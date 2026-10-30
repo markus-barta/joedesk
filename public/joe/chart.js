@@ -257,6 +257,30 @@ function easedAxis(el, target, o, room) {
   return fixedAxis(e.shown[0], e.shown[1], room, o.ticks || 4);
 }
 
+// Shared by full draws and callers deciding whether an in-place update is
+// equivalent. Keep the automatic fit and dot ink rules in one place.
+export function chartAxis(o, values, ph) {
+  const choice = o.axis ? axisChoice(o.axis) : AUTO;
+  const room = o.tickGap ? { px: ph, gap: o.tickGap + DRAWN_SLACK } : null;
+  if (choice.mode === 'custom') return fixedAxis(choice.min, choice.max, room, o.ticks || 4);
+  const fit = choice.mode === 'max' ? (o.maxValues ?? []).filter(Number.isFinite) : [];
+  const from = fit.length ? fit : values.filter(Number.isFinite);
+  let lo = Math.min(...from), hi = Math.max(...from);
+  if (o.margin) { const m = (hi - lo) * o.margin; lo -= m; hi += m; }
+  return axis(lo, hi, o.ticks || 4, o.base || 0, Boolean(o.zero), room);
+}
+export function chartDots({ axis: choice, Y, pad, ph, x0, x1 }) {
+  const custom = choice.mode === 'custom', extent = { single: 2, ring: 4 + 2 / 2, halo: 5 * 2.2 };
+  const fits = (cy, kind) => custom
+    ? cy - extent[kind] >= pad.t - 1e-6 && cy + extent[kind] <= pad.t + ph + 1e-6
+    : cy >= pad.t - 0.5 && cy <= pad.t + ph + 0.5;
+  const end = (x, v, live) => {
+    const cy = Y(v), inX = x >= x0 && x <= x1, ring = inX && fits(cy, 'ring');
+    return { ring, halo: ring && live && !reduced() && fits(cy, 'halo'), beyond: custom && inX && !ring };
+  };
+  return { fits, end };
+}
+
 // series: [{ pts:[{x,v}], color, w, live, area, endDot, estimate }]; gaps are
 // drawn by the caller as estimate series (one subtle dashed style). Optional
 // hitTest(x) supplies one hit per observed, hittable series independently of
@@ -303,15 +327,7 @@ export function drawChart(el, o) {
   }
   const choice = o.axis ? axisChoice(o.axis) : AUTO, custom = choice.mode === 'custom';
   const room = o.tickGap ? { px: ph, gap: o.tickGap + DRAWN_SLACK } : null;
-  let target;
-  if (custom) target = fixedAxis(choice.min, choice.max, room, o.ticks || 4);
-  else {
-    const fit = choice.mode === 'max' ? (o.maxValues ?? []).filter(Number.isFinite) : [];
-    const from = fit.length ? fit : values;
-    let lo = Math.min(...from), hi = Math.max(...from);
-    if (o.margin) { const m = (hi - lo) * o.margin; lo -= m; hi += m; }
-    target = axis(lo, hi, o.ticks || 4, o.base || 0, Boolean(o.zero), room);
-  }
+  const target = chartAxis(o, values, ph);
   let ax = o.ease > 0 ? easedAxis(el, target, o, room) : target;
   const [x0, x1] = o.xDomain;
   const X = x => pad.l + (x1 === x0 ? pw / 2 : (x - x0) / (x1 - x0) * pw);
@@ -326,9 +342,8 @@ export function drawChart(el, o) {
   // its values (History's with an 8 % margin), so a dot is drawn wherever its
   // value is in view, as on every chart before; a frame of a glide that has
   // not caught up with a value leaves that value's dot out.
-  const SINGLE = 2, RING = 4 + 2 / 2, HALO = 5 * 2.2, WING = 4 + 2 / 2;
-  const inPlot = y => y >= pad.t - 0.5 && y <= pad.t + ph + 0.5;
-  const fits = (cy, extent) => (custom ? cy - extent >= pad.t - 1e-6 && cy + extent <= pad.t + ph + 1e-6 : inPlot(cy));
+  const WING = 4 + 2 / 2;
+  const dots = chartDots({ axis: choice, Y, pad, ph, x0, x1 }), fits = dots.fits;
   // A chevron at the edge a value reaches, its wings kept inside the chart's width.
   const chevron = (x, cy) => {
     const above = cy < pad.t + ph / 2, tip = above ? pad.t + 1 : pad.t + ph - 1, d = above ? 5 : -5, cx = Math.min(W - WING, Math.max(WING, x));
@@ -377,7 +392,7 @@ export function drawChart(el, o) {
       // An isolated value is a dot where it fits; on a custom axis, else a chevron.
       if (seg.length === 1 && !s.estimate) {
         const p = seg[0], cy = Y(p.v);
-        if (fits(cy, SINGLE)) g += `<circle cx="${X(p.x).toFixed(1)}" cy="${cy.toFixed(1)}" r="2" fill="${s.color}"/>`;
+        if (fits(cy, 'single')) g += `<circle cx="${X(p.x).toFixed(1)}" cy="${cy.toFixed(1)}" r="2" fill="${s.color}"/>`;
         else if (custom && p.x >= x0 && p.x <= x1) markBeyond(si, p, s.color);
         continue;
       }
@@ -395,8 +410,9 @@ export function drawChart(el, o) {
     const last = [...s.pts].reverse().find(p => p.v !== null && p.v !== undefined);
     if (s.endDot !== false && !s.estimate && last && last.x >= x0 && last.x <= x1) {
       const cx = X(last.x), cy = Y(last.v);
-      if (fits(cy, RING)) g += `${s.live && !reduced() && fits(cy, HALO) ? `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="5" fill="${s.color}" class="dot-live" opacity=".35"/>` : ''}<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="var(--surface)" stroke="${s.color}" stroke-width="2"/>`;
-      else if (custom) markBeyond(si, last, s.color);
+      const dot = dots.end(last.x, last.v, Boolean(s.live));
+      if (dot.ring) g += `${dot.halo ? `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="5" fill="${s.color}" class="dot-live" opacity=".35"/>` : ''}<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="var(--surface)" stroke="${s.color}" stroke-width="2"/>`;
+      else if (dot.beyond) markBeyond(si, last, s.color);
     }
   });
   for (const m of marks.values()) g += `<path d="${m.d}" ${CHEVRON} style="stroke:${m.color}" data-beyond="${m.side}"/>`;
@@ -432,7 +448,7 @@ export function drawChart(el, o) {
     // The tip keeps the words either way.
     xds.forEach((d, i) => {
       const c = xcs[i], cy = near[i] && !near[i].estimated ? Y(near[i].v) : NaN;
-      if (Number.isFinite(cy) && fits(cy, RING)) {
+      if (Number.isFinite(cy) && fits(cy, 'ring')) {
         d.setAttribute('cx', X(near[i].x)); d.setAttribute('cy', cy); d.setAttribute('visibility', 'visible');
         c?.setAttribute('visibility', 'hidden');
         return;

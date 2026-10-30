@@ -306,6 +306,30 @@ test('JOED-165 v2 backup covers every release-39 writer and restores damaged evi
   assert.equal(reopened.feeds().data.value.seq, model.feeds().data.value.seq);
   assert.equal(reopened.feeds().results.value.seq, model.feeds().results.value.seq);
 });
+test('JOED-158 v2 retry files remain verbatim bounded evidence through backup, verify and restore', t => {
+  const root = temporary(t), { source } = release39Store(root, { damaged: true });
+  const stores = fs.readdirSync(source).filter(name => !name.includes('.damaged-'));
+  const bytes = Buffer.from([0, 255, 123]); // A partial write need not be JSON.
+  for (const store of stores) fs.writeFileSync(join(source, `${store}.next`), bytes);
+  const backup = join(root, 'retry-backup'), restored = join(root, 'retry-restored');
+  backupStore({ source, destination: backup, boardSchema: 'v2' });
+  verifyBackup(backup);
+  restoreStore({ backup, destination: restored, boardSchema: 'v2' });
+  for (const store of stores) for (const dir of [source, backup, restored]) {
+    assert.deepEqual(fs.readFileSync(join(dir, `${store}.next`)), bytes, store);
+  }
+  // Retry and damaged files share the same 64-file allowance.
+  const evidence = fs.readdirSync(source).filter(name => name.endsWith('.next') || name.includes('.damaged-')).length;
+  for (let i = evidence; i < 64; i++) fs.writeFileSync(join(source, `account-history-state.json.damaged-${NOW}-${i + 100}`), bytes);
+  backupStore({ source, destination: join(root, 'sixty-four'), boardSchema: 'v2' });
+  fs.writeFileSync(join(source, `account-history-state.json.damaged-${NOW}-1000`), bytes);
+  assert.throws(() => backupStore({ source, destination: join(root, 'sixty-five'), boardSchema: 'v2' }), { message: 'backup_unexpected_file' });
+  // V1 does not admit v2 retry evidence.
+  const v1 = join(root, 'v1'); fs.mkdirSync(v1);
+  fs.writeFileSync(join(v1, 'data.json'), JSON.stringify({ schema: 'inspr.joe.household.v1' }));
+  fs.writeFileSync(join(v1, 'fleet-config.json.next'), bytes);
+  assert.throws(() => backupStore({ source: v1, destination: join(root, 'v1-backup'), boardSchema: 'v1' }), { message: 'backup_unexpected_file' });
+});
 test('JOED-165 refuses invalid new stores, envelopes, embedded markers and journals on backup and verification', t => {
   const root = temporary(t), { source } = release39Store(root, { damaged: true });
   const invalid = [
@@ -331,7 +355,8 @@ test('JOED-165 refuses invalid new stores, envelopes, embedded markers and journ
     backupStore({ source, destination: backup, boardSchema: 'v2' });
     fs.writeFileSync(join(source, name), bytes);
     const destination = join(root, `refused-${i}`);
-    assert.throws(() => backupStore({ source, destination, boardSchema: 'v2' }), undefined, name);
+    const error = { message: name.startsWith('account-') && value?.value && Object.keys(value.value).length === 0 ? 'contract_invalid' : 'backup_schema_mismatch' };
+    assert.throws(() => backupStore({ source, destination, boardSchema: 'v2' }), error, name);
     assert.equal(fs.existsSync(destination), false);
     // Reseal this isolated backup so schema checks, not hashes, reject it.
     fs.writeFileSync(join(backup, name), bytes);
@@ -339,8 +364,8 @@ test('JOED-165 refuses invalid new stores, envelopes, embedded markers and journ
     Object.assign(manifest.files.find(f => f.name === name), { size: bytes.length,
       sha256: createHash('sha256').update(bytes).digest('hex') });
     fs.writeFileSync(join(backup, 'backup-manifest.json'), JSON.stringify(manifest));
-    assert.throws(() => verifyBackup(backup), undefined, name);
-    assert.throws(() => restoreStore({ backup, destination, boardSchema: 'v2' }), undefined, name);
+    assert.throws(() => verifyBackup(backup), error, name);
+    assert.throws(() => restoreStore({ backup, destination, boardSchema: 'v2' }), error, name);
     assert.equal(fs.existsSync(destination), false);
     fs.writeFileSync(join(source, name), original);
   }
@@ -350,7 +375,8 @@ test('JOED-165 damaged-copy allowlist is exact and bounded; backup closure, dige
   for (const [i, name] of ['unknown.json', 'data-state.json.damaged-2026-10-01T00:00:00.000Z',
     'account-history-state.json.damaged-bad', `account-history-state.json.damaged-${NOW}-0`,
     `account-history-state.json.damaged-${NOW}\n`, 'account-closes-state.json.damaged-2026-02-30T00:00:00.000Z',
-    'history-continuity.json.damaged-not-a-uuid', 'account-history-state.json.next'].entries()) {
+    'history-continuity.json.damaged-not-a-uuid', 'unknown.json.next', 'data.json.next',
+    'account-history-state.json.next.extra', 'account-history-state.json.next.next', 'account-history-state.json.next\n'].entries()) {
     fs.writeFileSync(join(source, name), '{}');
     assert.throws(() => backupStore({ source, destination: join(root, `unknown-${i}`), boardSchema: 'v2' }), /unexpected/);
     fs.renameSync(join(source, name), join(root, `rejected-file-${i}`));

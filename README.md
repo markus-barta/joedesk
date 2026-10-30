@@ -185,6 +185,12 @@ board data/config/audit files, retain exact bytes, use directory mode 0700 and
 file mode 0600, and record sizes/SHA256 in `backup-manifest.json`. Unknown files,
 symlinks, oversized input, incomplete backups and existing destinations fail
 closed; nothing is deleted or overwritten.
+V2 backups also preserve recognized damaged copies and exact `<known v2 store>.next`
+retry files verbatim, including partial non-JSON bytes. These evidence files share
+one limit of 64 copies; the 65th blocks backup until an operator retains the
+needed evidence elsewhere and trashes old copies. Each file remains limited to
+16 MiB and the complete backup to 32 MiB. Retry evidence never replaces the
+validated primary store; verification and restore enforce the same limits.
 
 The command forms are:
 
@@ -1565,10 +1571,21 @@ rendered pixel verification remains a coordinator gate. This board-only policy
 does not change revision 10 or require producer re-vendoring.
 When Today is a broken dash, its local caption states the reason unless the
 board's state line already explains it. This includes pending start-of-day
-results and every revision-10 exactness reason; repeated section reasons stay shared.
+results and every revision-10 exactness reason; repeated section reasons stay shared. Multi-desk
+fault captions are capped within the existing two-line reserve (three on phones),
+with their full text retained for accessibility and in the hover title.
+
+Mixed Open blockers name both the desks waiting on prices and the desks whose
+result is not exact, in the same order regardless of the feed's desk ordering.
+An absent P&L source stays absent; it is not evidence of a broker fault.
+Absent Open figures and their summary say “unavailable”, agreeing with the light;
+an all-price-wait household keeps “Waiting on prices” through retained observations.
 
 JOED-148 (board only, no figure changes meaning) states each dash's reason once
-and promises no time. `not_exact_yet` reads “not exact”; the other not-exact
+and promises no time. Other missing figures name their supplied reason directly
+(“Today: not reported by the broker”), or say “not reported” without a reason.
+A reason-less Today or Open summary never claims that board data has not arrived.
+`not_exact_yet` reads “not exact”; the other not-exact
 reasons add their own words (“Not exact · start-of-day value missing”). A
 not-exact household Today names the desks that keep it from being exact,
 from the board's own per-desk cells (“Not exact for J and Joe”); a reason that
@@ -1941,9 +1958,10 @@ separate supporting Cash figure, and Settings appends it to the account
 row. Both use the label “Cash” and caption “cash · as the broker reports it”.
 They show two decimals using exact integer units for display only, with
 the untouched broker lexeme in title and accessible name. Null Cash shows a
-muted dash in the Desk figure with “not reported · [reason]” in its caption;
-Settings retains that wording inline. A not-exact Cash says “not exact”
-instead (JOED-148). Rev-7 omission reads “no data received yet”.
+muted dash in the Desk figure with its reason once beside it; a reason shared
+with the account value stays in the change line. Settings shows the reason
+once inline. Both accessible names carry the same reason. A not-exact Cash
+says “not exact” instead (JOED-148). Rev-7 omission reads “no data received yet”.
 Desk reserves fixed caption lines inside each cell; Settings reserves the actual
 wrapped value/stale/null reason forms, including the session reason at 360 px. They wrap
 text and keep the existing header. P5's `cash` cases cover real ingress, stale, null, API-session loss,
@@ -2176,7 +2194,7 @@ caption covers the desk figures. Cash is Desk's Cash figure (JOED-49) in the
 block's “Since start · Cash” line, as designed (“Cash € 4.212,77”; Settings
 keeps the caption “cash · as the broker reports it”): two decimals, the
 broker's exact lexeme in its title and accessible name, a missing Cash a
-muted dash with “not reported · ‹reason›” (“no data received yet” when none
+muted dash with its reason stated once (“no data received yet” when none
 came), a not-exact one “not exact” (JOED-148) and an outage's kept Cash
 withheld (JOED-91); a reason the account value shares is said once, in the
 change line. On a phone the block stays open, first on the screen (no

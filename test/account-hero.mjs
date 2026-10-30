@@ -81,7 +81,7 @@ test('JOED-156 hero: the whole account first, its change for the range, Cash and
   assert.ok(!p.$('#acctChange [data-clamp]'), 'a current value has no state line');
   const sub = p.text('#acctSub');
   assert.match(sub, /^Account start loading/);
-  assert.match(sub, /Cash — · not reported/);
+  assert.match(sub, /Cash — · no data received yet/);
   assert.match(sub, /incl\. kept holdings SXR8 € 600,00 · TSLA \$ 200,00, each in its own currency$/, 'never converted');
   // Kept holdings are text only: nothing there can be acted on.
   const kept = p.$('#acctSub').innerHTML.slice(p.$('#acctSub').innerHTML.indexOf('incl. kept holdings'));
@@ -102,7 +102,7 @@ test('JOED-156 hero: Since start comes from the Settings start; until it is set 
   const ctx = ctxFor();
   const set = A.subParts(ctx, { amountEur: 1000000, date: '2025-06-02' }, { reason: null });
   assert.match(words(htmlDocument(set.wide).textContent), /^Since start \(€ 1\.000\.000 on 2 Jun 2025\): −€ 972\.000,00 · −97,20 %/);
-  assert.match(words(htmlDocument(set.narrow).textContent), /^Since start −€ 972\.000,00 \(−97,20 %\) · Cash — · not reported · no data received yet$/);
+  assert.match(words(htmlDocument(set.narrow).textContent), /^Since start −€ 972\.000,00 \(−97,20 %\) · Cash — · no data received yet$/);
   assert.match(set.details, /change in Settings/);
   for (const reason of ['missing', 'unset']) {
     const unset = A.subParts(ctx, null, { reason });
@@ -135,7 +135,7 @@ test('JOED-156 hero: a value that is not current and exact keeps its state, neve
   await p.render(ctxFor({ mutate: d => { d.brokerAccount = { equity: null, reason: 'source_unavailable', scope: d.brokerAccount.scope, observedAt: d.brokerAccount.observedAt }; } }));
   const dash = p.$('#acctValue .bn');
   assert.equal(dash.textContent, '—');
-  assert.equal(words(dash.getAttribute('aria-label')), 'Whole account: not reported · not reported by the broker');
+  assert.equal(words(dash.getAttribute('aria-label')), 'Whole account: not reported by the broker');
   assert.equal(words(p.$('#acctChange [data-clamp]').textContent), 'Unavailable · not reported by the broker');
   await p.render(ctxFor({ mutate: d => { d.brokerAccount = { equity: null, reason: 'not_exact_yet', scope: d.brokerAccount.scope, observedAt: d.brokerAccount.observedAt }; } }));
   assert.equal(words(p.$('#acctChange [data-clamp]').textContent), 'Not exact');
@@ -237,7 +237,7 @@ test('JOED-156 hero: on a phone the short eyebrow, one Since start · Cash line,
   const p = page(t, { phone: true });
   await p.render();
   assert.equal(p.text('#acctTitle .acct-narrow'), 'Whole account');
-  assert.match(p.text('#acctSubN'), /^Account start loading · Cash — · not reported · no data received yet$/);
+  assert.match(p.text('#acctSubN'), /^Account start loading · Cash — · no data received yet$/);
   const details = p.$('#acctDetailsBtn');
   assert.deepEqual([details.getAttribute('aria-expanded'), details.getAttribute('aria-controls'), p.$('#acctDetails').getAttribute('hidden')], ['false', 'acctDetails', '']);
   details.listeners.click();
@@ -814,6 +814,10 @@ const snapshotAt = (ms, amount) => ctxFor({ now: ms + 5 * SEC, mutate: d => {
 const shown = svg => ({
   lines: [...svg.querySelectorAll('path')].filter(x => x.getAttribute('stroke') === 'var(--accent)').map(x => x.getAttribute('d')),
   dots: [...svg.querySelectorAll('circle')].filter(c => c.getAttribute('class') !== 'xd').map(c => `${c.getAttribute('r')}@${c.getAttribute('cx')},${c.getAttribute('cy')}`),
+  gaps: [...svg.querySelectorAll('[data-gap]')].map(e => [e.getAttribute('x'), e.getAttribute('width'), e.getAttribute('height')]),
+  notes: [...svg.querySelectorAll('[data-axis-note]')].map(e => [e.getAttribute('data-axis-note'), e.textContent]),
+  chevrons: [...svg.querySelectorAll('[data-beyond]')].map(e => [e.getAttribute('data-beyond'), e.getAttribute('d')]),
+  halos: [...svg.querySelectorAll('.dot-live')].map(e => [e.getAttribute('cx'), e.getAttribute('cy'), e.getAttribute('r')]),
   now: svg.querySelector('[data-now]')?.getAttribute('x1') ?? null, axis: [svg.dataset.ylo, svg.dataset.yhi], points: svg.dataset.points,
 });
 // A new drawing of the same moment: to another range and back.
@@ -834,6 +838,7 @@ test('JOED-156 r39 perf: a new live value inside the minute moves the line’s e
   const p = page(t), stripLine = withStrip(p);
   await p.render(snapshotAt(SNAP, '28000.00'));
   const svg = p.svg(), drawn = A.accountDraws(), before = shown(svg), strip = stripLine();
+  assert.ok(before.gaps.length, 'the fixture includes visible gap bands');
   assert.ok(before.now && before.dots.length === 1 && strip, 'the live value with its dot, now and the strip');
   assert.equal(Number(svg.dataset.x1), Math.floor(NOW / MIN) * MIN + MIN, 'the month ends with the minute, under a pixel on');
   const ctx = await p.render(snapshotAt(SNAP + 10 * SEC, '27950.55'));
@@ -939,4 +944,38 @@ test('JOED-156 r39 perf: sizes come from a ResizeObserver; a new live value read
   await p.render(snapshotAt(SNAP + MIN, '28060.00'));
   assert.equal(A.accountDraws().chart, count + 2, 'the next minute still draws the chart and overview');
   assert.equal(reads, beforeMinute, 'a complete redraw also reuses the measured chart and handle geometry');
+});
+
+
+test('JOED-158 chart parity: normal motion halos, edge chevrons and custom notes follow fresh draws', async t => {
+  const p = page(t);
+  A.accountAxis().setAxisMode({ mode: 'custom', min: 25000, max: 30000 });
+  await p.render(snapshotAt(SNAP, '29000.00'));
+  const reduced = globalThis.matchMedia;
+  globalThis.matchMedia = query => /reduce/.test(query) ? { matches: false } : reduced(query);
+  const fresh = async ctx => { A.useAccountHistory(history()); await p.render(ctx); return shown(p.svg()); };
+  // First normal-motion draw adds the breathing halo. Every later update
+  // compares complete visible marks against an independently forced redraw.
+  await fresh(snapshotAt(SNAP, '29000.00'));
+  const cases = [
+    ['29100.00', true, 1, null, false, false],
+    ['29800.00', false, 0, null, false, false], // ring fits, halo does not
+    ['29790.00', true, 0, null, false, false],
+    ['29900.00', false, 0, 'above', false, false], // ring reaches the edge
+    ['30100.00', false, 0, 'above', true, false],
+    ['24900.00', false, 0, 'below', false, true],
+    ['29000.00', false, 1, null, false, false],
+  ];
+  for (const [i, [amount, inPlace, halos, beyond, above, below]] of cases.entries()) {
+    const before = A.accountDraws().chart, ctx = snapshotAt(SNAP + (i + 1) * 3 * SEC, amount);
+    await p.render(ctx);
+    assert.equal(A.accountDraws().chart, before + (inPlace ? 0 : 1), amount);
+    const moved = shown(p.svg());
+    assert.ok(moved.gaps.length, `${amount}: gap bands remain`);
+    assert.equal(moved.halos.length, halos, `${amount}: halo ink fits`);
+    assert.equal(moved.chevrons.at(-1)?.[0] ?? null, beyond, `${amount}: edge mark`);
+    assert.equal(moved.notes.some(([, text]) => text.includes('above')), above, amount);
+    assert.equal(moved.notes.some(([, text]) => text.includes('below')), below, amount);
+    assert.deepEqual(await fresh(ctx), moved, `${amount}: fresh-draw parity`);
+  }
 });

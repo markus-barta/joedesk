@@ -159,12 +159,12 @@ test('cash formatting: exact broker lexemes display at two decimals without a fl
 test('cash captions: null, omitted and broken retained values always explain why', () => {
   for (const key of ['hero.cash', 'rt.cash']) {
     const nullHtml = cashCaption({ state: 'broken', value: null, reason: 'gateway_unconfirmed' }, key);
-    assert.match(nullHtml, />not reported · broker connection not confirmed<\/span>/);
-    assert.match(nullHtml, /title="Cash not reported · broker connection not confirmed" aria-label="Cash not reported · broker connection not confirmed"/);
+    assert.match(nullHtml, />broker connection not confirmed<\/span>/);
+    assert.match(nullHtml, /title="Cash broker connection not confirmed" aria-label="Cash broker connection not confirmed"/);
     const held = cashCaption({ state: 'broken', value: { amount: '12345.67890123', currency: 'EUR' },
       retained: true, reason: 'gateway_unconfirmed' }, key);
     assert.equal(held, nullHtml);
-    assert.match(cashCaption(null, key), />not reported · no data received yet<\/span>/);
+    assert.match(cashCaption(null, key), />no data received yet<\/span>/);
   }
 });
 
@@ -181,8 +181,26 @@ test('JOED-148 cash captions: a not-exact Cash says "not exact" in its caption a
     // A shared section reason is not repeated on the figure.
     assert.equal(htmlDocument(cashCaption(cell, 'hero.cash', { figure: true, sharedReason: why })).querySelector('.cash-reason').textContent, 'not exact');
   }
-  // Faults keep their existing "not reported" naming in both surfaces.
-  assert.ok(cashCaption({ state: 'broken', value: null, reason: 'source_unavailable' }, 'rt.cash').includes('aria-label="Cash not reported · not reported by the broker">not reported · not reported by the broker</span>'));
+  // Faults name their reason once in both surfaces.
+  assert.ok(cashCaption({ state: 'broken', value: null, reason: 'source_unavailable' }, 'rt.cash').includes('aria-label="Cash not reported by the broker">not reported by the broker</span>'));
+});
+
+test('JOED-158 cash figures: missing values name one reason, matching Settings and accessibility', () => {
+  for (const reason of [null, ...Object.keys(health.CELL_REASON).filter(reason => !NOT_EXACT_REASONS.has(reason))]) {
+    const cell = { state: 'broken', value: null, reason };
+    const why = health.cellReason(reason ?? 'feed_not_received');
+    const settings = htmlDocument(cashCaption(cell, 'rt.cash')).querySelector('[data-cash]');
+    for (const sharedReason of [null, why]) {
+      const desk = htmlDocument(cashCaption(cell, 'hero.cash', { figure: true, sharedReason }));
+      const figure = desk.querySelector('[data-cash]');
+      assert.equal(desk.querySelector('.cash-amount').textContent, '—', reason);
+      assert.equal(desk.querySelector('.cash-reason').textContent, sharedReason ? '' : why, reason);
+      assert.equal(figure.getAttribute('aria-label'), `Cash ${why}`, reason);
+      assert.equal(figure.getAttribute('title'), settings.getAttribute('title'), reason);
+      assert.equal(figure.getAttribute('aria-label'), settings.getAttribute('aria-label'), reason);
+      assert.equal(settings.textContent, why, reason);
+    }
+  }
 });
 
 test('cash captions: stale values keep exact accessibility and their own reason with the same reserve', () => {
@@ -202,8 +220,8 @@ test('cash captions: Amy’s label and caption stay fixed; every null and stale 
     for (const key of ['hero.cash', 'rt.cash']) {
       const html = cashCaption({ state: 'broken', value: null, reason }, key);
       assert.ok(html.includes('<span class="cash-label">Cash</span><span class="cash-caption">cash · as the broker reports it</span>'));
-      // A not-exact Cash reserves its own not-exact words (JOED-148), the rest "not reported".
-      const missing = NOT_EXACT_REASONS.has(reason) ? `not exact${why === 'not exact' ? '' : ` · ${why}`}` : `not reported · ${why}`;
+      // Reserve the same plain reason the missing Cash actually shows.
+      const missing = NOT_EXACT_REASONS.has(reason) ? `not exact${why === 'not exact' ? '' : ` · ${why}`}` : why;
       assert.ok(html.includes(`<span class="cash-sizing" aria-hidden="true">${format.esc(missing)}</span>`), reason);
       assert.ok(html.includes(`<span class="cash-sizing" aria-hidden="true">${format.esc(`−€ 999.999,99 · ${why}`)}</span>`), reason);
     }
@@ -335,9 +353,8 @@ test('position rows: null values expose their reasons visibly and in accessible 
   const ctx = { states: cells, feeds: { data: { value: data } }, now: data.receivedAt };
   const kept = keptHtml(ctx), positions = positionsHtml(ctx).html;
   // JOED-148: a not-exact dash says "not exact"; only a value the broker did not report says "not reported".
-  const dashName = why => why === 'not exact' ? why : `not reported · ${why}`;
   for (const label of ['Quantity', 'Last price', 'Worth']) for (const why of ['not exact', 'not reported by the broker']) {
-    assert.ok(kept.includes(`title="${label}: ${dashName(why)}" aria-label="${label}: ${dashName(why)}">—</span>`));
+    assert.ok(kept.includes(`title="${label}: ${why}" aria-label="${label}: ${why}">—</span>`));
     assert.ok(kept.includes(`${label}: ${why}`) || htmlDocument(kept).querySelector('.pstate').textContent.includes(why), 'reason remains visible locally or once in the section');
   }
   const keptDoc = htmlDocument(kept), section = keptDoc.querySelector('.pstate').textContent;
@@ -350,12 +367,12 @@ test('position rows: null values expose their reasons visibly and in accessible 
     assert.ok(row.querySelector('.position-notes'), 'every row keeps the same detail slot');
     if (section.includes(why)) {
       assert.equal(row.querySelector('.position-day')?.textContent, 'Today’s result: —');
-      assert.equal(row.querySelector('.position-day .position-value')?.getAttribute('aria-label'), `Today’s result: ${dashName(why)}`);
+      assert.equal(row.querySelector('.position-day .position-value')?.getAttribute('aria-label'), `Today’s result: ${why}`);
     } else {
       assert.equal(row.querySelector('.position-day'), null, 'independent today’s result stays in the field list');
     }
   }
-  assert.match(positions, /title="Last price: not reported · not reported by the broker"/);
+  assert.match(positions, /title="Last price: not reported by the broker"/);
   assert.match(positions, /class="position-reasons">Last price: not reported by the broker/);
   assert.doesNotMatch(kept.slice(kept.indexOf('<div class="prow"')), /<(?:button|a|input)\b|tabindex=/);
   assert.match(kept, /data-keep="SXR8"/);
@@ -1191,7 +1208,7 @@ test('broker down: Positions and Kept show one section reason and accessible fie
     assert.equal(doc.textContent.match(/broker connection down/g).length, 1, name);
     assert.equal(doc.querySelectorAll('.position-reasons').length, 0, 'no repeated per-row reason list');
     for (const dash of doc.querySelectorAll('.position-value')) {
-      assert.match(dash.getAttribute('aria-label'), /^(Last price|Worth|Today’s result|Open result): not reported · broker connection down$/);
+      assert.match(dash.getAttribute('aria-label'), /^(Last price|Worth|Today’s result|Open result): broker connection down$/);
       assert.equal(dash.getAttribute('title'), dash.getAttribute('aria-label'));
       assert.equal(dash.textContent, '—');
     }
@@ -1240,12 +1257,12 @@ test('position reasons: today’s result keeps its name and dash when its reason
       assert.equal(row.querySelector('.position-reasons'), null, 'matching field reasons belong to the section');
       const field = row.querySelector('.position-day'), dash = field?.querySelector('.position-value');
       assert.equal(field?.textContent, 'Today’s result: —');
-      assert.equal(dash?.getAttribute('aria-label'), 'Today’s result: not reported · broker connection down');
+      assert.equal(dash?.getAttribute('aria-label'), 'Today’s result: broker connection down');
       assert.equal(dash.getAttribute('title'), dash.getAttribute('aria-label'));
       assert.equal(row.querySelector('.position-notes').getAttribute('aria-hidden'), null, 'populated detail stays accessible');
       assert.doesNotMatch(row.textContent, /broker connection down/, 'the section owns its shared reason');
       for (const dash of row.querySelectorAll('.position-value')) {
-        assert.match(dash.getAttribute('aria-label'), /: not reported · broker connection down$/);
+        assert.match(dash.getAttribute('aria-label'), /: broker connection down$/);
         assert.equal(dash.getAttribute('title'), dash.getAttribute('aria-label'));
       }
     }
@@ -1304,13 +1321,13 @@ test('broker down: hero, Cash and each desk explain the reason once and keep mix
   for (const caption of doc.querySelectorAll('.account-caption')) assert.doesNotMatch(caption.children[0].textContent, /broker connection down/);
   assert.equal(doc.querySelector('.disclosure-warning .vh').textContent.match(/broker connection down/g).length, 1, 'collapsed Desks’ money retains one reason');
   // JOED-156: Cash sits in the whole account above the hero and still says the outage once:
-  // the value's state line says it, Cash's dash only "not reported", its name all of it.
+  // the value's state line says it, Cash shows a dash and its name carries the reason.
   const state = A.stateLine(ctx.states.paperAccount);
   assert.equal(state.text.match(/broker connection down/g)?.length, 1, state.text);
   for (const html of Object.values(A.subParts(ctx, null, { reason: 'missing' })).slice(0, 2)) {
     const cash = htmlDocument(html).querySelector('[data-cash="acct.cash"]');
-    assert.equal(cash.textContent.replace(/\s+/g, ' ').trim(), 'Cash — · not reported');
-    assert.equal(cash.getAttribute('aria-label'), 'Cash not reported · broker connection down');
+    assert.equal(cash.textContent.replace(/\s+/g, ' ').trim(), 'Cash —');
+    assert.equal(cash.getAttribute('aria-label'), 'Cash broker connection down');
   }
   for (const id of ['j', 'joe', 'joel']) {
     ctx.states[`desks.${id}.totalPnl`].ageSeconds = 150;
@@ -1334,11 +1351,11 @@ test('broker down: hero, Cash and each desk explain the reason once and keep mix
   const cold = board(fixture('a-gateway-up-but-dead'), { cold: true });
   const coldHero = htmlDocument(heroLeft(cold));
   assert.equal(coldHero.querySelector('.board-caption').textContent, 'Numbers unavailable · broker connection down');
-  for (const dash of coldHero.querySelectorAll('[data-cell] .bn')) assert.match(dash.getAttribute('aria-label'), /: not reported · broker connection down$/);
+  for (const dash of coldHero.querySelectorAll('[data-cell] .bn')) assert.match(dash.getAttribute('aria-label'), /: broker connection down$/);
   for (const id of ['j', 'joe', 'joel']) {
     const card = htmlDocument(deskCard(cold, id));
     assert.equal(card.querySelector('.card-status').textContent, 'Numbers: unavailable · broker connection down');
-    for (const dash of card.querySelectorAll('.dnums .bn')) assert.match(dash.getAttribute('aria-label'), /: not reported · broker connection down$/);
+    for (const dash of card.querySelectorAll('.dnums .bn')) assert.match(dash.getAttribute('aria-label'), /: broker connection down$/);
   }
 });
 
@@ -2800,4 +2817,44 @@ test('JOED-142 F2: unpaused capture failure keeps continued-trading copy in Desk
   const runtime = htmlDocument(await captureRuntime(ctx));
   for (const sizing of runtime.querySelectorAll('.rt-sizing')) sizing.remove();
   assert.match(runtime.textContent, /results capture failing — trading continues/);
+});
+
+test('JOED-158 typography observer: each delivery samples the current viewport once across phone/desktop changes', () => {
+  const app = readFileSync(new URL('../public/joe/app.js', import.meta.url), 'utf8');
+  const start = app.indexOf('  const fixUnits = '), end = app.indexOf('  syncThemeButton();', start);
+  assert.ok(start > 0 && end > start);
+  const text = value => ({ nodeType: 3, nodeValue: value });
+  const descendant = { nodeType: 1, children: [] };
+  const body = { nodeType: 1, children: [text('2 units · initial'), descendant] };
+  const textNodes = node => node.nodeType === 3 ? [node] : node.children.flatMap(textNodes);
+  let phone = false, reads = 0, deliver;
+  runInNewContext(app.slice(start, end), {
+    NB: '\u00a0', joinUnits: format.joinUnits,
+    isPhone: () => { reads++; return phone; }, NodeFilter: { SHOW_TEXT: 4 },
+    document: { body, createTreeWalker: node => { const nodes = textNodes(node); let i = 0; return { nextNode: () => nodes[i++] ?? null }; } },
+    MutationObserver: class { constructor(callback) { deliver = callback; } observe(target, options) {
+      assert.equal(target, body);
+      assert.equal(options.characterData, true);
+      assert.equal(options.childList, true);
+      assert.equal(options.subtree, true);
+    } },
+  });
+  assert.equal(body.children[0].nodeValue, '2\u00a0units · initial');
+  for (const narrow of [true, false, true, false]) {
+    phone = narrow;
+    const changed = text('3 units · changed'), child = text('4 units · added'), split = text('5 units ');
+    split.nextSibling = { textContent: '· next inline' };
+    // A new text node inside an existing descendant needs childList + subtree.
+    const nested = text('6 units · nested');
+    descendant.children.push(nested);
+    const before = reads;
+    deliver([{ type: 'characterData', target: changed }, { type: 'childList', addedNodes: [{ nodeType: 1, children: [child, split] }] },
+      { type: 'childList', target: descendant, addedNodes: [nested] }]);
+    assert.equal(reads, before + 1, 'one viewport read for the whole delivery');
+    const space = narrow ? '\u00a0' : ' ';
+    assert.equal(changed.nodeValue, `3\u00a0units${space}· changed`);
+    assert.equal(child.nodeValue, `4\u00a0units${space}· added`);
+    assert.equal(split.nodeValue, `5\u00a0units${space}`, 'inline separators follow the same viewport');
+    assert.equal(nested.nodeValue, `6\u00a0units${space}· nested`, 'text appended inside an existing descendant follows the new viewport');
+  }
 });

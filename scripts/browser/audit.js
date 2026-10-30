@@ -110,6 +110,17 @@
         // P6 browser suite (full title and the field control's description;
         // the Saved line itself never takes focus).
         if (el.matches('[data-saved]')) continue;
+        // Household faults may name three independent desk reasons. The
+        // capped caption retains its complete accessible text and hover title.
+        if (el.matches('.primary-caption.day-caption')) {
+          const cs = getComputedStyle(el), lines = matchMedia('(max-width: 480px)').matches ? 3 : 2;
+          const words = text => text.replace(/\u00a0/g, ' ');
+          if (words(el.title) !== words(el.textContent) || el.getAttribute('aria-hidden') === 'true' ||
+              cs.webkitLineClamp !== String(lines) || cs.overflowY !== 'hidden' ||
+              Math.abs(el.getBoundingClientRect().height - lines * parseFloat(cs.lineHeight)) > 0.5)
+            failures.push({ el: 'household caption', why: 'missing full title or fixed-line clamp' });
+          continue;
+        }
         // Desk status may yield to a one-line check-in. Require the complete
         // native title and the actual ellipsis contract before accepting it.
         if (el.matches('.dcard .state > span[title]')) {
@@ -368,7 +379,7 @@
           // The page, or the fixed chrome above it (header, bottom bar, Settings' edit bar).
           const layer = Boolean(n.parentElement.closest('header.top, .bottom-nav, .editbar'));
           for (const raw of range.getClientRects()) {
-            const clamp = n.parentElement.closest('[data-clamp], .disclosure-warning .summary-text, .dcard .state > span[title], .cut-line[title]')?.getBoundingClientRect();
+            const clamp = n.parentElement.closest('[data-clamp], .disclosure-warning .summary-text, .dcard .state > span[title], .cut-line[title], .primary-caption.day-caption[title]')?.getBoundingClientRect();
             const q = clamp ? { left: Math.max(raw.left, clamp.left), right: Math.min(raw.right, clamp.right), top: Math.max(raw.top, clamp.top), bottom: Math.min(raw.bottom, clamp.bottom), width: Math.min(raw.right, clamp.right) - Math.max(raw.left, clamp.left), height: Math.min(raw.bottom, clamp.bottom) - Math.max(raw.top, clamp.top) } : raw;
             if (q.width > 0.5 && q.height > 0.5) boxes.push({ node: n, text: n.nodeValue.trim().slice(0, 30), layer, q });
           }
