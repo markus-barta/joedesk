@@ -57,6 +57,14 @@ export function resultsView(ctx) {
     cuts: M.basisCuts(cols, current, nowMs), basis: DESKS.map(id => (current[id] ? basisKey(current[id]) : '')).join('|'), positionsCell, positions };
 }
 
+// With no record to retain, expiry explains the unavailable placeholder once,
+// before the shell freezes it. A populated Results document stays untouched.
+export function explainResultsSignIn(ctx) {
+  if (ctx.feeds.results?.value || ctx.states.results?.value) return;
+  const sentence = $('#rheroL .say');
+  if (sentence) sentence.textContent = `Results are unavailable: ${cellReason('auth_required')}.`;
+}
+
 // ---------- What the controls change (app.js) ----------
 // The selected day always lies inside the shown period (All takes any day),
 // so one date names both and a link restores exactly what was shown. Days

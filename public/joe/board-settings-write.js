@@ -13,7 +13,7 @@ export function createBoardSettings({ fetcher = (...args) => fetch(...args), cha
   const snapshot = () => structuredClone(state);
   const publish = next => { state = next; changed(); };
   async function request(method, value) {
-    if (method === 'POST' && boardSession.signedOut()) return { ok: false, error: 'Sign-in expired. Reload to sign in.' };
+    if (boardSession.signedOut()) return { ok: false, error: 'Sign-in expired. Reload to sign in.' };
     if (saving) return { ok: false, error: 'Account start is being saved.' };
     const current = ++generation;
     saving = method === 'POST';
@@ -27,11 +27,9 @@ export function createBoardSettings({ fetcher = (...args) => fetch(...args), cha
       const body = response.payload;
       const settings = { accountStart: body?.accountStart };
       if (response.status !== 200 || validateBoardSettings(settings) || !['missing', 'invalid', 'unreadable', 'unset', null].includes(body.reason)) {
-        if (response.status === 200) boardSession.invalidateRecovery('/joe/board-settings.json');
         throw new Error(response.status !== 200 && typeof body?.error === 'string' ? body.error : 'Account start could not be checked.');
       }
       if ((body.reason === null) !== (settings.accountStart !== null)) {
-        boardSession.invalidateRecovery('/joe/board-settings.json');
         throw new Error('Account start could not be checked.');
       }
       if (method === 'POST' && (body.ok !== true || (value.accountStart === null ? settings.accountStart !== null :

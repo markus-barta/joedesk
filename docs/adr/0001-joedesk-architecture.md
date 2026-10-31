@@ -382,6 +382,17 @@ or successful live verification. Browser failures retain last-good and show
 why; refresh never invents a new producer receipt. Cookie/session policy stays
 with OPS; the board cannot repair an expired SSO session.
 
+JOED-173 fix 15: a native auth refusal freezes the current document until a
+fresh page load; feed responses never resume it in place. Manual Reload calls
+`location.reload()`. A single protected `/joe/state.json` probe uses the normal
+transport and body validator after 30 seconds, backing off to 60 then 120 seconds.
+Only validated same-origin 2xx may request a reload; every other outcome leaves
+the display frozen. A host/tab-scoped sessionStorage timestamp list caps automatic
+reloads at three per rolling ten minutes; unavailable storage permits one per
+page lifetime. At the limit probing stops until a manual reload, which is always
+available. This replaces per-endpoint recovery evidence and coordinated in-place
+refresh/unmark; normal sequence/receipt rejection and last-good reasons remain.
+
 Optional OPS proposal: provision a separate read-only machine identity for
 agent data reads through a narrowly scoped route. OPS owns issuance, storage,
 rotation, redaction, proxy header stripping and negative authorization tests.

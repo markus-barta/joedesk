@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import * as nodeModule from 'node:module';
 
 const baseline = process.env.JOED_PRESENTATION_BASELINE;
-if (baseline && !['a941776', '204b83d', 'd83f7ff'].includes(baseline)) throw new Error('Unsupported presentation baseline');
+if (baseline && !['a941776', '204b83d', 'd83f7ff', '32bf68e'].includes(baseline)) throw new Error('Unsupported presentation baseline');
 const sourceAt = url => baseline ? execFileSync('git', ['show', `${baseline}:public/joe/${new URL(url).pathname.split('/public/joe/')[1]}`], { encoding: 'utf8' }) : fs.readFileSync(url, 'utf8');
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
@@ -27,11 +27,11 @@ export async function resolve(specifier, context, next) { return next(mapped(spe
 
 // Expose existing markup builders in a test-only module instance. Production
 // sources and exports stay untouched; their imports retain the real modules.
-export async function builders(file, names, instance = '') {
+export async function builders(file, names, instance = '', setup = '') {
   const url = new URL(`../../public/joe/${file}`, import.meta.url);
   const source = sourceAt(url).replace(/from (['"])(\.[^'"]+)\1/g,
     (_match, _quote, specifier) => `from ${JSON.stringify(new URL(mapped(specifier, url.href), url).href)}`);
-  return import(`data:text/javascript,${encodeURIComponent(`${source}\nexport { ${names.join(', ')} };\n//# sourceURL=${url.href}?preview-builders${instance}`)}`);
+  return import(`data:text/javascript,${encodeURIComponent(`${source}\n${setup}\nexport { ${names.join(', ')} };\n//# sourceURL=${url.href}?preview-builders${instance}`)}`);
 }
 
 const decode = text => text.replace(/&(?:amp|lt|gt|quot|#39|nbsp);/g,

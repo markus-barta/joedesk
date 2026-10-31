@@ -41,13 +41,13 @@ let sent = null;
 export async function readAccount(have = null) {
   const started = performance.now(), ms = () => performance.now() - started;
   const res = await read('/joe/account-history.json');
-  if (res.status !== 200) return { message: { kind: 'account', status: res.status, reason: readFailure(res), value: null, key: null, ms: ms() }, transfer: [] };
+  if (res.status !== 200) return { message: { evidence: res.evidence, kind: 'account', status: res.status, reason: readFailure(res), value: null, key: null, ms: ms() }, transfer: [] };
   const key = fingerprint(res.text);
-  if (have !== null && have === key && sent?.key === key && sent.text === res.text) return { message: { kind: 'unchanged', feed: 'account', key, ms: ms() }, transfer: [] };
+  if (have !== null && have === key && sent?.key === key && sent.text === res.text) return { message: { evidence: res.evidence, kind: 'unchanged', feed: 'account', key, ms: ms() }, transfer: [] };
   let value;
-  try { value = acceptAccountHistory(JSON.parse(res.text)); } catch { return { message: { kind: 'account', status: 200, reason: 'contract_invalid', value: null, key: null, ms: ms() }, transfer: [] }; }
+  try { value = acceptAccountHistory(res.payload); } catch { return { message: { evidence: res.evidence, kind: 'account', status: 200, reason: 'contract_invalid', value: null, key: null, ms: ms() }, transfer: [] }; }
   sent = { key, text: res.text };
-  return { message: { kind: 'account', status: 200, reason: null, value, key, ms: ms() }, transfer: accountTransferables(value) };
+  return { message: { evidence: res.evidence, kind: 'account', status: 200, reason: null, value, key, ms: ms() }, transfer: accountTransferables(value) };
 }
 
 self.onmessage = async ({ data }) => {

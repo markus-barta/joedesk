@@ -1,5 +1,5 @@
-// The last rendered document stays inert and visibly stale until a complete
-// authenticated refresh has rendered. Only transient controls close on expiry.
+// The last rendered document stays inert and visibly stale until page reload.
+// Only transient controls close on expiry.
 const sections = ['acctHero', 'deskHero', 'desk-j', 'desk-joe', 'desk-joel', 'positions', 'kept',
   'rhero', 'tiles', 'breakdown', 'cal', 'daypanel', 'histChart', 'histCompare', 'jAcct', 'setMain',
   'calSum'];
@@ -9,7 +9,7 @@ export function createBoardFreeze(document, session, { cancelInteractions = () =
   const app = document.getElementById('app');
   const main = document.getElementById('main');
   const banner = document.getElementById('signedOutBanner');
-  let frozen = false, description = null, renderedAt = null;
+  let frozen = false, renderedAt = null;
   const sync = () => {
     if (!session.signedOut() || frozen) return frozen;
     frozen = true;
@@ -34,8 +34,7 @@ export function createBoardFreeze(document, session, { cancelInteractions = () =
       node.classList.remove('dot-live', 'live-dot', 'draw-in', 'fade-in');
     }
     for (const node of document.querySelectorAll('.xh, .xd, .xc')) node.setAttribute('visibility', 'hidden');
-    description = main.getAttribute('aria-describedby');
-    main.setAttribute('aria-describedby', [description, 'lastKnownLabel'].filter(Boolean).join(' '));
+    main.setAttribute('aria-describedby', [main.getAttribute('aria-describedby'), 'lastKnownLabel'].filter(Boolean).join(' '));
     app.setAttribute('data-last-known', '');
     app.setAttribute('inert', '');
     for (const id of sections) document.getElementById(id)?.setAttribute('data-frozen', '');
@@ -46,22 +45,7 @@ export function createBoardFreeze(document, session, { cancelInteractions = () =
     return frozen;
   };
   const remember = at => { if (!frozen) renderedAt = at; };
-  const rendered = at => {
-    if (session.signedOut()) return;
-    renderedAt = at;
-    if (!frozen) return;
-    // Called synchronously after rendering fresh data, before the next paint.
-    frozen = false;
-    banner.hidden = true;
-    if (description === null) main.removeAttribute('aria-describedby');
-    else main.setAttribute('aria-describedby', description);
-    for (const node of app.querySelectorAll('[data-frozen-motion]')) {
-      node.setAttribute('class', node.getAttribute('data-frozen-motion')); node.removeAttribute('data-frozen-motion');
-    }
-    app.removeAttribute('data-last-known');
-    app.removeAttribute('inert');
-    for (const node of app.querySelectorAll('[data-frozen]')) node.removeAttribute('data-frozen');
-  };
+  const rendered = remember;
   const unsubscribe = session.subscribe(sync);
   sync();
   return { sync, remember, rendered, frozen: () => frozen, stop: unsubscribe };

@@ -5,14 +5,13 @@ import { isCanonicalJoeHost } from './host.js';
 import { SCREENS, parseRoute, routeHash, sameRoute, historyStep, linkRoute, onRoute, applyRoute, onAddress, writeRoute, createPlaces } from './route.js';
 import { $, $$, icon, initTips, isPhone, trapDialogs, fromPointer, patch, fitStatusLine } from './ui.js';
 import { createFeed } from './feed.js';
-import { boardSession } from './transport.js';
-import { refreshBoardSettings } from './board-settings.js';
+import { boardSession, startAuthProbe } from './transport.js';
 import { createBoardFreeze } from './presentation.js';
 import { createObservedEvents } from './events.js';
 import { renderDesk, headerHealth, healthPop, forgetCharts, toggleDeskDisclosure, initBarTaps, cancelBarInteractions } from './desk.js';
-import { initAccount, renderAccount, refreshAccountHistory, pollAccountHistory, accountHistoryIdle, cancelInteractions as cancelAccountInteractions } from './account.js';
+import { initAccount, renderAccount, pollAccountHistory, cancelInteractions as cancelAccountInteractions } from './account.js';
 import { renderHistory, historyChart, HS, historyPreset, toggleFollow, initHistoryInput, initHistoryControls, historyQuery, readHistoryRoute, cancelInteractions as cancelHistoryInteractions } from './history.js';
-import { renderResults, RS, stepPeriod, choosePeriod, chooseDesk, selectDay, showMonth, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText, requestResultsRoute, resultsUrl } from './results.js';
+import { renderResults, RS, stepPeriod, choosePeriod, chooseDesk, selectDay, showMonth, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText, requestResultsRoute, resultsUrl, explainResultsSignIn } from './results.js';
 import { boardHealthPresentation } from './health.js';
 import { sinceStarts } from './performance.js';
 import { setTheme, toggleTheme, syncThemeButton } from './theme.js';
@@ -35,11 +34,11 @@ if (!isCanonicalJoeHost(location.hostname)) {
 
 function start() {
   const freeze = createBoardFreeze(document, boardSession, { cancelInteractions: () => {
+    explainResultsSignIn(context());
     cancelAccountInteractions(); cancelHistoryInteractions(); cancelBarInteractions(); tips.cancel();
   } });
-  let recoveringRender = false, queuedRoute = null;
   // Keep reading/scrolling available, but a frozen board cannot edit a draft,
-  // open a live explanation or navigate into a renderer until sign-in recovers.
+  // open a live explanation or navigate into a renderer until the page reloads.
   const blockFrozenInput = event => {
     if (!freeze.frozen() || !event.target.closest?.('#app')) return;
     event.preventDefault(); event.stopImmediatePropagation();
@@ -134,7 +133,7 @@ function start() {
 
   function render(reason) {
     frame = 0;
-    if (freeze.sync() && !recoveringRender) { root.dataset.ready = '1'; return; }
+    if (freeze.sync()) { root.dataset.ready = '1'; return; }
     renderFailed = false;
     const started = performance.now();
     const ctx = context();
@@ -202,7 +201,7 @@ function start() {
     return true;
   });
   function go(next, { anchor = null, query = '', push = false, scroll = 0 } = {}) {
-    if (freeze.frozen() && !recoveringRender) return;
+    if (freeze.frozen()) return;
     if (!SCREENS.includes(next)) { next = 'desk'; anchor = null; query = ''; }
     // The reader's own way onto the screen already shown (its nav button, the
     // gear, a bare link or anchor) asks for that screen as it is: it keeps the
@@ -376,7 +375,7 @@ function start() {
   // Back and Forward fire both events; the second finds the entry taken up.
   const follow = () => {
     const moved = places.step(), next = parseRoute(location.hash);
-    if (freeze.frozen()) { queuedRoute = { ...next, scroll: places.saved() }; return; }
+    if (freeze.frozen()) return;
     if (!moved && next.known && !next.anchor && sameRoute(next, shown)) return;
     go(next.screen, { anchor: next.anchor, query: next.query, scroll: places.saved() });
   };
@@ -415,18 +414,7 @@ function start() {
   places.step();
   const first = parseRoute(location.hash || '#desk');
   go(first.screen, { anchor: first.anchor, query: first.query, scroll: places.saved() });
-  boardSession.coordinateRecovery(async () => {
-    await Promise.all([feed.whenIdle(), accountHistoryIdle()]);
-    await Promise.all([feed.refresh(), feed.refreshActions(), refreshAccountHistory(), refreshBoardSettings()]);
-    boardSession.finishRecovery(() => {
-      recoveringRender = true;
-      try {
-        syncThemeButton();
-        forgetCharts(); forgetResults(); dirtyHistory = true;
-        const route = queuedRoute; queuedRoute = null;
-        return route ? go(route.screen, route) : render('recovery');
-      } finally { recoveringRender = false; }
-    });
-  });
+  const stopProbe = startAuthProbe(boardSession);
+  addEventListener('pagehide', stopProbe, { once: true });
   feed.start();
 }

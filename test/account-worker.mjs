@@ -35,7 +35,7 @@ test('JOED-156 worker: a read posts the two series as compact columns, by transf
   assert.deepEqual(urls, ['/joe/account-history.json'], 'the board’s own route, from the worker’s release path');
   assert.equal(posted.length, 1);
   const { message, transfer } = posted[0];
-  assert.deepEqual(Object.keys(message).sort(), ['key', 'kind', 'ms', 'reason', 'status', 'value']);
+  assert.deepEqual(Object.keys(message).sort(), ['evidence', 'key', 'kind', 'ms', 'reason', 'status', 'value']);
   assert.deepEqual([message.kind, message.status, message.reason], ['account', 200, null]);
   assert.ok(typeof message.key === 'string' && message.key.length > 10 && Number.isFinite(message.ms));
   for (const name of ['short', 'daily']) {
@@ -118,7 +118,7 @@ test('JOED-156 worker: a failed read or a body off the contract posts its reason
     answer(t, { status });
     posted.length = 0;
     await send({ read: 'account', have: null });
-    assert.deepEqual({ ...posted[0].message, ms: 0 }, { kind: 'account', status, reason, value: null, key: null, ms: 0 }, String(status));
+    assert.deepEqual({ ...posted[0].message, ms: 0 }, { evidence: [401, 302].includes(status) ? 'AUTH_FAILURE' : 'NO_EVIDENCE', kind: 'account', status, reason, value: null, key: null, ms: 0 }, String(status));
     assert.deepEqual(posted[0].transfer, []);
     t.mock.restoreAll();
   }

@@ -22,7 +22,7 @@ async function board(t, kind, { cold = false, mode = 'worker' } = {}) {
   const path = `/joe/${kind}.json`, sidecar = '/joe/history-continuity.json';
   const session = createBoardSession(), messages = [], workers = [];
   let transform = data => data, activeWorker;
-  let response = { status: 200, payload: valid[kind] }, continuity = { status: 200, payload: null };
+  let response = { status: 200, payload: valid[kind] }, continuity = { status: 200, payload: { schema: 'joedesk.history-continuity.v1', historySeq: valid.history.seq, intervals: [] } };
   t.mock.method(globalThis, 'fetch', async url => {
     const route = String(url).split('/').at(-1);
     const r = route === 'history-continuity.json' ? continuity : route === `${kind}.json` ? response
@@ -64,177 +64,78 @@ async function board(t, kind, { cold = false, mode = 'worker' } = {}) {
   const refresh = () => kind === 'history' ? feed.refreshHistory() : feed.refreshResults();
   if (!cold) await refresh();
   feed.select(); freeze.rendered(valid[kind].receivedAt);
-  let release;
-  const stop = session.coordinateRecovery(() => new Promise(done => { release = done; }), kind === 'history' ? [path, sidecar] : [path]);
-  t.after(() => { release?.(); stop(); });
   return { feed, session, doc, messages, refresh, path,
     fallback: async () => { activeWorker.onerror(); await feed.whenIdle(); assert.equal(feed.usesWorker(), false); },
     set: r => { response = r; }, sidecar: r => { continuity = r; },
     transform: fn => { transform = fn; },
     expire: () => session.observe(path, { auth: true }),
-    finish: () => session.finishRecovery(() => { feed.select(); freeze.rendered(valid[kind].receivedAt); return true; }),
   };
 }
-// Importing this module in the worker installs hooks only, never starts nested tests.
+// Importing this module in the worker installs hooks only.
 if (!process.env.JOED_FIX7_WORKER) {
   for (const kind of ['history', 'results']) for (const mode of ['worker', 'fallback', 'disabled'])
-    test(`JOED-173 fix9 ${kind} cold ${mode} retains a validated sequence_replayed body without proving recovery`, async t => {
-      const b = await board(t, kind, { cold: true, mode });
-      assert.equal(b.feed.feeds[kind], null);
-      b.set({ status: 200, payload: valid[kind], headers: { 'X-Joe-Feed-Reason': 'sequence_replayed' } });
-      if (mode === 'fallback') await b.fallback(); else await b.refresh();
-      const retained = b.feed.feeds[kind].value;
-      assert.ok(retained, 'a cold client retains the validated last-good body');
-      assert.equal(retained.seq, valid[kind].seq);
-      assert.equal(retained.receivedAt, valid[kind].receivedAt);
-      assert.equal(b.feed.feeds[kind].reason, 'sequence_replayed');
-      assert.equal(b.feed.select().states[kind].state, 'stale');
-      const newer = { ...valid[kind], seq: retained.seq + 1 };
-      b.set({ status: 200, payload: newer, headers: { 'X-Joe-Feed-Reason': 'sequence_replayed' } });
-      await b.refresh();
-      assert.equal(b.feed.feeds[kind].value.seq, newer.seq, 'a failure label alone does not reject a newer last-good body');
-      b.set({ status: 200, payload: valid[kind], headers: { 'X-Joe-Feed-Reason': 'sequence_replayed' } });
-      await b.refresh();
-      assert.equal(b.feed.feeds[kind].value.seq, newer.seq, 'an actual regression preserves the retained document');
-      assert.equal(b.feed.feeds[kind].value.receivedAt, retained.receivedAt);
-      b.expire(); await b.refresh();
-      assert.equal(b.finish(), false, 'a server failure label cannot prove recovery');
-      assert.equal(b.session.signedOut(), true);
-      assert.equal(b.feed.feeds[kind].value.seq, newer.seq);
-      b.set({ status: 200, payload: newer, headers: { 'X-Joe-Feed-Reason': 'sequence_replayed' } }); await b.refresh();
-      assert.equal(b.finish(), false, 'an equal retained body with a server failure still cannot recover');
-      b.set({ status: 200, payload: newer }); await b.refresh();
-      assert.equal(b.finish(), true, 'a later clean equal document can recover');
-      assert.equal(b.feed.select().states[kind].state, 'fresh');
-    });
-  test('JOED-173 fix7 history recovery resends the document discarded across a continuity 503 and null-200 replay', async t => {
-    const b = await board(t, 'history'); b.expire();
-    const newer = { ...valid.history, seq: valid.history.seq + 1 };
-    b.set({ status: 200, payload: newer }); b.sidecar({ status: 503, payload: {} }); await b.refresh();
-    assert.equal(b.finish(), false);
-    b.sidecar({ status: 200, payload: null }); await b.refresh();
-    assert.equal(b.finish(), true);
-    assert.equal(b.feed.feeds.history.value.seq, newer.seq, 'new history must be in the page store before removing stale marks');
-    assert.equal(b.doc.querySelectorAll('[data-frozen]').length, 0);
+  test(`JOED-173 fix9 ${kind} cold ${mode} retains validated rejected bodies and equal re-serves`, async t => {
+    const b = await board(t, kind, { cold: true, mode });
+    b.set({ status: 200, payload: valid[kind], headers: { 'X-Joe-Feed-Reason': 'sequence_replayed' } });
+    if (mode === 'fallback') await b.fallback(); else await b.refresh();
+    const retained = b.feed.feeds[kind].value;
+    assert.ok(retained); assert.equal(retained.seq, valid[kind].seq);
+    assert.equal(retained.receivedAt, valid[kind].receivedAt);
+    assert.equal(b.feed.feeds[kind].reason, 'sequence_replayed');
+    assert.equal(b.feed.select().states[kind].state, 'stale');
+    const newer = { ...valid[kind], seq: retained.seq + 1 };
+    b.set({ status: 200, payload: newer, headers: { 'X-Joe-Feed-Reason': 'sequence_replayed' } }); await b.refresh();
+    assert.equal(b.feed.feeds[kind].value.seq, newer.seq);
+    b.set({ status: 200, payload: valid[kind] }); await b.refresh();
+    assert.equal(b.feed.feeds[kind].value.seq, newer.seq);
+    assert.equal(b.feed.feeds[kind].reason, 'sequence_replayed');
+    b.set({ status: 200, payload: newer }); await b.refresh(); await b.refresh();
+    assert.equal(b.feed.select().states[kind].state, 'fresh', 'equal receipt and sequence is a valid re-serve');
+    const frozen = structuredClone(b.feed.select()); b.expire(); await b.refresh();
+    assert.equal(b.session.signedOut(), true); assert.deepEqual(b.feed.select(), frozen);
   });
-  test('JOED-173 fix7 Results recovery never loses refresh_failed on an unchanged cached document', async t => {
-    const b = await board(t, 'results'); b.expire();
-    b.set({ status: 503, payload: {} }); await b.refresh();
-    b.set({ status: 200, payload: valid.results, headers: { 'X-Joe-Feed-Reason': 'refresh_failed' } }); await b.refresh();
-    b.finish();
-    assert.equal(b.feed.feeds.results.reason, 'refresh_failed');
-    assert.equal(boardStates(b.feed.feeds, valid.results.receivedAt).results.state, 'broken', 'failed Results retain their normal failure state under frozen marks');
-    assert.equal(b.session.signedOut(), true, 'failure is not authenticated successful recovery evidence');
-  });
-  for (const kind of ['history', 'results']) {
-    for (const shape of ['missing status', 'missing auth', 'unchanged wrong document']) test(`JOED-173 fix7 ${kind} message arrival alone cannot prove recovery: ${shape}`, async t => {
-      const b = await board(t, kind); b.expire(); await b.refresh();
-      b.transform(data => {
-        if (shape === 'missing status') { delete data.status; return data; }
-        if (shape === 'missing auth') { delete data.status[b.path].auth; return data; }
-        return { ...data, kind: 'unchanged', feed: kind, status: { ...data.status,
-          [b.path]: { ...data.status[b.path], document: { seq: valid[kind].seq + 1, receivedAt: valid[kind].receivedAt } } } };
-      });
-      await b.refresh();
-      assert.equal(b.finish(), false);
-      assert.equal(b.session.signedOut(), true);
-      assert.ok(b.doc.querySelectorAll('[data-frozen]').length);
-      b.transform(data => data); await b.refresh(); assert.equal(b.finish(), true);
-    });
-    test(`JOED-173 fix7 ${kind} accepts equal sequence and receipt on recovery`, async t => {
-      const b = await board(t, kind); b.expire(); await b.refresh();
-      assert.equal(b.finish(), true);
-      assert.equal(b.feed.select().states[kind].state, 'fresh');
-      assert.equal(b.doc.querySelectorAll('[data-frozen]').length, 0);
-    });
-    for (const frozen of [false, true]) test(`JOED-173 fix7 ${kind} rejects a newer sequence with an older receipt, frozen=${frozen}`, async t => {
-      const b = await board(t, kind), original = valid[kind]; if (frozen) b.expire();
-      b.set({ status: 200, payload: { ...original, seq: original.seq + 1, receivedAt: new Date(Date.parse(original.receivedAt) - 1000).toISOString() } });
-      await b.refresh();
-      assert.equal(b.finish(), false);
-      assert.equal(b.session.signedOut(), frozen);
-      assert.equal(b.messages.at(-1).status[b.path].reason, 'sequence_replayed');
-      assert.equal(b.feed.feeds[kind].value.seq, original.seq);
-      assert.equal(Boolean(b.doc.querySelectorAll('[data-frozen]').length), frozen);
-    });
-    for (const mode of ['worker', 'fallback']) for (const failure of ['503', 'header failure', 'malformed', 'replay', 'receivedAt regression']) test(`JOED-173 fix7 ${kind} latest ${failure} revokes an earlier recovery success, ${mode}`, async t => {
-      const b = await board(t, kind), original = valid[kind];
-      if (mode === 'fallback') await b.fallback();
-      b.expire(); await b.refresh();
-      b.set({ status: failure === '503' ? 503 : 200,
-        payload: failure === 'malformed' ? { schema: original.schema } : { ...original,
-          seq: original.seq + (failure === 'receivedAt regression' ? 1 : failure === 'replay' ? -1 : 0),
-          receivedAt: failure === 'receivedAt regression' ? new Date(Date.parse(original.receivedAt) - 1000).toISOString() : original.receivedAt },
-        headers: failure === 'header failure' ? { 'X-Joe-Feed-Reason': 'refresh_failed' } : {} });
-      await b.refresh();
-      assert.equal(b.finish(), false);
-      assert.equal(b.session.signedOut(), true);
-      assert.ok(b.doc.querySelectorAll('[data-frozen]').length);
-      if (mode === 'worker') assert.equal(b.messages.at(-1).status[b.path].state, 'error');
-      b.set({ status: 200, payload: original }); await b.refresh();
-      assert.equal(b.finish(), true, 'a later valid equal document can recover');
-      assert.equal(b.feed.select().states[kind].state, 'fresh');
-    });
-    test(`JOED-173 fix7 ${kind} unchanged errors preserve their reason on every reply`, async t => {
-      const b = await board(t, kind);
-      b.set({ status: 200, payload: valid[kind], headers: { 'X-Joe-Feed-Reason': 'refresh_failed' } });
-      await b.refresh(); await b.refresh();
-      assert.equal(b.messages.at(-1).kind, 'unchanged');
-      assert.equal(b.messages.at(-1).reason, 'refresh_failed');
-      assert.equal(b.feed.select().states[kind].state, 'broken');
-      assert.equal(b.feed.select().states[kind].reason, 'refresh_failed');
-      assert.equal(b.session.signedOut(), false);
-    });
-  }
-  for (const kind of ['history', 'results']) {
-    test(`JOED-173 fix8 fallback ${kind} cannot recover a newer sequence with an older receivedAt after worker.onerror`, async t => {
-      const b = await board(t, kind), original = valid[kind];
-      b.set({ status: 401, payload: {} }); await b.refresh();
-      assert.equal(b.session.signedOut(), true);
-      b.set({ status: 200, payload: { ...original, seq: original.seq + 1,
-        receivedAt: new Date(Date.parse(original.receivedAt) - 1000).toISOString() } });
-      await b.fallback();
-      assert.equal(b.finish(), false, 'receipt regression cannot end sign-out');
-      assert.equal(b.session.signedOut(), true);
-      assert.equal(b.feed.feeds[kind].value.seq, original.seq);
-      assert.equal(b.feed.feeds[kind].value.receivedAt, original.receivedAt);
-      assert.equal(b.feed.feeds[kind].reason, 'sequence_replayed');
-      assert.ok(b.doc.querySelectorAll('[data-frozen]').length);
-      b.set({ status: 200, payload: original }); await b.refresh();
-      assert.equal(b.finish(), true, 'a later equal valid document can recover');
-      assert.equal(b.feed.select().states[kind].state, 'fresh');
-    });
-  }
   for (const mode of ['worker', 'fallback']) for (const kind of ['history', 'results'])
-    for (const outcome of ['ok newer', 'ok replay', 'receivedAt regression', '401', '503', 'malformed']) for (const frozen of [false, true])
-    test(`JOED-173 fix8 worker/fallback matrix: ${mode} / ${kind} / ${outcome} / frozen=${frozen}`, async t => {
-      const b = await board(t, kind), original = valid[kind];
-      if (frozen) b.expire();
-      const ok = outcome === 'ok newer';
-      const replay = outcome === 'ok replay' || outcome === 'receivedAt regression';
-      const reason = outcome === '401' ? 'auth_required' : ok ? null : replay ? 'sequence_replayed' : outcome === 'malformed' ? 'contract_invalid' : 'refresh_failed';
-      b.set({ status: outcome === '401' ? 401 : outcome === '503' ? 503 : 200,
-        payload: outcome === 'malformed' ? { schema: original.schema } : { ...original,
-          seq: original.seq + (ok || outcome === 'receivedAt regression' ? 1 : replay ? -1 : 0),
-          receivedAt: outcome === 'receivedAt regression' ? new Date(Date.parse(original.receivedAt) - 1000).toISOString() : original.receivedAt } });
-      if (mode === 'fallback') await b.fallback(); else await b.refresh();
-      const recovered = b.finish();
-      assert.equal(recovered, frozen && ok);
-      const signedOut = outcome === '401' || (frozen && !ok);
-      assert.equal(b.session.signedOut(), signedOut);
-      assert.equal(b.doc.getElementById('app').hasAttribute('data-last-known'), signedOut);
-      assert.equal(Boolean(b.doc.querySelectorAll('[data-frozen]').length), signedOut);
-      if (mode === 'worker') {
-        const status = b.messages.at(-1).status?.[b.path];
-        assert.equal(status?.state, outcome === '401' ? 'auth' : ok ? 'ok' : 'error');
-        assert.equal(status.reason, reason);
-      }
-      const cell = b.feed.select().states[kind];
-      if (!signedOut) {
-        assert.equal(cell.state, ok ? 'fresh' : replay ? 'stale' : 'broken');
-        assert.equal(cell.reason, reason);
-        assert.equal(b.feed.feeds[kind].value.seq, original.seq + (ok ? 1 : 0));
-        assert.equal(b.feed.feeds[kind].value.receivedAt, original.receivedAt, 'errors and replays never freshen receipts');
-      } else assert.equal(b.feed.select().feeds[kind].value.seq, original.seq, 'frozen selection retains the original document');
-    });
+  for (const outcome of ['ok newer', 'ok replay', 'receivedAt regression', '401', '503', 'malformed', 'header failure']) for (const frozen of [false, true])
+  test(`JOED-173 fix15 worker/fallback retention: ${mode} / ${kind} / ${outcome} / frozen=${frozen}`, async t => {
+    const b = await board(t, kind), original = valid[kind], before = structuredClone(b.feed.select());
+    if (frozen) b.expire();
+    const ok = outcome === 'ok newer', replay = ['ok replay', 'receivedAt regression'].includes(outcome);
+    const reason = outcome === '401' ? 'auth_required' : ok ? null : replay ? 'sequence_replayed' : outcome === 'malformed' ? 'contract_invalid' : 'refresh_failed';
+    b.set({ status: outcome === '401' ? 401 : outcome === '503' ? 503 : 200,
+      payload: outcome === 'malformed' ? { schema: original.schema } : { ...original,
+        seq: original.seq + (ok || outcome === 'receivedAt regression' ? 1 : replay ? -1 : 0),
+        receivedAt: outcome === 'receivedAt regression' ? new Date(Date.parse(original.receivedAt) - 1000).toISOString() : original.receivedAt },
+      headers: outcome === 'header failure' ? { 'X-Joe-Feed-Reason': 'refresh_failed' } : {} });
+    if (mode === 'fallback') await b.fallback(); else await b.refresh();
+    const signedOut = frozen || outcome === '401';
+    assert.equal(b.session.signedOut(), signedOut);
+    assert.equal(b.doc.getElementById('app').hasAttribute('data-last-known'), signedOut);
+    if (signedOut) assert.deepEqual(b.feed.select(), before);
+    else {
+      assert.equal(b.feed.select().states[kind].state, ok ? 'fresh' : replay ? 'stale' : 'broken');
+      assert.equal(b.feed.select().states[kind].reason, reason);
+      assert.equal(b.feed.feeds[kind].value.seq, original.seq + (ok ? 1 : 0));
+      assert.equal(b.feed.feeds[kind].value.receivedAt, original.receivedAt);
+    }
+  });
+  for (const kind of ['history', 'results']) test(`JOED-173 fix15 ${kind} crash keeps the page ordering floor on an older receipt`, async t => {
+    const b = await board(t, kind), original = valid[kind];
+    b.set({ status: 200, payload: { ...original, seq: original.seq + 1,
+      receivedAt: new Date(Date.parse(original.receivedAt) - 1000).toISOString() } });
+    await b.fallback();
+    assert.equal(b.feed.feeds[kind].value.seq, original.seq);
+    assert.equal(b.feed.feeds[kind].value.receivedAt, original.receivedAt);
+    assert.equal(b.feed.feeds[kind].reason, 'sequence_replayed');
+    b.set({ status: 200, payload: original }); await b.refresh();
+    assert.equal(b.feed.select().states[kind].state, 'fresh');
+  });
+  for (const kind of ['history', 'results']) test(`JOED-173 fix7 ${kind} unchanged errors preserve their reason on every reply`, async t => {
+    const b = await board(t, kind);
+    b.set({ status: 200, payload: valid[kind], headers: { 'X-Joe-Feed-Reason': 'refresh_failed' } });
+    await b.refresh(); await b.refresh();
+    assert.equal(b.messages.at(-1).kind, 'unchanged');
+    assert.equal(b.messages.at(-1).reason, 'refresh_failed');
+    assert.equal(b.feed.select().states[kind].reason, 'refresh_failed');
+    assert.equal(b.session.signedOut(), false);
+  });
 }

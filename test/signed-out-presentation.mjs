@@ -26,6 +26,32 @@ const start = { amountEur: 100000, date: '2026-01-01' };
 const snapshotURL = new URL('./fixtures/presentation-non-auth.json', import.meta.url);
 const failureReasons = Object.keys(H.CELL_REASON).filter(reason => reason !== 'auth_required');
 
+test('JOED-173 fix12 cold Results explains expired sign-in once, with figures and populated records preserved', async t => {
+  const { createBoardSession } = await import('../public/joe/transport.js');
+  const { createBoardFreeze } = await import('../public/joe/presentation.js');
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  t.after(() => { if (previous) Object.defineProperty(globalThis, 'document', previous); else delete globalThis.document; });
+  for (const populated of [false, true]) {
+    const doc = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
+    globalThis.document = doc;
+    const ctx = context();
+    if (!populated) { ctx.feeds.results = { value: null }; ctx.states.results = { value: null }; }
+    const copy = populated ? 'The retained Results sentence.' : 'Results are unavailable: no data received yet.';
+    doc.getElementById('rheroL').innerHTML = `<div class="display">—</div><p class="say">${copy}</p>`;
+    const s = createBoardSession();
+    const freeze = createBoardFreeze(doc, s, { cancelInteractions: () => R.explainResultsSignIn(ctx) });
+    s.observe('/joe/results.json', { auth: true });
+    assert.equal(doc.querySelector('#rheroL .say').textContent, populated ? copy : 'Results are unavailable: sign-in expired — reload.');
+    assert.equal(doc.querySelector('#rheroL .display').textContent, '—');
+    assert.equal(doc.getElementById('signedOutBanner').hidden, false);
+    assert.equal(doc.getElementById('app').hasAttribute('inert'), true);
+    const frozen = doc.getElementById('rheroL').innerHTML;
+    s.observe('/joe/results.json', { status: 503 }); freeze.sync();
+    assert.equal(doc.getElementById('rheroL').innerHTML, frozen, 'later failures cannot rewrite the frozen placeholder');
+    freeze.stop();
+  }
+});
+
 function context() {
   const feeds = Object.fromEntries(['data', 'history', 'results', 'fleet-config'].map(name => [name, { value: structuredClone(fixture[name]), reason: null }]));
   feeds.history.value.columns = toColumns(feeds.history.value.points);

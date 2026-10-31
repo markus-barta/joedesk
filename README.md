@@ -743,7 +743,7 @@ a screenshot alone.
 | `period-partial-day-hints` | results.js: renderHero, renderCalendar; results-model.js: countPartialDays | `period-hint/partial/1440/light` |
 | `trade-open-close-and-held` | results.js: held, tradeRows; format.js: timeHM | `trade-amount/rows/1440/light` |
 | `open-position-today-time` | results.js: dayContent; results-model.js: viennaDate | `partial-days/desk-filtered-reasoned/1440/light` |
-| `receipt-ingress-clock` | feed.js: serverClock, createFeed; history-worker.js: serverClock, clockNow | `ingress/live-stale-recovery/1440/light` |
+| `receipt-ingress-clock` | transport.js: serverClock, readJSON; feed.js: createFeed; history-worker.js: clockNow | `ingress/live-stale-recovery/1440/light` |
 | `stale-retained-ago` | results.js: renderStatus; format.js: age; ui.js: ageSpan | `states/stale-retained/1440/light` |
 | `worker-date-indexing` | history-worker.js: pollResults; results-model.js: indexResults, viennaDate | `ingress/live-stale-recovery/1440/light` |
 | `today-rollover-retained-receipt` | results.js: resultsToday, renderResults; results-model.js: addDays | `partial-days/retained-midnight/1440/light` |
@@ -2369,6 +2369,10 @@ calendar month total is marked and muted too. Values are muted and the board
 is desaturated. Freshness dots/halos disappear,
 animation classes are removed, and no clocks, ages or countdowns advance.
 Figures, comparisons, diagnostic text and draft form values stay intact.
+If Results has no accepted record at expiry, its empty-state sentence instead
+explains **Results are unavailable: sign-in expired — reload.** once, as the
+board freezes. Dashes remain dashes; an existing Results record and its sentence
+are retained exactly.
 
 The entire board is `inert`, with the banner outside it. Expiry closes native
 modals, chart inspectors and popovers so Reload remains reachable. Pending
@@ -2376,34 +2380,40 @@ chart touch/long-press timers, animation frames, tip dismissals and version-copy
 feedback are cancelled. Late clipboard results cannot create fallback UI.
 Capture guards also reject synthetic board input, including hover, focus,
 keyboard, wheel and Safari gestures. System appearance changes defer repainting
-until recovery. Address changes retain the latest route and follow it after
-recovery.
+until a fresh page load. Address changes keep their URL, which the fresh
+page reads after reload.
 
 The shared page/worker transport recognizes SSO 302/303 redirects, opaque and
-followed cross-origin redirects, 401/403, and successful HTML instead of JSON.
+401/403, and successful HTML instead of JSON. Followed cross-origin responses
+are discarded without supplying authentication evidence.
 Auth responses are rejected before store acceptance. Fleet submission uses this
 same boundary and freezes before any submission-error rendering; account-start
-writes stay guarded. Writes in flight at expiry are abandoned for the UI, even
-if they finish after recovery. Account-start recovery refetches the saved value
-without waiting for an abandoned POST; its late response cannot replace that
-read or show a success/error message. Every read continues polling while signed
-out, including account history independently of the active page and the fleet
-action log.
+writes stay guarded. Writes in flight at expiry are abandoned for the UI;
+late replies cannot replace the frozen baseline or show a success/error message.
+Board-settings reads across expiry are ignored, including valid responses.
 
-Any authenticated success can initiate recovery. The shell waits for pending
-reads, refreshes every feed plus account history and board settings, then
-renders fresh data synchronously before removing the stale markings or inert
-state. Every protected read must have an authenticated success after the freeze:
-state, history, continuity, results, account history, board settings, fleet
-settings and the fleet action log. A feed still failing authentication, or one
-without that success, keeps the board frozen. A later non-auth failure after
-authenticated success contributes its normal honest failure reason to the
-recovered page. Invalid documents invalidate that feed’s recovery evidence.
-History/results workers keep the first recovering document
-and invalidate unchanged-response hints for complete refreshes. The displayed
-selection and server-anchored clock stay fixed until recovery commits. A proxy’s
-5xx HTML, invalid JSON, contract failures, missing routes and network failures
-retain their existing behavior outside sign-out.
+Signed-out never ends in place. Every feed response arriving after expiry,
+including an all-200 refresh, is ignored for display and recovery. Only a fresh
+page load can become live: the banner's Reload control calls `location.reload()`,
+or one auth probe may request the same reload. While signed out, the probe reads
+only protected `/joe/state.json` through the normal JSON transport and its
+validator, first after 30 seconds, then after 60 seconds and at most every 120
+seconds on failure. Only a same-origin 2xx with a valid endpoint body triggers
+`location.reload()`. Auth failures, redirects to sign-in, HTML sign-in pages,
+5xx, 404, network failures and invalid bodies keep the old document frozen.
+Ordinary feed and account-history polling pauses at expiry; only the probe
+continues automatically. The probe never accepts data into any feed or changes
+a frozen mark.
+
+The probe records reload timestamps in `sessionStorage` under
+`joe-auth-probe-reloads-v1`: at most three automatic reloads per rolling ten
+minutes. The key is host/tab scoped, holds only timestamps, and is necessary to
+prevent an authentication reload loop; entries outside ten minutes are dropped
+on the next probe check. No identifier or analytics is stored or sent. All
+storage access is guarded. If storage access fails, at most one automatic reload
+is allowed in that page lifetime. At the limit the probe stops for that document;
+manual Reload always remains available. A reload that finds expired authentication
+creates a new frozen page rather than reviving the prior display.
 
 `test/signed-out-pages.mjs` uses the actual page renderers and `index.html` at
 390 and 1440 px, with populated account history, dirty Settings, Results and
@@ -2412,45 +2422,46 @@ markup, all attributes, titles, accessible names and live form properties. Only
 the explicit board/section freeze attributes and saved animation-class marking
 normalize. Transient controls are audited separately; retained data equality is exact;
 there is no phrase denylist or selected-value allowlist. The matrix covers all
-37 reasons, nine auth shapes, four pages, 401→503 retention, elapsed time and
-recovery. Named tests retain the earlier review reproducers, including session
+37 reasons, eight native auth shapes plus followed cross-origin responses,
+four pages, 401→503 retention, elapsed time and successful-feed freeze retention.
+Named tests retain the earlier review reproducers, including session
 bars, position counts, the account’s 1M change and Since start comparison,
 phone learning and aggregate kept worth. Oracle mutation tests reject arbitrary
 new wording, changed inputs and vanished values. The historical non-auth page
 hashes from `a941776` and builder hashes from `fa6db1d` remain unchanged.
-`node --test test/signed-out-fix5.mjs` adds named inert/modal, hover/focus/key,
-pre-expiry timer, fleet-write, worker-document, route, appearance and recovery
-regressions, including validated snapshots with a recorded server rejection.
-`test/signed-out-fix6.mjs` covers per-feed recovery evidence, account-history
-failures before and after authenticated success, abandoned writes, collapsed
-section headers, copy callbacks and exact non-auth submission error wording.
-It also exercises page/worker recovery using in-process messages and actual
-Node worker threads, plus late-success and failed-notification recovery races.
-The `d83f7ff` replay uses in-memory source hooks; no baseline checkout is edited.
-History and Results worker replies report each feed's explicit authenticated
-success, authentication refusal, or failure reason. Recovery requires a validated
-document whose sequence and receipt do not regress, with no current feed failure.
-While frozen, the worker sends full documents on every attempt; unchanged replies
-outside recovery still carry their reason and document receipt. A message's arrival
-alone never proves recovery. `test/signed-out-fix7.mjs` exercises both discarded-cache
-reproducers in real worker threads (replay with `JOED_FIX7_BASELINE=9eb2482`), the
-history/results × worker/fallback × newer/replay/receipt-regression/401/503/malformed
-× frozen/live matrix, equal-document
-recovery, receipt regressions, and failures that revoke an earlier recovery success.
-The worker, page reply handler and main-thread fallback share `acceptRecovery`:
-authenticated success, no feed failure, and neither sequence nor receipt older
-than the retained document. A worker crash cannot reset that ordering floor or
-discard the page's last good values when the first fallback read fails. Named
-History and Results regressions replay the crash followed by a higher sequence
-with an older receipt (`JOED_FIX7_BASELINE=58770a9`).
-Document retention separately compares the actual sequence and receipt: an
-authenticated 200 carrying a validated last-good body with a server-reported
-`sequence_replayed` reason keeps that body and reason, even with empty stores.
-It remains stale and cannot end signed-out recovery. The six cold-read regressions
-cover History and Results in workers, after worker failure, and with workers
-disabled (`JOED_FIX7_BASELINE=5b788a8`). The version adapter binds `matchMedia`
-to the browser global, preserving expiry disposal and the sweep planner's
-literal-query boundary inventory without changing the pinned vendor bundle.
+`test/signed-out-fix5.mjs` and `test/signed-out-fix6.mjs` retain inert/modal,
+hover/focus/key, pre-expiry timer, version clipboard, collapsed-section,
+abandoned-write, board-settings GET and frozen account-history regressions.
+`test/signed-out-fix7.mjs` keeps normal worker/fallback regression rejection,
+cold validated last-good bodies and reasons, equal-document re-serves, and
+the page's ordering floor after worker failure. While signed out every response
+preserves the prior selection, store and anchored time. The per-endpoint recovery
+evidence map, coordinated refresh, `acceptRecovery`, and in-place unmark paths
+have been removed from the transport, feed, worker and shell.
+
+`test/signed-out-fix14.mjs` now runs one real-worker/fallback parity table of the
+earlier review sequences (including both response orders, History beside
+Continuity auth/errors, all-503 and all-200). Every step remains frozen.
+`test/signed-out-fix15.mjs` tests the probe with real transport responses,
+its validator and origin boundary, 30/60/120-second backoff, a single pending
+attempt, lifecycle disposal, rolling reload guard, storage denial and manual
+Reload despite an exhausted automatic guard. No feed body proves in-place recovery.
+Account history still validates through its own typed account validator, in its
+reader rather than in the probe classifier.
+
+The fix 12 regression checks normal identical Results polling in the actual
+worker and main-thread fallback: receipt age reaches five minutes, a failed
+refresh retains that age and its existing wording, and neither sequence nor
+receipt may go backwards. The P4 stale fixture advances server time while
+re-serving one fixed record and refreshing its independent money input; it
+does not manufacture an older receipt on the second read. P3's signed-out fixture
+now checks that successful feed responses leave the old page frozen and a fresh
+page load resumes rendering. `scripts/browser/signed-out-pages.mjs` keeps all
+2,496 matrix cases and changes each resume assertion to observe a probe-triggered
+page reload and a live new document, including the Results-503 case with its cold
+unavailable state. It also exercises the real manual Reload control. All
+seven CI browser phases run in the same locked shell; signed-out checks retain
+failure while Results and Settings still run, and preview phases stay gated.
 
 The complete non-auth page snapshot fixes the footer's release coordinate to
 `261030154842.0.0`, the value rendered by `a941776`, as a harness input.
@@ -2459,6 +2470,12 @@ and titles are still compared. The fix 11 regression renders a later release
 coordinate and verifies that changing a footer label still changes the oracle.
 The reported New York failure came from the integration shell's newer release
 coordinate, rather than a machine-zone-dependent date or time.
+
+The historical fixture also fixes its Mac platform input: its chart hint says
+`⌘-scroll`, while a real Linux reader gets `Ctrl-scroll`. The fix 12 regression
+runs that fixture from both host platforms and verifies that changing the
+modifier's rendered text still fails the exact comparison. Product platform
+detection and the stored hashes stay unchanged.
 
 `TZ=UTC node scripts/browser/signed-out-pages.mjs` runs the same whole-document
 oracle on the actual app in one headless browser, using synthetic loopback reads.

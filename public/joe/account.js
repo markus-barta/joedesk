@@ -170,14 +170,12 @@ export function useAccountHistory(body, at = performance.now()) {
 }
 // A worker's or the page's reply; returns whether the history is current.
 function useReply(reply) {
-  if (!boardSession.accept('/joe/account-history.json', { auth: reply?.reason === 'auth_required' ? true
-    : reply?.kind === 'unchanged' || reply?.status === 200 || reply?.value ? false : undefined, status: reply?.status })) return false;
+  if (!boardSession.accept('/joe/account-history.json', reply)) return false;
   if (reply?.kind === 'unchanged' && store.value) { store.reason = null; store.loadedAt = performance.now(); return true; }
   if (reply?.kind === 'account' && reply.value) {
     Object.assign(store, { value: reply.value, reason: null, loadedAt: performance.now(), key: reply.key ?? null, version: store.version + 1 });
     return true;
   }
-  if (reply?.status === 200) boardSession.invalidateRecovery('/joe/account-history.json');
   store.reason = reply?.reason ?? 'refresh_failed';
   return false;
 }
@@ -210,12 +208,12 @@ function startWorker() {
 }
 async function readOnPage() {
   const started = performance.now(), res = await read('./account-history.json');
-  if (res.status !== 200) return { kind: 'account', status: res.status, reason: readFailure(res), value: null };
+  if (res.status !== 200) return { evidence: res.evidence, kind: 'account', status: res.status, reason: readFailure(res), value: null };
   try {
     const value = M.acceptAccountHistory(res.payload);
     timing('account-accept', performance.now() - started);
-    return { kind: 'account', status: 200, reason: null, value };
-  } catch { return { kind: 'account', status: 200, reason: 'contract_invalid', value: null }; }
+    return { evidence: res.evidence, kind: 'account', status: 200, reason: null, value };
+  } catch { return { evidence: res.evidence, kind: 'account', status: 200, reason: 'contract_invalid', value: null }; }
 }
 // One read at a time: a read asked for while one runs is that read, so no
 // reply can go to the wrong caller (and leave a healthy worker timed out).
@@ -257,7 +255,7 @@ export const forgetAccountHistory = () => Object.assign(store, { value: null, re
 export const refreshAccountHistory = () => refresh();
 export const accountHistoryIdle = () => reader.reading ?? Promise.resolve();
 export function pollAccountHistory() {
-  if (!store.busy && performance.now() >= store.next && typeof fetch === 'function') return refresh();
+  if (!boardSession.signedOut() && !store.busy && performance.now() >= store.next && typeof fetch === 'function') return refresh();
 }
 // Forget the worker and its failures (tests): the next read starts a new one.
 export const forgetAccountWorker = () => {
@@ -586,7 +584,7 @@ export function renderAccount(ctx) {
   last.ctx = ctx;
   const root = $('#acctHero');
   if (!root) return;
-  if (!store.busy && performance.now() >= store.next && typeof fetch === 'function') refresh();
+  if (!boardSession.signedOut() && !store.busy && performance.now() >= store.next && typeof fetch === 'function') refresh();
   // The value and its panel state (fresh, stale, broken or not reported).
   const value = $('#acctValue'), state = ctx.states.paperAccount?.state ?? 'not reported';
   patch(value, valueHtml(ctx.states.paperAccount));

@@ -4,7 +4,7 @@
 // the only place a reviewed draft leaves the browser. Paper is fixed: no
 // function here can produce anything but mode "paper".
 import { digits, money, NB } from './format.js';
-import { validateBoardSettings } from './board-settings.js';
+import { validateBoardSettings } from './board-settings-validation.js';
 
 // Display settings have their own save; never add them to the fleet draft.
 const ACCOUNT_START_UNSET = "Not set: the whole account's 'Since start' stays hidden until you set it.";
