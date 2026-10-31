@@ -2452,6 +2452,14 @@ disabled (`JOED_FIX7_BASELINE=5b788a8`). The version adapter binds `matchMedia`
 to the browser global, preserving expiry disposal and the sweep planner's
 literal-query boundary inventory without changing the pinned vendor bundle.
 
+The complete non-auth page snapshot fixes the footer's release coordinate to
+`261030154842.0.0`, the value rendered by `a941776`, as a harness input.
+Its hashes remain unchanged; the version element and surrounding text, labels
+and titles are still compared. The fix 11 regression renders a later release
+coordinate and verifies that changing a footer label still changes the oracle.
+The reported New York failure came from the integration shell's newer release
+coordinate, rather than a machine-zone-dependent date or time.
+
 `TZ=UTC node scripts/browser/signed-out-pages.mjs` runs the same whole-document
 oracle on the actual app in one headless browser, using synthetic loopback reads.
 It exercises every native auth response shape on every protected transport,

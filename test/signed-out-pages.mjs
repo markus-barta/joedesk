@@ -53,12 +53,21 @@ function snapshot(doc, width) {
   return renderedSnapshot(doc, shown);
 }
 let instance = 0;
-async function preview(t, width, shape = '401', populated = true) {
+async function preview(t, width, shape = '401', populated = true, { html = readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8') } = {}) {
   const controls = { ...R.RS };
   Object.assign(R.RS, { period: 'week', anchor: null, sel: null, desk: 'all', cal: null, moved: false });
   R.forgetResults();
   const old = Object.fromEntries(['document', 'matchMedia', 'localStorage', 'innerHeight', 'scrollY', 'CSS', 'window'].map(k => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
-  const doc = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
+  const doc = htmlDocument(html);
+  if (!populated) {
+    // The non-auth oracle was captured from a941776, including this footer.
+    // Fix release metadata as a harness input, like the feed timestamps:
+    // JOED-174's later coordinate changed every hash, regardless of TZ.
+    // Keep the version element and all of its surrounding copy in the oracle.
+    const version = doc.getElementById('appVersion');
+    version.textContent = '261030154842.0.0';
+    version.setAttribute('data-product-version', '261030154842.0.0');
+  }
   doc.documentElement = doc.querySelector('html'); doc.body = doc.querySelector('body');
   globalThis.document = doc;
   globalThis.CSS = { escape: text => text };
@@ -274,6 +283,22 @@ test('JOED-173 fix4 oracle rejects arbitrary added copy and every dropped elemen
   const valueNode = p.doc.getElementById('accountStartSummary'), children = valueNode.children;
   valueNode.textContent = ''; assert.throws(() => assertSignedOutPage(p.capture(), before, 'lost comparison')); valueNode.children = children;
   assertSignedOutPage(p.capture(), before, 'restored');
+});
+
+test('JOED-173 fix11 snapshot: release coordinates are fixed inputs, with footer copy still compared', async t => {
+  const html = readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8');
+  const version = htmlDocument(html).getElementById('appVersion').getAttribute('data-product-version');
+  const before = await preview(t, 390, '401', false);
+  const expected = before.render(before.context('gateway_down'), 'desk');
+  before.close();
+  const released = await preview(t, 390, '401', false, { html: html.replaceAll(version, '261031052151.0.0') });
+  const actual = released.render(released.context('gateway_down'), 'desk');
+  assert.deepEqual(actual, expected, 'a release coordinate cannot change the historical page oracle');
+  assert.match(actual.copy, /Version 261030154842\.0\.0/);
+  const hashes = JSON.parse(readFileSync(new URL('./fixtures/presentation-pages-non-auth.json', import.meta.url)));
+  assert.equal(createHash('sha256').update(JSON.stringify(actual)).digest('hex'), hashes['390/gateway_down/desk']);
+  released.doc.getElementById('versionMode').setAttribute('aria-label', 'Changed footer copy');
+  assert.notDeepEqual(snapshot(released.doc, 390), expected, 'footer labels remain part of the exact comparison');
 });
 
 test('JOED-173 fix3 snapshot: complete non-auth pages keep exact text, labels and titles', async t => {
