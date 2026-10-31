@@ -460,7 +460,7 @@ test('JOED-98: scoped source exactness still clears last-good when a bag reason 
 });
 
 test('rev 10 is additive: rev 9 exact, null switch-set and reasoned-position payloads still validate', () => {
-  assert.equal(CONTRACTS.revision, 10);
+  assert.equal(CONTRACTS.revision, 11);
   assert.deepEqual(REASONS.slice(34), ['sod_missing', 'ledger_unreconciled', 'position_stale']);
   for (const data of [read('valid').data, read('positions-null'), switchSetSnapshot()]) {
     assert.equal(validateContract('data', ingress(data), { stage: 'ingress' }).ok, true);

@@ -1544,6 +1544,46 @@ element. Results goes through the one router (route.js): it reads a link with
 `writeRoute`, a push for the reader's change and a correction otherwise.
 Desk's links use this format; History has its own `#history?…`.
 
+### Two proven Today conversions (JOED-149, contract-set revision 11)
+
+The data ID remains `inspr.joe.household.v2`; revision 10 and revision 11
+payloads are accepted together. A payload has no separate revision tag.
+Revision 11 adds the optional, pusher-owned field
+`desks[].pnlSources.day.fx = { start: { source, observedAt }, end: { source, observedAt } }`.
+Every object is closed. Both sources must be `ib-account-ExchangeRate`, the
+source currently proved by the pusher's IB account conversion path. Instants
+use the existing canonical UTC format `YYYY-MM-DDTHH:mm:ss.sssZ`.
+The pair belongs to an available `sod-virtual-equity` desk day source with a
+non-null `periodStart`: `start.observedAt <= periodStart` and
+`end.observedAt >= start.observedAt`. The field carries no rate values;
+existing revision-10 `money.fx` provenance is unchanged. Aggregate DAY and
+OPEN sources do not accept the pair. Omit it for a desk with no foreign leg
+or without proof; it is never fabricated from a timestamp or free-text detail.
+
+Both proven conversions can support exact euro Today even when the rates
+differ. The board retains its existing exactness, freshness, gateway, NY-day
+and null-reason rules; adding the pair cannot promote an inexact amount.
+For each exact desk carrying the pair, Details says
+“converted at the start-of-day rate from HH:MM and the current rate from HH:MM”.
+Those clocks always use Europe/Vienna, including DST, independently of the
+browser's timezone. Details displays no rate values. Revision-10 payloads
+and revision-11 payloads without the pair render as before. Invalid proofs
+are rejected as `contract_invalid` with a field/rule diagnostic; the existing
+last-good and rejected-update presentation applies.
+
+DEVOPS owns the later pusher flip, following JOED-86/87: re-vendor the entire
+`contracts/` bundle at the revision-11 digest in `release/contracts.json`,
+retain rev-10 output compatibility until the board is deployed, and then
+emit both proved observations from `provenDayFx`'s SOD/current evidence for
+each eligible desk. Preserve the two independent rate values in their existing
+calculation/provenance path, withhold exactness on missing proof, and omit
+`fx` for euro-only desks. The interim `day.detail` text is not structured
+proof. Real producer/executor compatibility, immutable deployment pins and
+Amy's sign-off remain required; synthetic fixtures do not supply them.
+JOED-149 changes no release coordinate or deployment pin and does not reseal
+the runtime closure. A later coordinated release must reserve and seal its
+own candidate after review; sealed-build integrity checks remain closed until then.
+
 ### Phase B exact money (JOED-85, contract-set revision 10)
 
 The data ID stays `inspr.joe.household.v2`. Every valid revision-9 payload
