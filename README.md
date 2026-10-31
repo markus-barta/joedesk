@@ -2432,8 +2432,15 @@ While frozen, the worker sends full documents on every attempt; unchanged replie
 outside recovery still carry their reason and document receipt. A message's arrival
 alone never proves recovery. `test/signed-out-fix7.mjs` exercises both discarded-cache
 reproducers in real worker threads (replay with `JOED_FIX7_BASELINE=9eb2482`), the
-history/results × newer/replay/401/503/malformed × frozen/live matrix, equal-document
+history/results × worker/fallback × newer/replay/receipt-regression/401/503/malformed
+× frozen/live matrix, equal-document
 recovery, receipt regressions, and failures that revoke an earlier recovery success.
+The worker, page reply handler and main-thread fallback share `acceptRecovery`:
+authenticated success, no feed failure, and neither sequence nor receipt older
+than the retained document. A worker crash cannot reset that ordering floor or
+discard the page's last good values when the first fallback read fails. Named
+History and Results regressions replay the crash followed by a higher sequence
+with an older receipt (`JOED_FIX7_BASELINE=58770a9`).
 
 `TZ=UTC node scripts/browser/signed-out-pages.mjs` runs the same whole-document
 oracle on the actual app in one headless browser, using synthetic loopback reads.

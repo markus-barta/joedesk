@@ -45,6 +45,21 @@ export async function readJSON(url, init = {}, { text = false, fetcher = (...arg
 
 export const readFailure = ({ auth, status }) => auth ? 'auth_required' : status === 404 ? 'route_not_found' : 'refresh_failed';
 
+// History/Results use this policy in the worker, on worker replies, and after
+// worker failure. The page's retained document remains the ordering floor even
+// when the fallback's raw-document cache has never received a value.
+export function acceptRecovery(retained, incoming, status) {
+  const valid = incoming && Number.isSafeInteger(incoming.seq) && Number.isFinite(Date.parse(incoming.receivedAt));
+  const ordered = valid && (!retained || (incoming.seq >= retained.seq && Date.parse(incoming.receivedAt) >= Date.parse(retained.receivedAt)));
+  const reason = status?.auth === true ? 'auth_required'
+    : !valid ? status?.reason ?? 'contract_invalid'
+    : !ordered ? 'sequence_replayed'
+    : status?.valid === false ? status?.reason ?? 'contract_invalid'
+    : status?.state !== 'ok' || status?.auth !== false ? status?.reason ?? 'refresh_failed'
+    : status.reason ?? null;
+  return { ok: reason === null, reason };
+}
+
 // The shell coordinates recovery: any authenticated read can start a full
 // refresh, while the displayed document stays frozen until that refresh renders.
 export function createBoardSession() {

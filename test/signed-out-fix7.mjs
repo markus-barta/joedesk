@@ -5,10 +5,10 @@ import { execFileSync } from 'node:child_process';
 import { registerHooks } from 'node:module';
 import { Worker as NodeWorker } from 'node:worker_threads';
 import { htmlDocument } from './fixtures/preview-dom.mjs';
-// Replay only the two production modules under repair, without another checkout.
+// Replay the production modules under repair, without another checkout.
 if (process.env.JOED_FIX7_BASELINE) registerHooks({ load(url, context, next) {
   const name = new URL(url).pathname.split('/').at(-1);
-  if (url.startsWith('file:') && url.includes('/public/joe/') && ['feed.js', 'history-worker.js'].includes(name))
+  if (url.startsWith('file:') && url.includes('/public/joe/') && ['feed.js', 'history-worker.js', 'transport.js'].includes(name))
     return { format: 'module', source: execFileSync('git', ['show', `${process.env.JOED_FIX7_BASELINE}:public/joe/${name}`], { encoding: 'utf8' }), shortCircuit: true };
   return next(url, context);
 } });
@@ -21,11 +21,19 @@ const valid = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.m
 async function board(t, kind) {
   const path = `/joe/${kind}.json`, sidecar = '/joe/history-continuity.json';
   const session = createBoardSession(), messages = [], workers = [];
-  let transform = data => data;
+  let transform = data => data, activeWorker;
   let response = { status: 200, payload: valid[kind] }, continuity = { status: 200, payload: null };
+  t.mock.method(globalThis, 'fetch', async url => {
+    const route = String(url).split('/').at(-1);
+    const r = route === 'history-continuity.json' ? continuity : route === `${kind}.json` ? response
+      : { status: 200, payload: valid[route.replace('.json', '')] };
+    return new Response(r.body ?? JSON.stringify(r.payload), { status: r.status,
+      headers: { 'X-Joe-Server-Now': valid[kind].receivedAt, ...r.headers } });
+  });
   const old = Object.getOwnPropertyDescriptor(globalThis, 'Worker');
   globalThis.Worker = class {
     constructor() {
+      activeWorker = this;
       const boot = `import { parentPort } from 'node:worker_threads';
         import ${JSON.stringify(import.meta.url)};
         const requests = new Map(); let serial = 0;
@@ -58,6 +66,7 @@ async function board(t, kind) {
   const stop = session.coordinateRecovery(() => new Promise(done => { release = done; }), kind === 'history' ? [path, sidecar] : [path]);
   t.after(() => { release?.(); stop(); });
   return { feed, session, doc, messages, refresh, path,
+    fallback: async () => { activeWorker.onerror(); await feed.whenIdle(); assert.equal(feed.usesWorker(), false); },
     set: r => { response = r; }, sidecar: r => { continuity = r; },
     transform: fn => { transform = fn; },
     expire: () => session.observe(path, { auth: true }),
@@ -116,16 +125,20 @@ if (!process.env.JOED_FIX7_WORKER) {
       assert.equal(b.feed.feeds[kind].value.seq, original.seq);
       assert.equal(Boolean(b.doc.querySelectorAll('[data-frozen]').length), frozen);
     });
-    for (const failure of ['503', 'header failure', 'malformed', 'replay']) test(`JOED-173 fix7 ${kind} latest ${failure} revokes an earlier recovery success`, async t => {
-      const b = await board(t, kind), original = valid[kind]; b.expire(); await b.refresh();
+    for (const mode of ['worker', 'fallback']) for (const failure of ['503', 'header failure', 'malformed', 'replay', 'receivedAt regression']) test(`JOED-173 fix7 ${kind} latest ${failure} revokes an earlier recovery success, ${mode}`, async t => {
+      const b = await board(t, kind), original = valid[kind];
+      if (mode === 'fallback') await b.fallback();
+      b.expire(); await b.refresh();
       b.set({ status: failure === '503' ? 503 : 200,
-        payload: failure === 'malformed' ? { schema: original.schema } : { ...original, seq: original.seq - (failure === 'replay' ? 1 : 0) },
+        payload: failure === 'malformed' ? { schema: original.schema } : { ...original,
+          seq: original.seq + (failure === 'receivedAt regression' ? 1 : failure === 'replay' ? -1 : 0),
+          receivedAt: failure === 'receivedAt regression' ? new Date(Date.parse(original.receivedAt) - 1000).toISOString() : original.receivedAt },
         headers: failure === 'header failure' ? { 'X-Joe-Feed-Reason': 'refresh_failed' } : {} });
       await b.refresh();
       assert.equal(b.finish(), false);
       assert.equal(b.session.signedOut(), true);
       assert.ok(b.doc.querySelectorAll('[data-frozen]').length);
-      assert.equal(b.messages.at(-1).status[b.path].state, 'error');
+      if (mode === 'worker') assert.equal(b.messages.at(-1).status[b.path].state, 'error');
       b.set({ status: 200, payload: original }); await b.refresh();
       assert.equal(b.finish(), true, 'a later valid equal document can recover');
       assert.equal(b.feed.select().states[kind].state, 'fresh');
@@ -141,28 +154,53 @@ if (!process.env.JOED_FIX7_WORKER) {
       assert.equal(b.session.signedOut(), false);
     });
   }
-  for (const kind of ['history', 'results']) for (const outcome of ['ok newer', 'ok replay', '401', '503', 'malformed']) for (const frozen of [false, true])
-    test(`JOED-173 fix7 worker matrix: ${kind} / ${outcome} / frozen=${frozen}`, async t => {
+  for (const kind of ['history', 'results']) {
+    test(`JOED-173 fix8 fallback ${kind} cannot recover a newer sequence with an older receivedAt after worker.onerror`, async t => {
+      const b = await board(t, kind), original = valid[kind];
+      b.set({ status: 401, payload: {} }); await b.refresh();
+      assert.equal(b.session.signedOut(), true);
+      b.set({ status: 200, payload: { ...original, seq: original.seq + 1,
+        receivedAt: new Date(Date.parse(original.receivedAt) - 1000).toISOString() } });
+      await b.fallback();
+      assert.equal(b.finish(), false, 'receipt regression cannot end sign-out');
+      assert.equal(b.session.signedOut(), true);
+      assert.equal(b.feed.feeds[kind].value.seq, original.seq);
+      assert.equal(b.feed.feeds[kind].value.receivedAt, original.receivedAt);
+      assert.equal(b.feed.feeds[kind].reason, 'sequence_replayed');
+      assert.ok(b.doc.querySelectorAll('[data-frozen]').length);
+      b.set({ status: 200, payload: original }); await b.refresh();
+      assert.equal(b.finish(), true, 'a later equal valid document can recover');
+      assert.equal(b.feed.select().states[kind].state, 'fresh');
+    });
+  }
+  for (const mode of ['worker', 'fallback']) for (const kind of ['history', 'results'])
+    for (const outcome of ['ok newer', 'ok replay', 'receivedAt regression', '401', '503', 'malformed']) for (const frozen of [false, true])
+    test(`JOED-173 fix8 worker/fallback matrix: ${mode} / ${kind} / ${outcome} / frozen=${frozen}`, async t => {
       const b = await board(t, kind), original = valid[kind];
       if (frozen) b.expire();
       const ok = outcome === 'ok newer';
-      const replay = outcome === 'ok replay';
+      const replay = outcome === 'ok replay' || outcome === 'receivedAt regression';
+      const reason = outcome === '401' ? 'auth_required' : ok ? null : replay ? 'sequence_replayed' : outcome === 'malformed' ? 'contract_invalid' : 'refresh_failed';
       b.set({ status: outcome === '401' ? 401 : outcome === '503' ? 503 : 200,
-        payload: outcome === 'malformed' ? { schema: original.schema } : { ...original, seq: original.seq + (ok ? 1 : replay ? -1 : 0) } });
-      await b.refresh();
+        payload: outcome === 'malformed' ? { schema: original.schema } : { ...original,
+          seq: original.seq + (ok || outcome === 'receivedAt regression' ? 1 : replay ? -1 : 0),
+          receivedAt: outcome === 'receivedAt regression' ? new Date(Date.parse(original.receivedAt) - 1000).toISOString() : original.receivedAt } });
+      if (mode === 'fallback') await b.fallback(); else await b.refresh();
       const recovered = b.finish();
       assert.equal(recovered, frozen && ok);
       const signedOut = outcome === '401' || (frozen && !ok);
       assert.equal(b.session.signedOut(), signedOut);
       assert.equal(b.doc.getElementById('app').hasAttribute('data-last-known'), signedOut);
       assert.equal(Boolean(b.doc.querySelectorAll('[data-frozen]').length), signedOut);
-      const last = b.messages.at(-1), status = last.status?.[b.path];
-      assert.equal(status?.state, outcome === '401' ? 'auth' : ok ? 'ok' : 'error');
-      assert.equal(status.reason, outcome === '401' ? 'auth_required' : ok ? null : replay ? 'sequence_replayed' : outcome === 'malformed' ? 'contract_invalid' : 'refresh_failed');
+      if (mode === 'worker') {
+        const status = b.messages.at(-1).status?.[b.path];
+        assert.equal(status?.state, outcome === '401' ? 'auth' : ok ? 'ok' : 'error');
+        assert.equal(status.reason, reason);
+      }
       const cell = b.feed.select().states[kind];
       if (!signedOut) {
         assert.equal(cell.state, ok ? 'fresh' : replay ? 'stale' : 'broken');
-        assert.equal(cell.reason, status.reason);
+        assert.equal(cell.reason, reason);
         assert.equal(b.feed.feeds[kind].value.seq, original.seq + (ok ? 1 : 0));
         assert.equal(b.feed.feeds[kind].value.receivedAt, original.receivedAt, 'errors and replays never freshen receipts');
       } else assert.equal(b.feed.select().feeds[kind].value.seq, original.seq, 'frozen selection retains the original document');

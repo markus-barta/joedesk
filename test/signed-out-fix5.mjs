@@ -180,7 +180,10 @@ for (const malformed of [false, true]) test(`JOED-173 fix5 recovery distinguishe
   t.mock.method(globalThis, 'fetch', async url => new Response(JSON.stringify(String(url).endsWith('state.json')
     ? { serverNow: valid.data.receivedAt, feeds: { data: { value: malformed ? {} : valid.data, reason: 'contract_invalid' } }, panels: {} }
     : String(url).includes('continuity') ? {} : String(url).includes('history') ? valid.history : String(url).includes('fleet-config') ? valid['fleet-config'] : valid.results),
-  { headers: { 'X-Joe-Received-At': valid.data.receivedAt, 'X-Joe-Feed-Reason': 'contract_invalid' } }));
+  // This regression concerns state.json's retained snapshot. History/Results
+  // failure headers are independently tested as failed recovery attempts.
+  { headers: { 'X-Joe-Received-At': valid.data.receivedAt,
+    ...(String(url).endsWith('state.json') ? { 'X-Joe-Feed-Reason': 'contract_invalid' } : {}) } }));
   session.observe('expiry', { auth: true });
   await feed.refresh();
   session.observe('expiry', { auth: false });

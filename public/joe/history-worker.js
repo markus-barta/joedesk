@@ -9,20 +9,22 @@ import { indexResults, transferables as resultsTransferables } from './results-m
 
 const previous = { history: null, results: null }, posted = { history: null, results: null };
 let frozen = false;
-import { readJSON } from './transport.js';
+import { readJSON, acceptRecovery } from './transport.js';
 const evidence = responses => Object.fromEntries(responses.map(([url, res]) => [url, res.auth]));
 // Auth, document acceptance and freshness are separate evidence. In particular,
 // a validated last-good body with a failure header is still a failed attempt.
-function outcome(res, accepted) {
-  return { state: res.auth === true ? 'auth' : res.auth === false && res.status === 200 && !accepted.reason ? 'ok' : 'error',
-    auth: res.auth, reason: res.auth === true ? 'auth_required' : accepted.reason ?? (res.status === 200 && res.auth === false ? null : 'refresh_failed'),
+function outcome(res, accepted, retained = null) {
+  const status = { state: res.status === 200 ? 'ok' : 'error', auth: res.auth, reason: accepted.reason };
+  const recovery = acceptRecovery(retained, accepted.value, status);
+  return { state: res.auth === true ? 'auth' : recovery.ok ? 'ok' : 'error',
+    auth: res.auth, reason: recovery.reason,
     document: accepted.value ? { seq: accepted.value.seq, receivedAt: accepted.value.receivedAt } : null };
 }
 function accept(kind, res) {
   const prior = previous[kind];
   let accepted = acceptRead(kind, res, prior);
-  const value = accepted.value;
-  if (value && prior?.value && (value.seq < prior.value.seq || Date.parse(value.receivedAt) < Date.parse(prior.value.receivedAt)))
+  const recovery = outcome(res, accepted, prior?.value);
+  if (recovery.reason === 'sequence_replayed')
     accepted = { ...prior, reason: 'sequence_replayed' };
   previous[kind] = accepted;
   return accepted;
