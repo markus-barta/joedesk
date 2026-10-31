@@ -112,10 +112,13 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
       try {
         const paths = kind === 'history' ? ['/joe/history.json', '/joe/history-continuity.json'] : ['/joe/results.json'];
         const evidence = paths.map(key => [key, data.status?.[key]]);
-        // A successful sibling of an auth failure was not decoded or posted.
-        // It cannot stand in for a fresh document in the recovery inventory.
+        // Even a blocked document reply reports every sibling's latest auth
+        // outcome; its undecoded body cannot prove authenticated recovery.
         if (data.kind === 'blocked') {
-          for (const [key, status] of evidence) if (status?.state === 'auth') session.observe(key, { auth: true });
+          for (const [key, status] of evidence) {
+            session.observe(key, { auth: status?.state === 'auth' ? true : status?.auth });
+            session.invalidateRecovery(key);
+          }
           return;
         }
         if (evidence.some(([, status]) => !['auth', 'ok', 'error'].includes(status?.state))) {

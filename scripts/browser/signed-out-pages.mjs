@@ -40,7 +40,7 @@ try {
       }
       const path = url.pathname.slice('/joe/'.length);
       if (!endpoints.includes(path)) { await browser.send('Fetch.continueRequest', { requestId }, m.sessionId); return; }
-      if (path === nonAuthOnly) { await send(503, '{}'); return; }
+      if (path === nonAuthOnly) { await send(503, path === 'results.json' ? { reason: 'feed_not_received' } : {}); return; }
       if (fail503) { await send(503, '{}'); return; }
       if (expired && (!only || only === path)) {
         visited.add(`${shape}/${path}`);
@@ -143,17 +143,8 @@ try {
     const timers = await page.evaluate(`Array.from(document.querySelectorAll('[data-age]')).filter(n => n.getClientRects().length).every(n => getComputedStyle(n, '::after').content.includes('last known'))`);
     assert.equal(timers, true, `${tag}: paused ages show their frozen value plus last known`);
     stage = `${tag}: recovery`;
-    const retainedReason = reason;
-    if (reason) {
-      expired = fail503 = false;
-      await refresh(); await idleRecovery();
-      assertSignedOutPage(await capture(), before, `${tag}/failed authenticated attempt cannot recover`);
-      // A failure-bearing last-good document is not a recovery success.
-      // First obtain clean worker documents, then restore the ordinary fault.
-      reason = null;
-    }
     await recover();
-    reason = retainedReason;
+    assert.equal((await capture()).marked, false, `${tag}: authenticated responses recover even with the feed's own failure reason`);
     const count = await page.evaluate('window.__joedesk.renders');
     await refresh(); await settle();
     assert.ok(await page.evaluate(`window.__joedesk.renders > ${count}`), `${tag}: recovery resumes renders`);
@@ -189,6 +180,32 @@ try {
       await recover(); only = null;
     }
     console.log(`fix6: ${width}px collapsed headers and all eight recovery gates passed`);
+    stage = `${width}: fix13 Results 503 after re-sign-in`;
+    await go('desk');
+    expired = true; only = 'state.json';
+    await page.evaluate(`window.__joedesk.refresh('state')`);
+    assert.equal((await capture()).marked, true, 'state 401 freezes the populated board');
+    const priorEquity = f.data.brokerAccount.equity.amount;
+    f.data.seq++; f.data.brokerAccount.equity.amount = '29001';
+    nonAuthOnly = 'results.json';
+    await recover(); await idleRecovery();
+    assert.deepEqual(await page.evaluate(`({
+      signedOut: !document.getElementById('signedOutBanner').hidden,
+      inert: document.getElementById('app').hasAttribute('inert'),
+      marked: document.getElementById('app').hasAttribute('data-last-known'),
+      frozen: document.querySelectorAll('[data-frozen]').length
+    })`), { signedOut: false, inert: false, marked: false, frozen: 0 });
+    assert.match(await page.evaluate(`document.getElementById('acctValue').textContent`), /29.001/);
+    const expanded = await page.evaluate(`document.getElementById('acctDetailsBtn').getAttribute('aria-expanded')`);
+    await page.evaluate(`document.getElementById('acctDetailsBtn').click()`); await settle();
+    assert.notEqual(await page.evaluate(`document.getElementById('acctDetailsBtn').getAttribute('aria-expanded')`), expanded, 'recovered controls respond to a real click');
+    await go('results'); await refresh(); await settle();
+    const resultsFailure = await page.evaluate(`document.getElementById('resStatus').textContent`);
+    assert.match(resultsFailure, /Results refresh failed: no data received yet\. Showing the last good results from/);
+    assert.doesNotMatch(resultsFailure, /sign.in/i);
+    nonAuthOnly = only = null; f.data.seq++; f.data.brokerAccount.equity.amount = priorEquity;
+    await refresh(); await go('desk'); await settle();
+    console.log(`fix13: ${width}px Results 503 recovery shows 29001, restores interactions and retains the Results failure reason`);
     stage = `${width}: later non-auth account-history failure shows its honest reason`;
     only = null; expired = true;
     await page.evaluate(`import('/joe/board-settings.js').then(m => m.refreshBoardSettings())`);

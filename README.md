@@ -2394,18 +2394,18 @@ action log.
 
 Any authenticated success can initiate recovery. The shell waits for pending
 reads, refreshes every feed plus account history and board settings, then
-renders fresh data synchronously before removing the stale markings or inert
-state. Every protected read must have an authenticated success after the freeze:
-state, history, continuity, results, account history, board settings, fleet
-settings and the fleet action log. A feed still failing authentication, or one
-without that success, keeps the board frozen. A later non-auth failure after
-authenticated success contributes its normal honest failure reason to the
-recovered page. Invalid documents invalidate that feed’s recovery evidence.
-History/results workers keep the first recovering document
+renders accepted data and each feed's own failure reason synchronously before
+removing the stale markings or inert state. Signed-out ends when no protected
+read's latest response is an authentication refusal and at least one
+authenticated response has arrived since expiry. Non-auth failures supersede a
+previous refusal on that read, but cannot themselves prove a new sign-in or
+revoke earlier positive evidence. A validation failure does not contribute
+positive evidence. A feed whose latest response still refuses authentication
+keeps the board frozen. History/results workers keep recovering documents
 and invalidate unchanged-response hints for complete refreshes. The displayed
-selection and server-anchored clock stay fixed until recovery commits. A proxy’s
+selection and server-anchored clock stay fixed until recovery commits. A proxy's
 5xx HTML, invalid JSON, contract failures, missing routes and network failures
-retain their existing behavior outside sign-out.
+retain their own failure states and last-good values on the recovered board.
 
 `test/signed-out-pages.mjs` uses the actual page renderers and `index.html` at
 390 and 1440 px, with populated account history, dirty Settings, Results and
@@ -2429,16 +2429,16 @@ section headers, copy callbacks and exact non-auth submission error wording.
 It also exercises page/worker recovery using in-process messages and actual
 Node worker threads, plus late-success and failed-notification recovery races.
 The `d83f7ff` replay uses in-memory source hooks; no baseline checkout is edited.
-History and Results worker replies report each feed's explicit authenticated
-success, authentication refusal, or failure reason. Recovery requires a validated
-document whose sequence and receipt do not regress, with no current feed failure.
+History and Results worker replies report each feed's explicit authentication
+evidence separately from document acceptance and failure reasons. Document
+acceptance still rejects a sequence or receipt regression during recovery.
 While frozen, the worker sends full documents on every attempt; unchanged replies
 outside recovery still carry their reason and document receipt. A message's arrival
 alone never proves recovery. `test/signed-out-fix7.mjs` exercises both discarded-cache
 reproducers in real worker threads (replay with `JOED_FIX7_BASELINE=9eb2482`), the
 history/results × worker/fallback × newer/replay/receipt-regression/401/503/malformed
 × frozen/live matrix, equal-document
-recovery, receipt regressions, and failures that revoke an earlier recovery success.
+recovery, receipt regressions, and failures that retain their own reasons after authentication recovers.
 The worker, page reply handler and main-thread fallback share `acceptRecovery`:
 authenticated success, no feed failure, and neither sequence nor receipt older
 than the retained document. A worker crash cannot reset that ordering floor or
@@ -2448,7 +2448,7 @@ with an older receipt (`JOED_FIX7_BASELINE=58770a9`).
 Document retention separately compares the actual sequence and receipt: an
 authenticated 200 carrying a validated last-good body with a server-reported
 `sequence_replayed` reason keeps that body and reason, even with empty stores.
-It remains stale and cannot end signed-out recovery. The six cold-read regressions
+It remains stale; that failure label alone neither proves nor refuses authentication. The six cold-read regressions
 cover History and Results in workers, after worker failure, and with workers
 disabled (`JOED_FIX7_BASELINE=5b788a8`). The version adapter binds `matchMedia`
 to the browser global, preserving expiry disposal and the sweep planner's
@@ -2461,8 +2461,12 @@ receipt may go backwards. The P4 stale fixture advances server time while
 re-serving one fixed record and refreshing its independent money input; it
 does not manufacture an older receipt on the second read. P3's recovery fixture
 supplies an accepted Results record too, waits for the coordinated refresh,
-then checks that the next live account value appears. Its previous empty
-Results endpoint returned 503, which cannot prove successful recovery. All
+then checks that the next live account value appears. Fix 13 adds the Results
+503 recovery case beside that full recovery: equity 29001 becomes visible,
+controls respond again, and Results keeps its own failure reason and last-good
+receipt. Named worker/fallback reproducers cover this sequence, mixed 401s and
+regressed documents. Replay them against the previous head with
+`JOED_PRESENTATION_BASELINE=32bf68e node --test --test-name-pattern='fix13 re-sign-in' test/ui-modules.mjs`. All
 seven CI browser phases run in the same locked shell; signed-out checks retain
 failure while Results and Settings still run, and preview phases stay gated.
 

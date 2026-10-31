@@ -1438,22 +1438,36 @@ test('JOED-30 reads: the actual results worker and fallback both preserve partia
   }
 });
 
-test('JOED-173 fix12 recovery resumes live data only after the Results read also succeeds', async t => {
+for (const mode of ['worker', 'fallback']) for (const scenario of ['Results 503', 'mixed auth', 'regressed document'])
+test(`JOED-173 fix13 re-sign-in reproducer: ${scenario} / ${mode}`, async t => {
   const { createBoardSession } = await import('../public/joe/transport.js');
+  const { createBoardFreeze } = await import('../public/joe/presentation.js');
+  const { renderStatus } = await builders('results.js', ['renderStatus']);
   const session = createBoardSession();
-  const oldWorker = Object.getOwnPropertyDescriptor(globalThis, 'Worker');
-  globalThis.Worker = undefined;
-  t.after(() => { if (oldWorker) Object.defineProperty(globalThis, 'Worker', oldWorker); else delete globalThis.Worker; });
-  let expired = false, missingResults = true, rendered = null, recovery = Promise.resolve();
-  const data = structuredClone(valid.data);
+  const old = new Map(['Worker', 'self', 'document'].map(k => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+  t.after(() => { for (const [key, descriptor] of old) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; } });
+  let worker;
+  if (mode === 'worker') {
+    globalThis.self = { postMessage: (data, transfer) => worker.onmessage({ data: structuredClone(data, { transfer }) }) };
+    await import(`../public/joe/history-worker.js?fix13-${scenario}`);
+    const handle = self.onmessage;
+    globalThis.Worker = class { constructor() { worker = this; } postMessage(data) { handle({ data }); } };
+  } else globalThis.Worker = undefined;
+  const doc = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
+  globalThis.document = doc;
+  const freeze = createBoardFreeze(doc, session); t.after(freeze.stop);
+  let expired = false, recovering = false, rendered = null, recovery = Promise.resolve();
+  const data = structuredClone(valid.data), original = valid.results;
   t.mock.method(globalThis, 'fetch', async url => {
     if (expired && String(url).endsWith('state.json')) return new Response('{}', { status: 401 });
-    if (missingResults && String(url).endsWith('results.json')) return new Response('{"reason":"feed_not_received"}', { status: 503 });
+    if (recovering && scenario === 'mixed auth' && String(url).endsWith('results.json')) return new Response('{}', { status: 401 });
+    if (recovering && scenario === 'Results 503' && String(url).endsWith('results.json')) return new Response('{"reason":"feed_not_received"}', { status: 503 });
     const body = String(url).endsWith('state.json') ? { serverNow: data.receivedAt, feeds: { data: { value: data } } }
       : String(url).endsWith('history-continuity.json') ? null
       : String(url).endsWith('actions.json') ? { schema: 'inspr.joe.fleet-config.actions.v1', entries: [] }
       : String(url).endsWith('history.json') ? valid.history
-      : String(url).endsWith('fleet-config.json') ? valid['fleet-config'] : valid.results;
+      : String(url).endsWith('fleet-config.json') ? valid['fleet-config']
+      : recovering && scenario === 'regressed document' ? { ...original, seq: original.seq - 1 } : original;
     return new Response(JSON.stringify(body), { headers: { 'X-Joe-Server-Now': data.receivedAt, 'X-Joe-Received-At': data.receivedAt } });
   });
   const feed = createFeed(() => {}, () => {}, '', { session }); t.after(feed.stop);
@@ -1462,22 +1476,75 @@ test('JOED-173 fix12 recovery resumes live data only after the Results read also
       await feed.whenIdle();
       await Promise.all([feed.refresh(), feed.refreshActions()]);
       for (const route of ['account-history', 'board-settings']) session.accept(`/joe/${route}.json`, { auth: false });
-      return session.finishRecovery(() => { rendered = feed.select(); return true; });
+      return session.finishRecovery(() => { rendered = feed.select(); freeze.rendered(rendered.now); return true; });
     })();
     return recovery;
   }); t.after(stop);
   await feed.refresh();
+  assert.equal(feed.select().feeds.data.value.brokerAccount.equity.amount, '28000');
+  freeze.rendered(feed.now());
   expired = true; await feed.refreshState();
   assert.equal(session.signedOut(), true);
-  expired = false; await feed.refresh(); await recovery;
-  assert.equal(session.signedOut(), true, 'the original P3 fixture still has an unsuccessful Results read');
-  assert.equal(rendered, null);
-  missingResults = false; await feed.refresh(); await recovery;
-  assert.equal(session.signedOut(), false);
-  assert.equal(rendered.feeds.data.value.brokerAccount.equity.amount, data.brokerAccount.equity.amount);
+  recovering = true;
   data.seq++; data.brokerAccount.equity.amount = '29001';
+  expired = false; await feed.refresh(); await recovery;
+  if (scenario === 'mixed auth') {
+    assert.equal(session.signedOut(), true, 'a latest Results 401 still refuses authentication');
+    assert.equal(rendered, null);
+    assert.equal(feed.select().feeds.data.value.brokerAccount.equity.amount, '28000');
+    assert.equal(doc.getElementById('app').hasAttribute('inert'), true);
+    recovering = false; await feed.refresh(); await recovery;
+  }
+  assert.equal(session.signedOut(), false, 'a non-auth feed failure cannot keep claiming signed out');
+  assert.equal(rendered.feeds.data.value.brokerAccount.equity.amount, '29001');
+  assert.equal(doc.getElementById('signedOutBanner').hidden, true);
+  assert.equal(doc.getElementById('app').hasAttribute('inert'), false);
+  assert.equal(doc.querySelectorAll('[data-frozen]').length, 0);
+  if (scenario !== 'mixed auth') {
+    assert.equal(rendered.states.results.reason, scenario === 'Results 503' ? 'feed_not_received' : 'sequence_replayed');
+    assert.equal(rendered.feeds.results.value.seq, original.seq);
+    assert.equal(rendered.feeds.results.value.receivedAt, original.receivedAt);
+    renderStatus({ ix: true, cell: rendered.states.results });
+    assert.match(doc.getElementById('resStatus').textContent, scenario === 'Results 503'
+      ? /Results refresh failed: no data received yet\. Showing the last good results from/
+      : /Results update not used: last update repeated an old one\. Showing the last good results from/);
+    assert.doesNotMatch(doc.getElementById('resStatus').textContent, /sign.in/i);
+  }
+  recovering = false; data.seq++; data.brokerAccount.equity.amount = '29002';
   await feed.refreshState();
-  assert.equal(feed.select().feeds.data.value.brokerAccount.equity.amount, '29001', 'the recovered board accepts the next live snapshot');
+  assert.equal(feed.select().feeds.data.value.brokerAccount.equity.amount, '29002', 'normal live acceptance resumes');
+});
+
+for (const route of ['state', 'history', 'history-continuity', 'results', 'account-history', 'board-settings', 'fleet-config', 'fleet-config/actions'])
+for (const failure of ['401', '503', '404', 'network', 'validation'])
+test(`JOED-173 fix13 auth evidence: ${route} / ${failure}`, async t => {
+  const { createBoardSession } = await import('../public/joe/transport.js');
+  const s = createBoardSession(), key = `/joe/${route}.json`;
+  t.after(s.coordinateRecovery(async () => {}));
+  s.observe(key, { auth: false }); // pre-expiry evidence cannot recover a session
+  s.observe(key, { auth: true });
+  s.accept(key, failure === '401' ? { auth: true, status: 401 }
+    : failure === 'validation' ? { auth: false, status: 200 } : { status: failure === 'network' ? 0 : Number(failure) });
+  if (failure === 'validation') s.invalidateRecovery(key);
+  assert.equal(s.finishRecovery(() => true), false, 'non-auth failures alone never prove a new sign-in');
+  s.accept('/joe/another.json', { auth: false, status: 200 });
+  assert.equal(s.finishRecovery(() => true), failure !== '401', 'only a latest auth refusal keeps the freeze');
+  if (failure === '401') {
+    // The new latest response is neither proof nor refusal; the other read
+    // has already supplied positive evidence since expiry.
+    s.accept(key, { status: 503 });
+    assert.equal(s.finishRecovery(() => true), true);
+  }
+});
+
+test('JOED-173 fix13 validation does not revoke an earlier authenticated response since expiry', async t => {
+  const { createBoardSession } = await import('../public/joe/transport.js');
+  const s = createBoardSession(), key = '/joe/results.json';
+  t.after(s.coordinateRecovery(async () => {}));
+  s.observe(key, { auth: true });
+  s.accept(key, { auth: false, status: 200 });
+  s.accept(key, { auth: false, status: 200 }); s.invalidateRecovery(key);
+  assert.equal(s.finishRecovery(() => true), true);
 });
 
 for (const mode of ['worker', 'fallback']) test(`JOED-173 fix12 Results identical polling ages the original receipt, retains failures and rejects regressions: ${mode}`, async t => {
