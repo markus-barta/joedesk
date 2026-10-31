@@ -2474,6 +2474,12 @@ coordinate and verifies that changing a footer label still changes the oracle.
 The reported New York failure came from the integration shell's newer release
 coordinate, rather than a machine-zone-dependent date or time.
 
+The historical fixture also fixes its Mac platform input: its chart hint says
+`⌘-scroll`, while a real Linux reader gets `Ctrl-scroll`. The fix 12 regression
+runs that fixture from both host platforms and verifies that changing the
+modifier's rendered text still fails the exact comparison. Product platform
+detection and the stored hashes stay unchanged.
+
 `TZ=UTC node scripts/browser/signed-out-pages.mjs` runs the same whole-document
 oracle on the actual app in one headless browser, using synthetic loopback reads.
 It exercises every native auth response shape on every protected transport,

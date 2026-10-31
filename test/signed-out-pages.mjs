@@ -57,9 +57,12 @@ async function preview(t, width, shape = '401', populated = true, { html = readF
   const controls = { ...R.RS };
   Object.assign(R.RS, { period: 'week', anchor: null, sel: null, desk: 'all', cal: null, moved: false });
   R.forgetResults();
-  const old = Object.fromEntries(['document', 'matchMedia', 'localStorage', 'innerHeight', 'scrollY', 'CSS', 'window'].map(k => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+  const old = Object.fromEntries(['document', 'matchMedia', 'localStorage', 'innerHeight', 'scrollY', 'CSS', 'window', 'navigator'].map(k => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
   const doc = htmlDocument(html);
   if (!populated) {
+    // The historical oracle includes the Mac chart hint (⌘ rather than Ctrl).
+    // Fix its platform input too; every word remains in the exact comparison.
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { platform: 'MacIntel' } });
     // The non-auth oracle was captured from a941776, including this footer.
     // Fix release metadata as a harness input, like the feed timestamps:
     // JOED-174's later coordinate changed every hash, regardless of TZ.
@@ -299,6 +302,24 @@ test('JOED-173 fix11 snapshot: release coordinates are fixed inputs, with footer
   assert.equal(createHash('sha256').update(JSON.stringify(actual)).digest('hex'), hashes['390/gateway_down/desk']);
   released.doc.getElementById('versionMode').setAttribute('aria-label', 'Changed footer copy');
   assert.notDeepEqual(snapshot(released.doc, 390), expected, 'footer labels remain part of the exact comparison');
+});
+
+test('JOED-173 fix12 snapshot: host platform is a fixed input, with chart modifier copy still compared', async t => {
+  const old = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  t.after(() => { if (old) Object.defineProperty(globalThis, 'navigator', old); else delete globalThis.navigator; });
+  const hashes = JSON.parse(readFileSync(new URL('./fixtures/presentation-pages-non-auth.json', import.meta.url)));
+  for (const platform of ['Linux x86_64', 'MacIntel']) {
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { platform } });
+    const p = await preview(t, 390, '401', false);
+    const rendered = p.render(p.context('gateway_down'), 'desk');
+    assert.match(rendered.regions.acctHero, /⌘ -scroll/);
+    const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+    assert.equal(hash(rendered), hashes['390/gateway_down/desk'], platform);
+    p.doc.querySelector('#acctNote .mod-key').textContent = 'Ctrl';
+    assert.notEqual(hash(snapshot(p.doc, 390)), hash(rendered), 'the chart modifier remains part of the oracle');
+    p.close();
+    assert.equal(globalThis.navigator.platform, platform, 'the historical fixture restores its host input');
+  }
 });
 
 test('JOED-173 fix3 snapshot: complete non-auth pages keep exact text, labels and titles', async t => {
