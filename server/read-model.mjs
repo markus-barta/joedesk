@@ -41,6 +41,12 @@ function fieldReasons(data, name) {
   return reasons;
 }
 const exactnessFailure = (data, name) => fieldReasons(data, name).some(reason => NOT_EXACT_REASONS.has(reason));
+function unavailableSource(source, reason) {
+  // Conversion proof belongs only to an available source. Keep the original
+  // feed/last-good evidence intact while removing it from a demoted projection.
+  const { fx, ...evidence } = source;
+  return { ...evidence, status: 'unavailable', reason: reason ?? 'family_projection_unavailable' };
+}
 // Legacy producers may attach retained_values to a non-null amount. Only a
 // previously verified observation can fill that unavailable current input.
 function policyPanels(feeds, now, previous = {}) {
@@ -396,12 +402,12 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
         value.brokerAccount.cash = null; (value.brokerAccount.reasons ??= {}).cash = projection.paperCash.reason;
       }
       for (const [period, field] of [['day', 'dayPnl'], ['open', 'openPnl']]) {
-        if (value.pnlSources?.[period] && state.feed.value.totals[field] != null && value.totals[field] == null) value.pnlSources[period] = {
-          ...value.pnlSources[period], status: 'unavailable', reason: value.totals.reasons?.[field] ?? 'family_projection_unavailable' };
+        if (value.pnlSources?.[period] && state.feed.value.totals[field] != null && value.totals[field] == null)
+          value.pnlSources[period] = unavailableSource(value.pnlSources[period], value.totals.reasons?.[field]);
         for (const desk of value.desks) {
           const original = state.feed.value.desks.find(d => d.id === desk.id);
-          if (desk.pnlSources?.[period] && original.money[field] != null && desk.money[field] == null) desk.pnlSources[period] = {
-            ...desk.pnlSources[period], status: 'unavailable', reason: desk.money.reasons?.[field] ?? 'family_projection_unavailable' };
+          if (desk.pnlSources?.[period] && original.money[field] != null && desk.money[field] == null)
+            desk.pnlSources[period] = unavailableSource(desk.pnlSources[period], desk.money.reasons?.[field]);
         }
       }
       if (value.positions && projection.positions.state === 'broken' &&
