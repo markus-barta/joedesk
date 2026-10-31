@@ -2357,6 +2357,114 @@ interaction, one announcement per transition, silent ticks, and recovery.
 Full and browser validation runs on agm2 CI; local work runs only syntax,
 the small unit file, and `git diff --check`.
 
+Expired browser sign-in freezes the board at its last successful render. The
+banner says **Signed out — data as of HH:MM:SS (Vienna), not updating — reload to
+sign in**, using the last rendered data document’s timestamp, and offers Reload.
+A visible **Last known — signed out** label describes the main region through
+`aria-describedby`. Each price/value section and every section header, including
+collapsed Positions and Kept holdings, says **Stale · not updating**. The
+calendar month total is marked and muted too. Values are muted and the board
+is desaturated. Freshness dots/halos disappear,
+animation classes are removed, and no clocks, ages or countdowns advance.
+Figures, comparisons, diagnostic text and draft form values stay intact.
+
+The entire board is `inert`, with the banner outside it. Expiry closes native
+modals, chart inspectors and popovers so Reload remains reachable. Pending
+chart touch/long-press timers, animation frames, tip dismissals and version-copy
+feedback are cancelled. Late clipboard results cannot create fallback UI.
+Capture guards also reject synthetic board input, including hover, focus,
+keyboard, wheel and Safari gestures. System appearance changes defer repainting
+until recovery. Address changes retain the latest route and follow it after
+recovery.
+
+The shared page/worker transport recognizes SSO 302/303 redirects, opaque and
+followed cross-origin redirects, 401/403, and successful HTML instead of JSON.
+Auth responses are rejected before store acceptance. Fleet submission uses this
+same boundary and freezes before any submission-error rendering; account-start
+writes stay guarded. Writes in flight at expiry are abandoned for the UI, even
+if they finish after recovery. Account-start recovery refetches the saved value
+without waiting for an abandoned POST; its late response cannot replace that
+read or show a success/error message. Every read continues polling while signed
+out, including account history independently of the active page and the fleet
+action log.
+
+Any authenticated success can initiate recovery. The shell waits for pending
+reads, refreshes every feed plus account history and board settings, then
+renders fresh data synchronously before removing the stale markings or inert
+state. Every protected read must have an authenticated success after the freeze:
+state, history, continuity, results, account history, board settings, fleet
+settings and the fleet action log. A feed still failing authentication, or one
+without that success, keeps the board frozen. A later non-auth failure after
+authenticated success contributes its normal honest failure reason to the
+recovered page. Invalid documents invalidate that feed’s recovery evidence.
+History/results workers keep the first recovering document
+and invalidate unchanged-response hints for complete refreshes. The displayed
+selection and server-anchored clock stay fixed until recovery commits. A proxy’s
+5xx HTML, invalid JSON, contract failures, missing routes and network failures
+retain their existing behavior outside sign-out.
+
+`test/signed-out-pages.mjs` uses the actual page renderers and `index.html` at
+390 and 1440 px, with populated account history, dirty Settings, Results and
+History events. Its oracle serializes the entire retained body, including hidden
+markup, all attributes, titles, accessible names and live form properties. Only
+the explicit board/section freeze attributes and saved animation-class marking
+normalize. Transient controls are audited separately; retained data equality is exact;
+there is no phrase denylist or selected-value allowlist. The matrix covers all
+37 reasons, nine auth shapes, four pages, 401→503 retention, elapsed time and
+recovery. Named tests retain the earlier review reproducers, including session
+bars, position counts, the account’s 1M change and Since start comparison,
+phone learning and aggregate kept worth. Oracle mutation tests reject arbitrary
+new wording, changed inputs and vanished values. The historical non-auth page
+hashes from `a941776` and builder hashes from `fa6db1d` remain unchanged.
+`node --test test/signed-out-fix5.mjs` adds named inert/modal, hover/focus/key,
+pre-expiry timer, fleet-write, worker-document, route, appearance and recovery
+regressions, including validated snapshots with a recorded server rejection.
+`test/signed-out-fix6.mjs` covers per-feed recovery evidence, account-history
+failures before and after authenticated success, abandoned writes, collapsed
+section headers, copy callbacks and exact non-auth submission error wording.
+It also exercises page/worker recovery using in-process messages and actual
+Node worker threads, plus late-success and failed-notification recovery races.
+The `d83f7ff` replay uses in-memory source hooks; no baseline checkout is edited.
+History and Results worker replies report each feed's explicit authenticated
+success, authentication refusal, or failure reason. Recovery requires a validated
+document whose sequence and receipt do not regress, with no current feed failure.
+While frozen, the worker sends full documents on every attempt; unchanged replies
+outside recovery still carry their reason and document receipt. A message's arrival
+alone never proves recovery. `test/signed-out-fix7.mjs` exercises both discarded-cache
+reproducers in real worker threads (replay with `JOED_FIX7_BASELINE=9eb2482`), the
+history/results × worker/fallback × newer/replay/receipt-regression/401/503/malformed
+× frozen/live matrix, equal-document
+recovery, receipt regressions, and failures that revoke an earlier recovery success.
+The worker, page reply handler and main-thread fallback share `acceptRecovery`:
+authenticated success, no feed failure, and neither sequence nor receipt older
+than the retained document. A worker crash cannot reset that ordering floor or
+discard the page's last good values when the first fallback read fails. Named
+History and Results regressions replay the crash followed by a higher sequence
+with an older receipt (`JOED_FIX7_BASELINE=58770a9`).
+Document retention separately compares the actual sequence and receipt: an
+authenticated 200 carrying a validated last-good body with a server-reported
+`sequence_replayed` reason keeps that body and reason, even with empty stores.
+It remains stale and cannot end signed-out recovery. The six cold-read regressions
+cover History and Results in workers, after worker failure, and with workers
+disabled (`JOED_FIX7_BASELINE=5b788a8`). The version adapter binds `matchMedia`
+to the browser global, preserving expiry disposal and the sweep planner's
+literal-query boundary inventory without changing the pinned vendor bundle.
+
+`TZ=UTC node scripts/browser/signed-out-pages.mjs` runs the same whole-document
+oracle on the actual app in one headless browser, using synthetic loopback reads.
+It exercises every native auth response shape on every protected transport,
+including workers, plus opaque redirects independently on each endpoint. A
+controlled monotonic clock invokes the actual registered page timer callbacks
+125 seconds later to cross minute boundaries without suspending worker event
+loops. The browser audit also exercises chart hover/focus/keys/wheel, an open
+native modal, Reload reachability, per-section stale marks and muted values,
+removed animation classes, queued routes and refresh-before-unmark ordering. Followed cross-origin redirects, which native
+`redirect: manual` prevents, are covered at the shared transport boundary in
+unit tests. CI runs this under its existing browser lock; `finally` closes the
+owned browser and fixture server. P3’s `signed-out` group also checks the full
+retained document, a real Reload and recovery at its standard widths/themes:
+`JOED_P3_ONLY=signed-out node scripts/browser-p3.mjs`.
+
 The following paragraph records the earlier header presentation and its
 historical evidence; JOED-70 supersedes its header wording and layout.
 

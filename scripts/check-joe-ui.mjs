@@ -61,16 +61,17 @@ for (const [name, text] of modules) {
     facade.replace(/export\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"]\s*;/g, '').trim() === '',
     'board-settings.js: only Settings may access saves; the page facade exports only the named read APIs and validation');
   const display = files[DISPLAY_WRITER] ?? '';
-  required(/fetcher\('\.\/board-settings\.json',/.test(display) && /request\('POST', value\)/.test(display), 'board-settings-write.js: display writes stay on the board settings route');
+  required(/readJSON\('\.\/board-settings\.json',/.test(display) && /request\('POST', value\)/.test(display), 'board-settings-write.js: display writes stay on the board settings route through the shared transport');
   required(/validateBoardSettings\(value\)/.test(display) && /credentials: 'same-origin'/.test(display), 'board-settings-write.js: validated same-origin display writes');
   required(!/\/inbox|fleet-config\/propagate/.test(display), 'board-settings-write.js: display settings never write feeds or fleet policy');
 }
 {
   const writer = files[WRITER] ?? '';
-  required((writer.match(/fetch\(/g) ?? []).length === 1 && (writer.match(/method:\s*['"`]POST['"`]/g) ?? []).length === 1, `${WRITER}: exactly one request, a POST`);
-  required(/const ROUTE = '\.\/fleet-config\/propagate';/.test(writer) && /fetch\(ROUTE,/.test(writer), `${WRITER}: the request goes only to the propagate route`);
+  required((writer.match(/readJSON\(/g) ?? []).length === 1 && !/\bfetch\(/.test(writer) && (writer.match(/method:\s*['"`]POST['"`]/g) ?? []).length === 1, `${WRITER}: exactly one request, a POST`);
+  required(/const ROUTE = '\.\/fleet-config\/propagate';/.test(writer) && /readJSON\(ROUTE,/.test(writer), `${WRITER}: the request goes only to the propagate route`);
   required(/config\.mode !== 'paper'/.test(writer) && /config\.rev !== baseRev/.test(writer) && /throw new Error/.test(writer), `${WRITER}: a non-paper draft, or one not based on the version it names, is refused before any request`);
   required(!/\/inbox/.test(writer), `${WRITER}: never the inbox`);
+  required(/boardSession\.accept\('\/joe\/fleet-config\.json', response\)/.test(writer), `${WRITER}: auth classification precedes submission UI and recovery requires the fleet read`);
 }
 for (const [name, text] of modules) {
   required(!/\bmode\s*[:=]\s*['"`](live|LIVE)['"`]/.test(text) && !/\.mode\s*=\s*(?!['"`]paper['"`])['"`]/.test(text), `${name}: no code path sets a live mode`);

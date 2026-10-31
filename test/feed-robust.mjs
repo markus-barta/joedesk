@@ -4,6 +4,9 @@ import { test } from 'node:test';
 import './fixtures/preview-dom.mjs';
 const { createFeed } = await import('../public/joe/feed.js');
 const { statusPresentation } = await import('../public/joe/health.js');
+const { readJSON, createBoardSession, boardSession } = await import('../public/joe/transport.js');
+const { createBoardSettings } = await import('../public/joe/board-settings-write.js');
+const { history: accountHistory } = await import('./fixtures/account-fixtures.mjs');
 
 function property(t, key, value) {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
@@ -203,4 +206,181 @@ test('JOED-130 timeouts retain warm values and ignore late bodies before a clean
   for (const value of Object.values(feed.feeds)) assert.equal(value.reason, null);
   assert.equal(feed.feeds.data.value.receivedAt, stamp);
   assert.equal(clock.deadlines.size, 0);
+});
+
+const authResponses = {
+  '302 to SSO': () => new Response(null, { status: 302, headers: { Location: 'https://auth.inspr.at/sign-in' } }),
+  '303 to SSO': () => new Response(null, { status: 303, headers: { Location: 'https://auth.inspr.at/sign-in' } }),
+  opaqueredirect: () => ({ type: 'opaqueredirect', status: 0 }),
+  '401': () => new Response('{}', { status: 401 }),
+  '403': () => new Response('{}', { status: 403 }),
+  'HTML content type': () => new Response('<h1>Sign in</h1>', { headers: { 'Content-Type': 'text/html; charset=utf-8' } }),
+  'HTML body': () => new Response(' \n<!doctype html><html><body>Sign in</body></html>', { headers: { 'Content-Type': 'application/json' } }),
+  'HTML fragment': () => new Response('<form action="/login">Sign in</form>'),
+  'followed cross-origin redirect': () => ({ status: 200, redirected: true, url: 'https://auth.inspr.at/sign-in', headers: new Headers(), json: async () => ({}) }),
+};
+
+for (const [name, response] of Object.entries(authResponses)) test(`JOED-173 protected board settings freezes before store acceptance: ${name}`, async t => {
+  property(t, 'Worker', undefined);
+  let refused = false, fail503 = false;
+  const good = { accountStart: { amountEur: 100000, date: '2026-01-01' }, reason: null };
+  t.mock.method(globalThis, 'fetch', async url => String(url).endsWith('board-settings.json')
+    ? fail503 ? new Response('{}', { status: 503 }) : refused ? response() : new Response(JSON.stringify(good)) : reply(url));
+  const feed = createFeed(() => {}, () => {}, '', { session: boardSession });
+  const settings = createBoardSettings();
+  t.after(() => { feed.stop(); boardSession.observe('/joe/board-settings.json', { auth: false }); });
+  await feed.refresh(); await settings.refresh(); const before = settings.snapshot(), selected = feed.select();
+  refused = true; await settings.refresh();
+  assert.equal(feed.signedOut(), true); assert.deepEqual(settings.snapshot(), before); assert.equal(feed.select(), selected);
+  fail503 = true; await settings.refresh(); await feed.refresh();
+  assert.equal(feed.signedOut(), true); assert.deepEqual(settings.snapshot(), before);
+  assert.equal((await settings.save({ accountStart: null })).ok, false, 'frozen display never grants write permission');
+  refused = fail503 = false; await settings.refresh();
+  assert.equal(feed.signedOut(), false); assert.deepEqual(settings.snapshot(), before);
+});
+
+test('JOED-173 fix1 Medium: HTTP 200 history_compacted metadata stays accepted in worker and page', async t => {
+  let worker;
+  const history = { ...fixture.history, reason: 'history_compacted', compactedThrough: fixture.history.points[0].t };
+  const messages = [];
+  property(t, 'self', { postMessage(data) { messages.push(data); worker.onmessage({ data }); } });
+  await import('../public/joe/history-worker.js?joed173-fix1-compacted');
+  const handle = self.onmessage;
+  const workerClass = class { constructor() { worker = this; } postMessage(data) { handle({ data }); } };
+  property(t, 'Worker', workerClass);
+  t.mock.method(globalThis, 'fetch', async url => String(url).endsWith('history.json') ? new Response(JSON.stringify(history)) : reply(url));
+  for (const mode of ['worker', 'page']) {
+    globalThis.Worker = mode === 'worker' ? workerClass : undefined;
+    const feed = createFeed(() => {});
+    t.after(feed.stop);
+    await feed.refresh();
+    assert.equal(feed.feeds.history.reason, null, `${mode}: successful metadata is not a feed failure`);
+    assert.equal(feed.feeds.history.value.reason, 'history_compacted');
+    assert.equal(feed.feeds.history.value.compactedThrough, history.compactedThrough);
+    assert.equal(feed.select().states.history.retained, false);
+  }
+  assert.equal(messages.find(m => m.kind === 'history').reason, null);
+});
+
+test('JOED-173 fix1 Medium: transport is registered in package modules and pinned in the page import map', () => {
+  const source = file => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+  const modules = text => JSON.parse(text.match(/const UI_MODULES = (\[[\s\S]*?\]);/)[1]);
+  const server = modules(source('server.mjs')), checker = modules(source('scripts/check-package.mjs'));
+  assert.ok(checker.includes('transport.js'), 'package checker registers transport');
+  assert.deepEqual(checker.toSorted(), server.toSorted());
+  const map = JSON.parse(source('public/joe/index.html').match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]);
+  const pkg = JSON.parse(source('package.json'));
+  assert.equal(map.imports['/joe/transport.js'], `/joe/transport.js?v=${pkg.version}`);
+});
+
+for (const route of ['state.json', 'history.json', 'results.json', 'account-history.json', 'healthz']) {
+  for (const [name, response] of Object.entries(authResponses)) test(`JOED-173 shared boundary: ${route}, ${name}`, async t => {
+    t.mock.method(globalThis, 'fetch', async (_url, init) => { assert.equal(init.redirect, 'manual'); return response(); });
+    const res = await readJSON(`https://board.example/joe/${route}`);
+    assert.equal(res.auth, true);
+    assert.equal(res.payload, undefined, 'sign-in responses never become documents');
+  });
+}
+
+for (const route of ['state.json', 'history.json', 'history-continuity.json', 'results.json', 'fleet-config.json', 'fleet-config/actions.json']) {
+  test(`JOED-173 freeze, 503 after 401 and recovery: ${route}`, async t => {
+    const clock = scheduler(t); property(t, 'Worker', undefined);
+    let refused = false, fail503 = false;
+    t.mock.method(globalThis, 'fetch', async url => fail503 ? new Response('{}', { status: 503 })
+      : refused && String(url).endsWith(route) ? authResponses['401']() : reply(url));
+    const feed = createFeed(() => {}); t.after(feed.stop);
+    await feed.refresh(); await feed.refreshActions();
+    const selected = feed.select();
+    const stores = structuredClone(feed.feeds);
+    refused = true; await feed.refresh(); await feed.refreshActions();
+    assert.equal(feed.signedOut(), true); assert.equal(feed.select(), selected);
+    assert.ok(Object.values(feed.feeds).every(f => f.reason !== 'auth_required'), 'no auth failure enters a feed');
+    fail503 = true; const frozenStores = structuredClone(feed.feeds);
+    clock.advance(125000); await feed.refresh(); await feed.refreshActions();
+    assert.equal(feed.select(), selected); assert.deepEqual(feed.feeds, frozenStores);
+    assert.equal(feed.now(), selected.now, 'the anchored presentation clock is frozen');
+    assert.deepEqual(selected.feeds, stores, 'no value, reason or receipt in last rendered selection changes');
+    refused = fail503 = false; await feed.refresh(); await feed.refreshActions();
+    assert.equal(feed.signedOut(), false); assert.notEqual(feed.select(), selected);
+    clock.advance(2000); const resumed = feed.select(); clock.advance(1000);
+    assert.notEqual(feed.select().now, resumed.now, 'clock resumes');
+  });
+}
+
+test('JOED-173 a session recovers per endpoint; unrelated successes and network errors cannot clear it', () => {
+  const session = createBoardSession();
+  let changes = 0;
+  const stop = session.subscribe(() => changes++);
+  session.observe('state', { auth: true }); session.observe('healthz', { auth: true });
+  session.observe('history', { auth: false }); session.observe('state', { status: 0 });
+  assert.equal(session.signedOut(), true);
+  session.observe('state', { auth: false });
+  assert.equal(session.signedOut(), true);
+  session.observe('healthz', { auth: false });
+  assert.equal(session.signedOut(), false);
+  assert.equal(changes, 2, 'only board-level transitions announce');
+  stop();
+});
+
+for (const route of ['history.json', 'history-continuity.json', 'results.json']) test(`JOED-173 actual history worker reports auth and recovery: ${route}`, async t => {
+  let worker, refused = false;
+  property(t, 'self', { postMessage(data) { worker.onmessage({ data }); } });
+  await import(`../public/joe/history-worker.js?joed173-${route}`);
+  const handle = self.onmessage;
+  property(t, 'Worker', class { constructor() { worker = this; } postMessage(data) { handle({ data }); } });
+  t.mock.method(globalThis, 'fetch', async url => refused && String(url).endsWith(route) ? authResponses['HTML body']() : reply(url));
+  const feed = createFeed(() => {});
+  t.after(feed.stop);
+  await feed.refresh();
+  refused = true; await feed.refresh();
+  assert.equal(feed.signedOut(), true);
+  refused = false; await feed.refresh();
+  assert.equal(statusPresentation(feed.select()).reason, 'board_ok');
+  await feed.refresh();
+  assert.equal(statusPresentation(feed.select()).reason, 'board_ok', 'unchanged worker replies preserve recovered sign-in');
+});
+
+for (const mode of ['page', 'worker']) test(`JOED-173 account history ${mode} participates in the board session`, async t => {
+  let handle, send, refused = false;
+  property(t, 'Worker', undefined);
+  const { refreshAccountHistory, forgetAccountHistory } = await import(`../public/joe/account.js?joed173-${mode}`);
+  if (mode === 'worker') {
+    property(t, 'self', { postMessage(data) { handle.onmessage({ data }); } });
+    await import('../public/joe/account-worker.js?joed173');
+    send = self.onmessage;
+    property(t, 'JoeVersion', { APP_VERSION: 'test' });
+  }
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (String(url).endsWith('account-history.json')) return refused ? authResponses['HTML body']() : new Response(JSON.stringify(accountHistory()));
+    return reply(url);
+  });
+  // Feed uses the application's shared session here; ordinary feeds have
+  // independent sessions so a different board instance cannot contaminate it.
+  const feed = createFeed(() => {}, () => {}, '', { session: boardSession });
+  if (mode === 'worker') globalThis.Worker = class { constructor() { handle = this; } postMessage(data) { send({ data }); } };
+  t.after(() => { feed.stop(); boardSession.observe('/joe/account-history.json', { auth: false }); forgetAccountHistory(); });
+  await feed.refresh(); await refreshAccountHistory();
+  refused = true; await refreshAccountHistory();
+  assert.equal(feed.signedOut(), true);
+  await feed.refresh();
+  assert.equal(feed.signedOut(), true, 'main feed cannot clear an account read failure');
+  refused = false; await refreshAccountHistory();
+  assert.equal(statusPresentation(feed.select()).reason, 'board_ok');
+});
+
+for (const [name, response, expected] of [
+  ['proxy HTML', () => new Response('<html>Bad gateway</html>', { status: 503, headers: { 'Content-Type': 'text/html' } }), 'refresh_failed'],
+  ['invalid JSON', () => new Response('{bad json'), 'refresh_failed'],
+  ['invalid data', () => new Response('{}'), 'refresh_failed'],
+  ['network down', () => { throw new TypeError('offline'); }, 'refresh_failed'],
+  ['missing route', () => new Response('{}', { status: 404 }), 'route_not_found'],
+]) test(`JOED-173 non-auth failure stays honest: ${name}`, async t => {
+  property(t, 'Worker', undefined);
+  let fail = false;
+  t.mock.method(globalThis, 'fetch', async url => fail && String(url).endsWith('state.json') ? response() : reply(url));
+  const feed = createFeed(() => {});
+  t.after(feed.stop);
+  await feed.refresh(); fail = true; await feed.refresh();
+  assert.equal(feed.feeds.data.reason, expected);
+  assert.notEqual(statusPresentation(feed.select()).reason, 'signed-out');
 });

@@ -433,6 +433,7 @@ export function drawChart(el, o) {
   if (!tip || !o.tipFmt) { el.onpointermove = null; el.onpointerleave = null; return scale; }
   const xh = el.querySelector('.xh'), xds = [...el.querySelectorAll('.xd')], xcs = [...el.querySelectorAll('.xc')];
   const show = (xv, announce = false) => {
+    if (el.closest('[inert]')) return;
     const near = o.hitTest ? o.hitTest(xv) : hits.map(i => {
       let best = null;
       for (const p of o.series[i].pts) if (p.v !== null && p.v !== undefined && (!best || Math.abs(p.x - xv) < Math.abs(best.x - xv))) best = p;
@@ -466,8 +467,9 @@ export function drawChart(el, o) {
     tip.style.top = `${Math.max(0, Math.min(H - th, (anchor ? Y(anchor.v) : pad.t + ph / 2) - th - 10))}px`;
   };
   // A hidden tip goes back to the corner so it can never widen the page.
-  const hide = () => { tip.classList.remove('on'); tip.style.left = '0px'; tip.style.top = '0px'; xh.setAttribute('visibility', 'hidden'); [...xds, ...xcs].forEach(d => d.setAttribute('visibility', 'hidden')); };
+  const hide = () => { if (el.closest('[inert]')) return; tip.classList.remove('on'); tip.style.left = '0px'; tip.style.top = '0px'; xh.setAttribute('visibility', 'hidden'); [...xds, ...xcs].forEach(d => d.setAttribute('visibility', 'hidden')); };
   const inspectAt = clientX => {
+    if (el.closest('[inert]')) return;
     const r = el.getBoundingClientRect(), mx = clientX - r.left, xv = x0 + (mx - pad.l) / pw * (x1 - x0);
     if (mx < pad.l - 4 || mx > pad.l + pw + 4) return false;
     cursor.active = false;
@@ -476,6 +478,7 @@ export function drawChart(el, o) {
     return true;
   };
   el.onpointermove = e => {
+    if (el.closest('[inert]')) return;
     if (o.isPanning?.()) return;
     if (e.target.closest?.('.hist-status, .mini-label')) { el.onpointerleave(); return; }
     if (!inspectAt(e.clientX)) el.onpointerleave();
@@ -488,11 +491,12 @@ export function drawChart(el, o) {
     el.setAttribute('tabindex', '0');
     let index = points.findIndex(x => cursor.x !== null && x >= cursor.x);
     if (index < 0) index = cursor.x === null ? 0 : points.length - 1;
-    const inspect = () => { cursor.active = true; cursor.x = points[index]; show(cursor.x, true); };
-    const dismiss = () => { cursor.active = false; hide(); if (live) live.textContent = ''; };
-    el.onfocus = () => { if (el.matches(':focus-visible')) inspect(); };
+    const inspect = () => { if (el.closest('[inert]')) return; cursor.active = true; cursor.x = points[index]; show(cursor.x, true); };
+    const dismiss = () => { if (el.closest('[inert]')) return; cursor.active = false; hide(); if (live) live.textContent = ''; };
+    el.onfocus = () => { if (!el.closest('[inert]') && el.matches(':focus-visible')) inspect(); };
     el.onblur = dismiss;
     el.onkeydown = e => {
+      if (el.closest('[inert]')) return;
       if (e.target !== el || e.altKey || e.ctrlKey || e.metaKey) return;
       // Shift with an arrow, Home or End moves the shown window instead (the caller's).
       if (e.shiftKey && /^(Arrow|Home$|End$)/.test(e.key)) return;

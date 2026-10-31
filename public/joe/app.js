@@ -5,10 +5,13 @@ import { isCanonicalJoeHost } from './host.js';
 import { SCREENS, parseRoute, routeHash, sameRoute, historyStep, linkRoute, onRoute, applyRoute, onAddress, writeRoute, createPlaces } from './route.js';
 import { $, $$, icon, initTips, isPhone, trapDialogs, fromPointer, patch, fitStatusLine } from './ui.js';
 import { createFeed } from './feed.js';
+import { boardSession } from './transport.js';
+import { refreshBoardSettings } from './board-settings.js';
+import { createBoardFreeze } from './presentation.js';
 import { createObservedEvents } from './events.js';
-import { renderDesk, headerHealth, healthPop, forgetCharts, toggleDeskDisclosure, initBarTaps } from './desk.js';
-import { initAccount, renderAccount } from './account.js';
-import { renderHistory, historyChart, HS, historyPreset, toggleFollow, initHistoryInput, initHistoryControls, historyQuery, readHistoryRoute } from './history.js';
+import { renderDesk, headerHealth, healthPop, forgetCharts, toggleDeskDisclosure, initBarTaps, cancelBarInteractions } from './desk.js';
+import { initAccount, renderAccount, refreshAccountHistory, pollAccountHistory, accountHistoryIdle, cancelInteractions as cancelAccountInteractions } from './account.js';
+import { renderHistory, historyChart, HS, historyPreset, toggleFollow, initHistoryInput, initHistoryControls, historyQuery, readHistoryRoute, cancelInteractions as cancelHistoryInteractions } from './history.js';
 import { renderResults, RS, stepPeriod, choosePeriod, chooseDesk, selectDay, showMonth, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText, requestResultsRoute, resultsUrl } from './results.js';
 import { boardHealthPresentation } from './health.js';
 import { sinceStarts } from './performance.js';
@@ -31,6 +34,18 @@ if (!isCanonicalJoeHost(location.hostname)) {
 }
 
 function start() {
+  const freeze = createBoardFreeze(document, boardSession, { cancelInteractions: () => {
+    cancelAccountInteractions(); cancelHistoryInteractions(); cancelBarInteractions(); tips.cancel();
+  } });
+  let recoveringRender = false, queuedRoute = null;
+  // Keep reading/scrolling available, but a frozen board cannot edit a draft,
+  // open a live explanation or navigate into a renderer until sign-in recovers.
+  const blockFrozenInput = event => {
+    if (!freeze.frozen() || !event.target.closest?.('#app')) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+  };
+  for (const type of ['click', 'beforeinput', 'paste', 'cut', 'drop', 'input', 'change', 'submit', 'pointerdown', 'pointerup', 'pointercancel', 'pointermove', 'pointerover', 'pointerout', 'pointerleave', 'focus', 'blur', 'focusin', 'focusout', 'wheel', 'gesturestart', 'gesturechange', 'gestureend', 'keydown', 'keyup'])
+    document.addEventListener(type, blockFrozenInput, true);
   // The header keeps one row. While its last control, the theme button, does
   // not fit, add the next step (app.css: the wordmark goes, the nav drops its
   // icons, gaps tighten, the nav keeps only its icons, then the light may
@@ -41,6 +56,7 @@ function start() {
   const FIT = ['word', 'labels', 'tight', 'icons', 'squeeze'];
   const overflows = () => themeBtn.getBoundingClientRect().right > header.getBoundingClientRect().right - parseFloat(getComputedStyle(header).paddingRight) + 0.02;
   const fitHeader = () => {
+    if (freeze.frozen()) return;
     let steps = 0;
     header.dataset.fit = '';
     while (steps < FIT.length && overflows()) header.dataset.fit = FIT.slice(0, ++steps).join(' ');
@@ -57,17 +73,21 @@ function start() {
   fitHeader();
   trapDialogs();
   initAccount();
+  setInterval(pollAccountHistory, 15000);
   const events = createObservedEvents();
   let lastData = null, frame = 0, pending = null, dirtyHistory = true;
   const feed = createFeed(kind => {
     if (kind === 'history') dirtyHistory = true;
     schedule(kind);
   }, (reason, ms) => { timings.push({ reason, ms, at: performance.now() }); if (timings.length > 200) timings.shift(); }, globalThis.JoeVersion.APP_VERSION,
-  { actionsWanted: () => screen === 'settings' });
+  { actionsWanted: () => screen === 'settings', session: boardSession });
   const tips = initTips({ now: () => feed.now(), since: () => sinceStarts(feed.feeds) });
   initBarTaps();
-  // Read-only: fetches the same three reads now instead of at the next poll.
-  window.__joedesk.refresh = () => feed.refresh();
+  // Read-only refresh hooks; a named read also allows transport isolation.
+  window.__joedesk.refresh = kind => {
+    const read = { state: feed.refreshState, history: feed.refreshHistory, results: feed.refreshResults, fleet: feed.refreshFleet, actions: feed.refreshActions }[kind];
+    return read ? read() : Promise.all([feed.refresh(), feed.refreshActions()]);
+  };
   window.__joedesk.worker = () => feed.usesWorker();
 
   // Every render has a selection: before the server's clock is known, each
@@ -76,12 +96,13 @@ function start() {
 
   function guard(name, fn) {
     try { return fn(); } catch (error) {
+      renderFailed = true;
       console.error(`render ${name} failed`, error);
       return null;
     }
   }
 
-  let announcedStatus = null;
+  let announcedStatus = null, renderFailed = false;
   function renderHeader(ctx) {
     const health = boardHealthPresentation(ctx.states, ctx.feeds, ctx.now);
     const head = headerHealth(ctx, health);
@@ -96,6 +117,7 @@ function start() {
     }
     if (root.dataset.joeState !== health.statusTone) root.dataset.joeState = health.statusTone;
     const alert = $('#statusAlert');
+    if (alert.dataset.reason !== health.reason) alert.dataset.reason = health.reason;
     if (alert.dataset.tone !== health.statusTone) alert.dataset.tone = health.statusTone;
     const use = alert.querySelector('use'), href = health.statusTone === 'warn' ? '#i-half' : '#i-stop';
     if (use.getAttribute('href') !== href) use.setAttribute('href', href);
@@ -112,6 +134,8 @@ function start() {
 
   function render(reason) {
     frame = 0;
+    if (freeze.sync() && !recoveringRender) { root.dataset.ready = '1'; return; }
+    renderFailed = false;
     const started = performance.now();
     const ctx = context();
     const data = ctx.feeds.data?.value ?? null;
@@ -135,6 +159,8 @@ function start() {
       if (timings.length > 200) timings.shift();
     }
     if (feed.settled()) root.dataset.ready = '1';
+    if (!renderFailed) freeze.rendered(ctx.feeds.data?.value?.generatedAt ?? ctx.now);
+    return !renderFailed;
   }
 
   function schedule(reason = 'tick') {
@@ -176,6 +202,7 @@ function start() {
     return true;
   });
   function go(next, { anchor = null, query = '', push = false, scroll = 0 } = {}) {
+    if (freeze.frozen() && !recoveringRender) return;
     if (!SCREENS.includes(next)) { next = 'desk'; anchor = null; query = ''; }
     // The reader's own way onto the screen already shown (its nav button, the
     // gear, a bare link or anchor) asks for that screen as it is: it keeps the
@@ -200,9 +227,10 @@ function start() {
     dirtyHistory = true; forgetCharts(); forgetResults();
     if (next === 'settings') feed.refreshActions();
     if (!asIs) guard('route', () => applyRoute(target));
-    render('screen');
+    const rendered = render('screen');
     if (next === 'settings' && SETTINGS_SECTIONS.some(s => s.id === anchor)) { places.abandon(); showSection(anchor); }
     else if (anchor) { places.abandon(); document.getElementById(anchor)?.scrollIntoView({ block: 'start' }); } else places.arrive(scroll);
+    return rendered;
   }
 
   // The board details are a dialog: opening moves focus into it, Tab stays
@@ -235,6 +263,7 @@ function start() {
   const focusables = el => $$('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])', el).filter(n => !n.disabled && n.getClientRects().length);
 
   document.addEventListener('click', e => {
+    if (e.target.closest('[data-sign-in-reload]')) { location.reload(); return; }
     const disclosure = e.target.closest('[data-desk-disclosure]');
     if (disclosure) {
       tips.hide();
@@ -347,6 +376,7 @@ function start() {
   // Back and Forward fire both events; the second finds the entry taken up.
   const follow = () => {
     const moved = places.step(), next = parseRoute(location.hash);
+    if (freeze.frozen()) { queuedRoute = { ...next, scroll: places.saved() }; return; }
     if (!moved && next.known && !next.anchor && sameRoute(next, shown)) return;
     go(next.screen, { anchor: next.anchor, query: next.query, scroll: places.saved() });
   };
@@ -355,7 +385,7 @@ function start() {
   let resize = 0;
   addEventListener('resize', () => { cancelAnimationFrame(resize); resize = requestAnimationFrame(() => { forgetCharts(); forgetResults(); dirtyHistory = true; render('resize'); }); });
   // With System chosen the page follows the OS live (CSS); the header button's words follow too.
-  matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { syncThemeButton(); schedule('theme'); });
+  matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { if (!boardSession.signedOut()) { syncThemeButton(); schedule('theme'); } });
 
   // Numbers never part from their units, in static and rendered text alike.
   const fixUnits = (node, phone) => {
@@ -385,5 +415,18 @@ function start() {
   places.step();
   const first = parseRoute(location.hash || '#desk');
   go(first.screen, { anchor: first.anchor, query: first.query, scroll: places.saved() });
+  boardSession.coordinateRecovery(async () => {
+    await Promise.all([feed.whenIdle(), accountHistoryIdle()]);
+    await Promise.all([feed.refresh(), feed.refreshActions(), refreshAccountHistory(), refreshBoardSettings()]);
+    boardSession.finishRecovery(() => {
+      recoveringRender = true;
+      try {
+        syncThemeButton();
+        forgetCharts(); forgetResults(); dirtyHistory = true;
+        const route = queuedRoute; queuedRoute = null;
+        return route ? go(route.screen, route) : render('recovery');
+      } finally { recoveringRender = false; }
+    });
+  });
   feed.start();
 }
