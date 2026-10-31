@@ -162,7 +162,7 @@ async function preview(t, width, shape = '401', populated = true, { html = readF
     if (closed) return;
     closed = true;
     stopRecovery(); feed.stop(); freeze.stop();
-    for (const route of ['state.json', 'history.json', 'history-continuity.json', 'results.json', 'fleet-config.json', 'fleet-config/actions.json', 'board-settings.json', 'account-history.json']) boardSession.observe('/joe/' + route, { auth: false });
+    for (const route of ['state.json', 'history.json', 'history-continuity.json', 'results.json', 'fleet-config.json', 'fleet-config/actions.json', 'board-settings.json', 'account-history.json']) boardSession.observe('/joe/' + route, { evidence: 'AUTHENTICATED', auth: false });
     A.forgetAccountHistory(); A.store.next = Infinity;
     Object.assign(R.RS, controls); R.forgetResults();
     for (const id of ['j', 'joe', 'joel', 'positions', 'kept', 'chart']) D.toggleDeskDisclosure(id);

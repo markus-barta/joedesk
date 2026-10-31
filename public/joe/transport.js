@@ -1,5 +1,46 @@
 // All JSON reads use this boundary, on the page and in workers. Authentication
 // evidence is separate from a bad document or an unavailable board server.
+import { validateContract, REASONS } from './contracts/index.mjs';
+import { validContinuity } from './history-continuity.js';
+import { acceptAccountHistory } from './account-model.js';
+import { acceptActions } from './settings-model.js';
+import { validateBoardSettings } from './board-settings-validation.js';
+
+export const AUTH_FAILURE = 'AUTH_FAILURE';
+export const AUTHENTICATED = 'AUTHENTICATED';
+export const NO_EVIDENCE = 'NO_EVIDENCE';
+
+// The endpoint owns validation; a parsed 200 alone never proves sign-in.
+function validBody(url, response) {
+  const path = new URL(url, 'https://board/joe/').pathname, body = response.payload;
+  const contract = { '/joe/data.json': 'data', '/joe/history.json': 'history',
+    '/joe/results.json': 'results', '/joe/fleet-config.json': 'fleet-config', '/joe/healthz': 'healthz' }[path];
+  if (contract) return validateContract(contract, body).ok;
+  if (path === '/joe/history-continuity.json') return validContinuity(body);
+  if (path === '/joe/account-history.json') {
+    response.validated = acceptAccountHistory(body);
+    return true;
+  }
+  if (path === '/joe/fleet-config/actions.json') return acceptActions(body) !== null;
+  if (path === '/joe/board-settings.json') return body && !validateBoardSettings({ accountStart: body.accountStart }) &&
+    ['missing', 'invalid', 'unreadable', 'unset', null].includes(body.reason) &&
+    ((body.reason === null) === (body.accountStart !== null));
+  if (path === '/joe/state.json') {
+    const data = body?.feeds?.data;
+    return Boolean(data && (data.value ? validateContract('data', data.value).ok
+      : data.value === null && REASONS.includes(data.reason)));
+  }
+  return false;
+}
+
+export function classifyResponse(url, response = {}) {
+  if (response.crossedOrigin) return NO_EVIDENCE;
+  if (response.auth === true || AUTH.has(response.status)) return AUTH_FAILURE;
+  if (!(response.status >= 200 && response.status < 300)) return NO_EVIDENCE;
+  try { return validBody(url, response) ? AUTHENTICATED : NO_EVIDENCE; }
+  catch { return NO_EVIDENCE; }
+}
+
 const AUTH = new Set([301, 302, 303, 307, 308, 401, 403]);
 const HTML = /^\s*(?:<!doctype\s+html\b|<!--|<\/?[a-z][\w:-]*(?:\s|\/?>))/i;
 export function serverClock(headers) {
@@ -13,14 +54,15 @@ export async function readJSON(url, init = {}, { text = false, fetcher = (...arg
   const controller = new AbortController();
   let timer, clock = null, at, timedOut = false;
   try {
-    return await Promise.race([
+    const result = await Promise.race([
       new Promise((_, reject) => { timer = setTimeout(() => { timedOut = true; controller.abort(); reject(new Error('Read timed out')); }, timeoutMs); }),
       (async () => {
         const response = await fetcher(url, { cache: 'no-store', credentials: 'same-origin', ...init, redirect: 'manual', signal: controller.signal });
         at = performance.now();
         clock = serverClock(response.headers);
         const crossedOrigin = response.redirected && response.url && new URL(response.url).origin !== new URL(url, globalThis.location?.href ?? import.meta.url).origin;
-        if (response.type === 'opaqueredirect' || crossedOrigin) return { status: 302, redirected: true, auth: true, clock, at };
+        if (crossedOrigin) return { status: 0, crossedOrigin: true, clock, at };
+        if (response.type === 'opaqueredirect') return { status: 302, redirected: true, auth: true, clock, at };
         if (AUTH.has(response.status)) return { status: response.status, auth: true, clock, at };
         if (response.status === 304) return { status: 304, headers: response.headers, auth: false, clock, at };
         const ok = response.status >= 200 && response.status < 300;
@@ -33,14 +75,16 @@ export async function readJSON(url, init = {}, { text = false, fetcher = (...arg
           if (typeof response.text === 'function') {
             body = await response.text();
             if (ok && HTML.test(body)) return { status: 401, auth: true, clock, at };
-            if (!text) payload = JSON.parse(body);
+            payload = JSON.parse(body);
           } else { payload = await response.json(); if (text) body = JSON.stringify(payload); }
         } catch { if (ok) return { status: 0, httpStatus: response.status, clock, at }; }
         return { status: response.status, payload, ...(text ? { text: body } : {}), headers: response.headers,
           ...(ok ? { auth: false } : {}), clock, at };
       })(),
     ]);
-  } catch { return { status: 0, clock, at, ...(timedOut ? { timedOut: true } : {}) }; } finally { clearTimeout(timer); }
+    const evidence = classifyResponse(url, result);
+    return { ...result, evidence };
+  } catch { return { status: 0, evidence: NO_EVIDENCE, clock, at, ...(timedOut ? { timedOut: true } : {}) }; } finally { clearTimeout(timer); }
 }
 
 export const readFailure = ({ auth, status }) => auth ? 'auth_required' : status === 404 ? 'route_not_found' : 'refresh_failed';
@@ -68,19 +112,17 @@ export function acceptRecovery(retained, incoming, status) {
 // The shell coordinates recovery: any authenticated read can start a full
 // refresh, while the displayed document stays frozen until that refresh renders.
 export function createBoardSession() {
-  const blocked = new Set(), authenticated = new Set(), priorAuthentication = new Map(), listeners = new Set();
+  const latest = new Map(), authenticated = new Set(), listeners = new Set();
+  const blocked = () => [...latest.values()].includes(AUTH_FAILURE);
   let recover = null, recovering = false, recoveryOK = false, frozen = false, epoch = 0;
   const session = {
-    signedOut: () => frozen || blocked.size > 0,
+    signedOut: () => frozen || blocked(),
     recovering: () => recovering,
     epoch: () => epoch,
-    // A failed validation removes only this attempt's provisional evidence.
-    // It cannot revoke an authenticated response already seen since expiry.
-    invalidateRecovery(key) { if (!priorAuthentication.get(key)) authenticated.delete(key); },
     accepting: () => !session.signedOut() || recovering,
     coordinateRecovery(callback) { recover = callback; return () => { recover = null; recovering = false; frozen = false; }; },
     finishRecovery(render) {
-      if (!recovering || !recoveryOK || blocked.size || !authenticated.size) return false;
+      if (!recovering || !recoveryOK || blocked() || !authenticated.size) return false;
       recovering = frozen = false;
       try {
         for (const listener of listeners) listener();
@@ -90,22 +132,19 @@ export function createBoardSession() {
       for (const listener of listeners) listener();
       return false;
     },
-    observe(key, { auth } = {}) {
+    observe(key, response = {}) {
+      const evidence = response.evidence ?? classifyResponse(key, response);
       const before = session.signedOut();
-      if (auth === true && !before) { authenticated.clear(); priorAuthentication.clear(); epoch++; }
-      priorAuthentication.set(key, authenticated.has(key));
-      if (auth === true) {
-        blocked.add(key);
-        frozen = true;
-      }
+      if (evidence === AUTH_FAILURE && !before) { authenticated.clear(); epoch++; }
+      latest.set(key, evidence);
+      if (evidence === AUTH_FAILURE) frozen = true;
       // Track the latest attempt separately from positive authentication.
       // A 503 can supersede a 401, but cannot itself prove a new sign-in.
-      if (auth !== true) blocked.delete(key);
-      if (auth === false) {
+      if (evidence === AUTHENTICATED) {
         if (before) authenticated.add(key);
       }
-      if (before && auth !== true && authenticated.size) {
-        if (!recover && !blocked.size) frozen = false;
+      if (before && evidence !== AUTH_FAILURE && authenticated.size) {
+        if (!recover && !blocked()) frozen = false;
         if (recover && !recovering) {
           recovering = recoveryOK = true;
           // Let the successful read finish acceptance before refreshing it.
@@ -116,13 +155,14 @@ export function createBoardSession() {
         }
       }
       if (before !== session.signedOut()) for (const listener of listeners) listener();
+      return evidence;
     },
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     // Auth responses never enter stores. During recovery each non-auth attempt
     // contributes its own data or failure reason under the frozen selection.
     accept(key, response) {
-      session.observe(key, response);
-      return response?.auth !== true && session.accepting();
+      const evidence = session.observe(key, response);
+      return evidence !== AUTH_FAILURE && session.accepting();
     },
   };
   return session;

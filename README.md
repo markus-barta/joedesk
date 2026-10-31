@@ -2439,20 +2439,44 @@ reproducers in real worker threads (replay with `JOED_FIX7_BASELINE=9eb2482`), t
 history/results × worker/fallback × newer/replay/receipt-regression/401/503/malformed
 × frozen/live matrix, equal-document
 recovery, receipt regressions, and failures that retain their own reasons after authentication recovers.
-The worker, page reply handler and main-thread fallback share `acceptRecovery`:
-authenticated success, no feed failure, and neither sequence nor receipt older
-than the retained document. A worker crash cannot reset that ordering floor or
+The worker, page reply handler and main-thread fallback share `acceptRecovery`
+for document acceptance: no feed failure, and neither sequence nor receipt older
+than the retained document. Authentication is classified separately at the
+transport boundary. A worker crash cannot reset that ordering floor or
 discard the page's last good values when the first fallback read fails. Named
 History and Results regressions replay the crash followed by a higher sequence
 with an older receipt (`JOED_FIX7_BASELINE=58770a9`).
 Document retention separately compares the actual sequence and receipt: an
 authenticated 200 carrying a validated last-good body with a server-reported
 `sequence_replayed` reason keeps that body and reason, even with empty stores.
-It remains stale; that failure label alone neither proves nor refuses authentication. The six cold-read regressions
+It remains stale; authentication depends on the validated response body,
+independently of that failure label. The six cold-read regressions
 cover History and Results in workers, after worker failure, and with workers
 disabled (`JOED_FIX7_BASELINE=5b788a8`). The version adapter binds `matchMedia`
 to the browser global, preserving expiry disposal and the sweep planner's
 literal-query boundary inventory without changing the pinned vendor bundle.
+
+Fix 14 classifies each endpoint response once in `transport.js`: native auth
+refusals and successful sign-in HTML are `AUTH_FAILURE`; a 2xx body passing that
+endpoint's own validator is `AUTHENTICATED`; other responses are `NO_EVIDENCE`.
+That includes invalid Continuity intervals, invalid JSON, server/network failures,
+missing routes and followed cross-origin redirects. History, Results, data,
+state, Continuity, account history, fleet settings, action logs and board display
+settings all use their own existing body validators. Account history reuses the
+validated columns rather than parsing or validating again on the page.
+Workers carry the classification alongside their document outcome, including
+blocked replies. Worker and fallback responses meet in `createBoardSession`'s
+per-endpoint latest-response map. No sibling can add or remove another read's
+evidence. Positive evidence since expiry survives subsequent non-auth errors;
+recovery ends only after the coordinated refresh renders and no endpoint's
+latest response is `AUTH_FAILURE`. Regression rejection and feed failure labels
+remain independent of authentication, so a valid but old document may prove
+sign-in while the last-good document and its rejection label stay visible.
+`test/signed-out-fix14.mjs` runs the two review reproducers, Continuity 503/404/
+network/invalid-JSON failures, good Continuity beside a History 401 followed by
+two 503s, each protected endpoint's HTML/validation boundary, and the same
+sequence table in real workers and fallback. Replay production modules from
+`286a5b9` in memory with `JOED_FIX14_BASELINE=286a5b9`.
 
 The fix 12 regression checks normal identical Results polling in the actual
 worker and main-thread fallback: receipt age reaches five minutes, a failed

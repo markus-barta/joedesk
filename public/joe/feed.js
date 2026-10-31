@@ -18,7 +18,7 @@ export const TICK_MS = 1000;
 const NO_CLOCK = '1970-01-01T00:00:00.000Z';
 
 export { serverClock } from './transport.js';
-import { readJSON, createBoardSession, acceptRecovery, documentRegressed } from './transport.js';
+import { readJSON, createBoardSession, acceptRecovery, documentRegressed, AUTH_FAILURE, AUTHENTICATED, NO_EVIDENCE } from './transport.js';
 
 export function createFeed(onChange, measure = () => {}, version = '', { actionsWanted = () => false, session = createBoardSession() } = {}) {
   let anchor = null, serverPanels = {}, fleetTag = null;
@@ -30,7 +30,8 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
   });
   const read = async (url, init) => {
     const res = await readJSON(url, init);
-    return session.accept(new URL(url, 'https://board/joe/').pathname, res) ? res : null;
+    session.accept(new URL(url, 'https://board/joe/').pathname, res);
+    return res.evidence === AUTH_FAILURE ? null : res;
   };
   // Where the server read the fleet settings from, and its change log.
   let fleetSource = null, actions = null;
@@ -47,7 +48,6 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
   const settle = (key, value) => { feeds[key] = value; };
   const recoveryRead = (kind, incoming, status) => {
     const accepted = acceptRecovery(feeds[kind]?.value, incoming, status);
-    if (!accepted.ok) session.invalidateRecovery(`/joe/${kind}.json`);
     return accepted;
   };
 
@@ -66,7 +66,6 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     const res = await read('./state.json');
     if (!res || !session.accepting()) return;
     if (res.status !== 200 || !res.payload?.feeds) {
-      if (res.status === 200) session.invalidateRecovery('/joe/state.json');
       // Keep the last good snapshot and its original receipts; only the reason changes.
       anchorFrom(res);
       settle('data', acceptRead('data', { status: res.status === 200 ? 0 : res.status, redirected: res.redirected }, feeds.data));
@@ -78,7 +77,6 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     settle('data', acceptRead('data', d.value
       ? { status: 200, payload: d.value, receivedAt: d.value.receivedAt, generatedAdvancedAt: d.generatedAdvancedAt, gatewayProgress: d.gatewayProgress, reason: d.reason ?? undefined }
       : { status: 503, payload: { reason: d.reason }, reason: d.reason ?? undefined }, feeds.data));
-    if (d.value ? feeds.data.value !== d.value : Boolean(feeds.data.value)) session.invalidateRecovery('/joe/state.json');
     // History and results have their own worker-fed reads; only the data panels carry over.
     const { history: _history, results: _results, ...panels } = res.payload.panels ?? {};
     serverPanels = panels;
@@ -112,35 +110,24 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
       try {
         const paths = kind === 'history' ? ['/joe/history.json', '/joe/history-continuity.json'] : ['/joe/results.json'];
         const evidence = paths.map(key => [key, data.status?.[key]]);
-        // Even a blocked document reply reports every sibling's latest auth
-        // outcome; its undecoded body cannot prove authenticated recovery.
-        if (data.kind === 'blocked') {
-          for (const [key, status] of evidence) {
-            session.observe(key, { auth: status?.state === 'auth' ? true : status?.auth });
-            session.invalidateRecovery(key);
-          }
-          return;
+        // Each endpoint reports its transport classification, even beside an
+        // auth refusal. All replies meet the same store as main-thread reads.
+        for (const [key, status] of evidence) {
+          if ([AUTH_FAILURE, AUTHENTICATED, NO_EVIDENCE].includes(status?.evidence)) session.accept(key, status);
         }
-        if (evidence.some(([, status]) => !['auth', 'ok', 'error'].includes(status?.state))) {
-          return;
-        }
-        const acceptance = evidence.map(([key, status]) => {
-          const accepted = session.accept(key, { auth: status?.state === 'auth' ? true : status?.auth });
-          if (status.state !== 'ok' || status.auth !== false || status.reason) session.invalidateRecovery(key);
-          return accepted;
-        });
+        if (data.kind === 'blocked') return;
+        if (evidence.some(([, status]) => !['auth', 'ok', 'error'].includes(status?.state))) return;
         const status = data.status?.[`/joe/${kind}.json`], document = status?.document;
         const prior = feeds[kind]?.value;
         const recovery = recoveryRead(kind, document, { ...status, valid: data.valid, reason: status?.reason ?? data.reason });
-        if (evidence.some(([, s]) => s.state !== 'ok' || s.auth !== false || s.reason)) session.invalidateRecovery(`/joe/${kind}.json`);
-        if (!session.accepting() || acceptance.includes(false)) return;
+        if (!session.accepting() || evidence.some(([, s]) => s?.auth === true)) return;
         if (data.clock) anchorTo(data.clock.at, data.clock.precise ? 'stamp' : 'date');
         measure(`${kind}-worker`, data.ms);
         // An unchanged hint still carries the attempt's reason and receipt.
         // It can confirm only the document already held by this page.
         if (data.kind === 'unchanged') {
           if (!prior || document?.seq !== prior.seq || document?.receivedAt !== prior.receivedAt) {
-            session.invalidateRecovery(`/joe/${kind}.json`); return;
+            return;
           }
           settle(kind, { ...feeds[kind], reason: recovery.reason,
             ...(data.generatedAdvancedAt ? { generatedAdvancedAt: data.generatedAdvancedAt } : {}) });
@@ -166,10 +153,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
   function pollHistory() { return poll('history', async () => {
     if (worker) return readInWorker('history', 'poll');
     const [res, sidecar] = await Promise.all([read('./history.json'), read('./history-continuity.json')]);
-    if (!res || !sidecar || !session.accepting()) {
-      if (session.signedOut()) session.invalidateRecovery('/joe/history.json');
-      return;
-    }
+    if (!res || !sidecar || !session.accepting()) return;
     anchorFrom(res);
     const reason = res.headers?.get('X-Joe-Feed-Reason') ?? undefined;
     const started = performance.now();
@@ -177,7 +161,6 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
       : { status: res.status, redirected: res.redirected, payload: res.payload, reason: res.payload?.reason ?? undefined }, fallback);
     const recovery = recoveryRead('history', accepted.value, { state: res.status === 200 ? 'ok' : 'error', auth: res.auth,
       valid: res.status !== 200 || accepted.value === res.payload, reason: accepted.reason });
-    if (sidecar.status !== 200 || sidecar.auth !== false || sidecar.headers?.get('X-Joe-Feed-Reason')) session.invalidateRecovery('/joe/history-continuity.json');
     if (documentRegressed(feeds.history?.value, accepted.value) || (!accepted.value && feeds.history?.value)) {
       settle('history', { ...feeds.history, reason: recovery.reason }); onChange('history'); return;
     }
@@ -241,7 +224,6 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
       const path = res.headers.get('X-Joe-Fleet-Source-Path'), kind = res.headers.get('X-Joe-Fleet-Source-Kind');
       fleetSource = { path: path && /^\/[\x20-\x7e]{1,200}$/.test(path) ? path : null, kind: ['stored', 'example'].includes(kind) ? kind : null };
     }
-    if (accepted.reason === 'contract_invalid') session.invalidateRecovery('/joe/fleet-config.json');
     settle('fleet-config', accepted);
     onChange('fleet');
   }); }
@@ -253,7 +235,6 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     if (!res || !session.accepting()) return;
     anchorFrom(res);
     const entries = res.status === 200 ? acceptActions(res.payload) : null;
-    if (!entries && res.status === 200) session.invalidateRecovery('/joe/fleet-config/actions.json');
     actions = entries ? { entries, reason: null } : { entries: actions?.entries ?? null, reason: res.auth ? 'auth_required' : res.status === 200 ? 'contract_invalid' : 'refresh_failed' };
     onChange('actions');
   }); }

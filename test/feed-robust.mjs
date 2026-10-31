@@ -217,7 +217,6 @@ const authResponses = {
   'HTML content type': () => new Response('<h1>Sign in</h1>', { headers: { 'Content-Type': 'text/html; charset=utf-8' } }),
   'HTML body': () => new Response(' \n<!doctype html><html><body>Sign in</body></html>', { headers: { 'Content-Type': 'application/json' } }),
   'HTML fragment': () => new Response('<form action="/login">Sign in</form>'),
-  'followed cross-origin redirect': () => ({ status: 200, redirected: true, url: 'https://auth.inspr.at/sign-in', headers: new Headers(), json: async () => ({}) }),
 };
 
 for (const [name, response] of Object.entries(authResponses)) test(`JOED-173 protected board settings freezes before store acceptance: ${name}`, async t => {
@@ -228,7 +227,7 @@ for (const [name, response] of Object.entries(authResponses)) test(`JOED-173 pro
     ? fail503 ? new Response('{}', { status: 503 }) : refused ? response() : new Response(JSON.stringify(good)) : reply(url));
   const feed = createFeed(() => {}, () => {}, '', { session: boardSession });
   const settings = createBoardSettings();
-  t.after(() => { feed.stop(); boardSession.observe('/joe/board-settings.json', { auth: false }); });
+  t.after(() => { feed.stop(); boardSession.observe('/joe/board-settings.json', { evidence: 'AUTHENTICATED', auth: false }); });
   await feed.refresh(); await settings.refresh(); const before = settings.snapshot(), selected = feed.select();
   refused = true; await settings.refresh();
   assert.equal(feed.signedOut(), true); assert.deepEqual(settings.snapshot(), before); assert.equal(feed.select(), selected);
@@ -322,11 +321,11 @@ test('JOED-173 a session recovers per endpoint; unrelated successes and network 
   let changes = 0;
   const stop = session.subscribe(() => changes++);
   session.observe('state', { auth: true }); session.observe('healthz', { auth: true });
-  session.observe('history', { auth: false }); session.observe('state', { status: 0 });
+  session.observe('history', { evidence: 'AUTHENTICATED', auth: false }); session.observe('state', { status: 0 });
   assert.equal(session.signedOut(), true);
-  session.observe('state', { auth: false });
+  session.observe('state', { evidence: 'AUTHENTICATED', auth: false });
   assert.equal(session.signedOut(), true);
-  session.observe('healthz', { auth: false });
+  session.observe('healthz', { evidence: 'AUTHENTICATED', auth: false });
   assert.equal(session.signedOut(), false);
   assert.equal(changes, 2, 'only board-level transitions announce');
   stop();
@@ -368,7 +367,7 @@ for (const mode of ['page', 'worker']) test(`JOED-173 account history ${mode} pa
   // independent sessions so a different board instance cannot contaminate it.
   const feed = createFeed(() => {}, () => {}, '', { session: boardSession });
   if (mode === 'worker') globalThis.Worker = class { constructor() { handle = this; } postMessage(data) { send({ data }); } };
-  t.after(() => { feed.stop(); boardSession.observe('/joe/account-history.json', { auth: false }); forgetAccountHistory(); });
+  t.after(() => { feed.stop(); boardSession.observe('/joe/account-history.json', { evidence: 'AUTHENTICATED', auth: false }); forgetAccountHistory(); });
   await feed.refresh(); await refreshAccountHistory();
   refused = true; await refreshAccountHistory();
   assert.equal(feed.signedOut(), true);

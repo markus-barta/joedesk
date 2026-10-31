@@ -1475,7 +1475,7 @@ test(`JOED-173 fix13 re-sign-in reproducer: ${scenario} / ${mode}`, async t => {
     recovery = (async () => {
       await feed.whenIdle();
       await Promise.all([feed.refresh(), feed.refreshActions()]);
-      for (const route of ['account-history', 'board-settings']) session.accept(`/joe/${route}.json`, { auth: false });
+      for (const route of ['account-history', 'board-settings']) session.accept(`/joe/${route}.json`, { evidence: 'AUTHENTICATED', auth: false });
       return session.finishRecovery(() => { rendered = feed.select(); freeze.rendered(rendered.now); return true; });
     })();
     return recovery;
@@ -1521,13 +1521,12 @@ test(`JOED-173 fix13 auth evidence: ${route} / ${failure}`, async t => {
   const { createBoardSession } = await import('../public/joe/transport.js');
   const s = createBoardSession(), key = `/joe/${route}.json`;
   t.after(s.coordinateRecovery(async () => {}));
-  s.observe(key, { auth: false }); // pre-expiry evidence cannot recover a session
+  s.observe(key, { evidence: 'AUTHENTICATED', auth: false }); // pre-expiry evidence cannot recover a session
   s.observe(key, { auth: true });
   s.accept(key, failure === '401' ? { auth: true, status: 401 }
     : failure === 'validation' ? { auth: false, status: 200 } : { status: failure === 'network' ? 0 : Number(failure) });
-  if (failure === 'validation') s.invalidateRecovery(key);
   assert.equal(s.finishRecovery(() => true), false, 'non-auth failures alone never prove a new sign-in');
-  s.accept('/joe/another.json', { auth: false, status: 200 });
+  s.accept('/joe/another.json', { evidence: 'AUTHENTICATED', auth: false, status: 200 });
   assert.equal(s.finishRecovery(() => true), failure !== '401', 'only a latest auth refusal keeps the freeze');
   if (failure === '401') {
     // The new latest response is neither proof nor refusal; the other read
@@ -1543,13 +1542,12 @@ test(`JOED-173 fix13 ${latest} does not revoke an earlier authenticated response
   const s = createBoardSession(), key = '/joe/results.json';
   t.after(s.coordinateRecovery(async () => {}));
   s.observe(key, { auth: true });
-  s.accept(key, { auth: false, status: 200 });
+  s.accept(key, { evidence: 'AUTHENTICATED', auth: false, status: 200 });
   if (latest === '401 then 503') {
     s.accept(key, { auth: true, status: 401 });
     assert.equal(s.finishRecovery(() => true), false);
   }
   s.accept(key, latest === 'validation' ? { auth: false, status: 200 } : { status: 503 });
-  s.invalidateRecovery(key);
   assert.equal(s.finishRecovery(() => true), true);
 });
 

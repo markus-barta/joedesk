@@ -22,7 +22,7 @@ async function board(t, kind, { cold = false, mode = 'worker' } = {}) {
   const path = `/joe/${kind}.json`, sidecar = '/joe/history-continuity.json';
   const session = createBoardSession(), messages = [], workers = [];
   let transform = data => data, activeWorker;
-  let response = { status: 200, payload: valid[kind] }, continuity = { status: 200, payload: null };
+  let response = { status: 200, payload: valid[kind] }, continuity = { status: 200, payload: { schema: 'joedesk.history-continuity.v1', historySeq: valid.history.seq, intervals: [] } };
   t.mock.method(globalThis, 'fetch', async url => {
     const route = String(url).split('/').at(-1);
     const r = route === 'history-continuity.json' ? continuity : route === `${kind}.json` ? response
@@ -98,22 +98,22 @@ if (!process.env.JOED_FIX7_WORKER) {
       assert.equal(b.feed.feeds[kind].value.seq, newer.seq, 'an actual regression preserves the retained document');
       assert.equal(b.feed.feeds[kind].value.receivedAt, retained.receivedAt);
       b.expire(); await b.refresh();
-      assert.equal(b.finish(), kind === 'history', 'the continuity response proves authentication independently of the failed document');
-      assert.equal(b.session.signedOut(), kind !== 'history');
+      assert.equal(b.finish(), true, 'validated bodies prove authentication independently of feed rejection labels');
+      assert.equal(b.session.signedOut(), false);
       assert.equal(b.feed.feeds[kind].value.seq, newer.seq);
       b.set({ status: 200, payload: newer, headers: { 'X-Joe-Feed-Reason': 'sequence_replayed' } }); await b.refresh();
-      assert.equal(b.finish(), false, 'an equal retained body with a server failure still cannot recover');
+      assert.equal(b.finish(), false, 'already recovered; a repeated rejection preserves the feed reason');
       b.set({ status: 200, payload: newer }); await b.refresh();
-      assert.equal(b.finish(), kind !== 'history', 'a later clean equal document recovers Results or clears already-recovered History');
+      assert.equal(b.finish(), false, 'already recovered; a clean equal document clears the feed rejection');
       assert.equal(b.feed.select().states[kind].state, 'fresh');
     });
   test('JOED-173 fix7 history recovery resends the document discarded across a continuity 503 and null-200 replay', async t => {
     const b = await board(t, 'history'); b.expire();
     const newer = { ...valid.history, seq: valid.history.seq + 1 };
     b.set({ status: 200, payload: newer }); b.sidecar({ status: 503, payload: {} }); await b.refresh();
-    assert.equal(b.finish(), false);
+    assert.equal(b.finish(), true, 'History evidence survives the failed sibling (fix14)');
     b.sidecar({ status: 200, payload: null }); await b.refresh();
-    assert.equal(b.finish(), true);
+    assert.equal(b.finish(), false, 'already recovered; an invalid sidecar cannot undo it');
     assert.equal(b.feed.feeds.history.value.seq, newer.seq, 'new history must be in the page store before removing stale marks');
     assert.equal(b.doc.querySelectorAll('[data-frozen]').length, 0);
   });
@@ -124,20 +124,20 @@ if (!process.env.JOED_FIX7_WORKER) {
     b.finish();
     assert.equal(b.feed.feeds.results.reason, 'refresh_failed');
     assert.equal(boardStates(b.feed.feeds, valid.results.receivedAt).results.state, 'broken', 'failed Results retain their normal failure state under frozen marks');
-    assert.equal(b.session.signedOut(), true, 'failure is not authenticated successful recovery evidence');
+    assert.equal(b.session.signedOut(), false, 'validated 200 body proves sign-in while refresh_failed remains visible');
   });
   for (const kind of ['history', 'results']) {
-    for (const shape of ['missing status', 'missing auth', 'unchanged wrong document']) test(`JOED-173 fix7 ${kind} message arrival alone cannot prove recovery: ${shape}`, async t => {
+    for (const shape of ['missing status', 'missing evidence', 'unchanged wrong document']) test(`JOED-173 fix7 ${kind} message arrival alone cannot prove recovery: ${shape}`, async t => {
       const b = await board(t, kind); b.expire();
       b.transform(data => {
         if (shape === 'missing status') { delete data.status; return data; }
-        if (shape === 'missing auth') { delete data.status[b.path].auth; return data; }
+        if (shape === 'missing evidence') { delete data.status[b.path].evidence; return data; }
         return { ...data, kind: 'unchanged', feed: kind, status: { ...data.status,
           [b.path]: { ...data.status[b.path], document: { seq: valid[kind].seq + 1, receivedAt: valid[kind].receivedAt } } } };
       });
       await b.refresh();
-      const recovered = kind === 'history' && shape !== 'missing status';
-      assert.equal(b.finish(), recovered, 'a separate authenticated continuity response can recover the session');
+      const recovered = shape === 'unchanged wrong document';
+      assert.equal(b.finish(), recovered, 'only a classified response can recover; document hints never prove sign-in');
       assert.equal(b.session.signedOut(), !recovered);
       assert.equal(Boolean(b.doc.querySelectorAll('[data-frozen]').length), !recovered);
       assert.equal(b.feed.feeds[kind].value.seq, valid[kind].seq);
@@ -153,8 +153,8 @@ if (!process.env.JOED_FIX7_WORKER) {
       const b = await board(t, kind), original = valid[kind]; if (frozen) b.expire();
       b.set({ status: 200, payload: { ...original, seq: original.seq + 1, receivedAt: new Date(Date.parse(original.receivedAt) - 1000).toISOString() } });
       await b.refresh();
-      const recovered = frozen && kind === 'history';
-      assert.equal(b.finish(), recovered, 'continuity may prove authentication while the document remains rejected');
+      const recovered = frozen;
+      assert.equal(b.finish(), recovered, 'a validated response proves authentication while its regression remains rejected');
       assert.equal(b.session.signedOut(), frozen && !recovered);
       assert.equal(b.messages.at(-1).status[b.path].reason, 'sequence_replayed');
       assert.equal(b.feed.feeds[kind].value.seq, original.seq);
@@ -229,7 +229,7 @@ if (!process.env.JOED_FIX7_WORKER) {
       // recovery. The shell then waits for idle and refreshes every feed.
       if (frozen && kind === 'history' && outcome === '503') await b.refresh();
       const recovered = b.finish();
-      const positiveAuth = ok || kind === 'history' || mode === 'fallback';
+      const positiveAuth = ok || replay || kind === 'history' || mode === 'fallback';
       assert.equal(recovered, frozen && outcome !== '401' && positiveAuth);
       const signedOut = outcome === '401' || (frozen && !positiveAuth);
       assert.equal(b.session.signedOut(), signedOut);

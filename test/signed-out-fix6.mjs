@@ -10,7 +10,7 @@ const { sendFleetDraft } = await import('../public/joe/fleet-write.js');
 const { sendOutcome } = await import('../public/joe/settings-model.js');
 const valid = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url)));
 const keys = ['state', 'history', 'history-continuity', 'results', 'account-history', 'board-settings', 'fleet-config', 'fleet-config/actions'].map(s => `/joe/${s}.json`);
-const good = { status: 200, auth: false };
+const good = { evidence: 'AUTHENTICATED', status: 200, auth: false };
 function recovering(t, session = createBoardSession()) {
   const stop = session.coordinateRecovery(async () => {});
   t.after(() => { stop(); for (const key of [...keys, 'expiry']) session.observe(key, good); });
@@ -232,9 +232,8 @@ for (const threaded of [false, true]) test(`JOED-173 fix6 browser sequence recov
     return new Response(JSON.stringify(payload), { headers: { 'X-Joe-Received-At': valid.data.receivedAt } });
   });
   const feed = createFeed(() => {}, () => {}, '', { session: boardSession }); t.after(feed.stop);
-  const events = [], accept = boardSession.accept.bind(boardSession), invalidate = boardSession.invalidateRecovery.bind(boardSession);
+  const events = [], accept = boardSession.accept.bind(boardSession);
   t.mock.method(boardSession, 'accept', (key, response) => { const accepted = accept(key, response); events.push(['accept', key, response.auth, response.status, accepted]); return accepted; });
-  t.mock.method(boardSession, 'invalidateRecovery', key => { events.push(['invalid', key]); invalidate(key); });
   const refresh = () => Promise.all([feed.refresh(), feed.refreshActions(), A.refreshAccountHistory(), B.refreshBoardSettings()]);
   await refresh();
   const stop = boardSession.coordinateRecovery(() => (task = (async () => {
