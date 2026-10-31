@@ -225,6 +225,9 @@ if (!process.env.JOED_FIX7_WORKER) {
           seq: original.seq + (ok || outcome === 'receivedAt regression' ? 1 : replay ? -1 : 0),
           receivedAt: outcome === 'receivedAt regression' ? new Date(Date.parse(original.receivedAt) - 1000).toISOString() : original.receivedAt } });
       if (mode === 'fallback') await b.fallback(); else await b.refresh();
+      // The first History failure can arrive before continuity starts
+      // recovery. The shell then waits for idle and refreshes every feed.
+      if (frozen && kind === 'history' && outcome === '503') await b.refresh();
       const recovered = b.finish();
       const positiveAuth = ok || kind === 'history' || mode === 'fallback';
       assert.equal(recovered, frozen && outcome !== '401' && positiveAuth);
