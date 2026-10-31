@@ -1172,9 +1172,11 @@ try {
         check('signed-out', `${tag}: Reload performs a real page reload and cold auth remains signed out`, true);
       } finally { await unroute(); }
       await page.evaluate('window.__joedesk.refresh()');
-      await waitFor(page, `document.getElementById('signedOutBanner').hidden && !document.getElementById('app').hasAttribute('data-last-known')`);
+      check('signed-out', `${tag}: authenticated feed responses keep the old page frozen`, await page.evaluate(`!document.getElementById('signedOutBanner').hidden && document.getElementById('app').hasAttribute('data-last-known')`));
+      await page.s('Page.reload');
+      await waitFor(page, `document.documentElement.dataset.ready === '1' && document.getElementById('signedOutBanner').hidden && !document.getElementById('app').hasAttribute('data-last-known')`);
       await settle(page);
-      check('signed-out', `${tag}: successful authenticated reads resume the board`, await page.evaluate(`document.getElementById('signedOutBanner').hidden && !document.getElementById('app').hasAttribute('data-last-known')`));
+      check('signed-out', `${tag}: a fresh authenticated page load resumes the board`, await page.evaluate(`document.getElementById('signedOutBanner').hidden && !document.getElementById('app').hasAttribute('data-last-known')`));
       const next = structuredClone(snapshot); next.seq++;
       next.brokerAccount.equity.amount = String(Number(next.brokerAccount.equity.amount) + 1);
       Object.assign(snapshot, next);

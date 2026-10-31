@@ -210,7 +210,7 @@ try {
     await page.evaluate(`document.getElementById('acctDetailsBtn').click()`); await settle();
     assert.notEqual(await page.evaluate(`document.getElementById('acctDetailsBtn').getAttribute('aria-expanded')`), expanded, 'recovered controls respond to a real click');
     await go('results'); await refresh(); await settle();
-    const resultsFailure = await page.evaluate(`document.getElementById('resStatus').textContent`);
+    const resultsFailure = await page.evaluate(`document.querySelector('#rheroL .say').textContent`);
     assert.equal(resultsFailure, 'Results are unavailable: no data received yet.');
     assert.doesNotMatch(resultsFailure, /sign.in/i);
     nonAuthOnly = only = null; f.data.seq++; f.data.brokerAccount.equity.amount = priorEquity;
@@ -244,12 +244,11 @@ try {
     await page.evaluate(`document.getElementById('accountStartSave').click()`);
     const completeSave = await posted;
     expired = true; await page.evaluate(`window.__joedesk.refresh('state')`);
+    const frozenSave = await capture();
+    await completeSave(200, { ok: true, ...settingsValue }); await settle();
+    assert.deepEqual(await capture(), frozenSave, 'abandoned save cannot update the signed-out document');
     await recover();
     assert.match(await page.evaluate(`document.getElementById('accountStartSummary').textContent`), /200[.]000/);
-    const afterRead = await capture();
-    await completeSave(200, { ok: true, ...settingsValue });
-    await settle();
-    assert.deepEqual(await capture(), afterRead, 'abandoned save has no late success or error UI');
     settingsValue = { accountStart: { amountEur: 100000, date: '2026-01-01' }, reason: null };
     await refresh(); await settle();
     // Confirm the native modal/top-layer and long-press reproducers before
