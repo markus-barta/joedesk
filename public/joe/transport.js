@@ -110,7 +110,7 @@ export function startAuthProbe(session, {
   schedule = (fn, ms) => setTimeout(fn, ms),
   cancel = id => clearTimeout(id),
 } = {}) {
-  let timer = null, stopped = false, pending = false, delay = 30000, pageReloads = 0, storageFailed = false;
+  let timer = null, stopped = false, paused = false, pending = false, delay = 30000, pageReloads = 0, storageFailed = false;
   const history = () => {
     if (storageFailed) return null;
     try {
@@ -121,17 +121,17 @@ export function startAuthProbe(session, {
   };
   const allowed = entries => entries === null ? pageReloads < 1 : entries.length < 3;
   const arm = () => {
-    if (stopped || pending || timer !== null || !session.signedOut()) return;
+    if (stopped || paused || pending || timer !== null || !session.signedOut()) return;
     if (!allowed(history())) { stopped = true; return; }
     timer = schedule(probe, delay);
   };
   async function probe() {
     timer = null;
-    if (stopped || pending || !session.signedOut()) return;
+    if (stopped || paused || pending || !session.signedOut()) return;
     pending = true;
     try {
       const response = await read();
-      if (stopped) return;
+      if (stopped || paused) return;
       if (classifyResponse('/joe/state.json', response) === AUTHENTICATED) {
         const entries = history();
         if (!allowed(entries)) { stopped = true; return; }
@@ -145,11 +145,21 @@ export function startAuthProbe(session, {
         return;
       }
     } catch { /* Network/storage/reload failure leaves the marked document. */ }
-    finally { pending = false; }
-    delay = Math.min(delay * 2, 120000);
-    arm();
+    finally {
+      pending = false;
+      if (!stopped && !paused) {
+        delay = Math.min(delay * 2, 120000);
+        arm();
+      }
+    }
   }
   const unsubscribe = session.subscribe(arm);
   arm();
-  return () => { stopped = true; if (timer !== null) cancel(timer); timer = null; unsubscribe(); };
+  // A cached document keeps its subscription, backoff and reload guard. Only
+  // disposal is permanent; neither resume nor a late read can undo it.
+  const pause = () => { paused = true; if (timer !== null) cancel(timer); timer = null; };
+  return Object.assign(() => { stopped = true; pause(); unsubscribe(); }, {
+    pause,
+    resume() { paused = false; arm(); },
+  });
 }
