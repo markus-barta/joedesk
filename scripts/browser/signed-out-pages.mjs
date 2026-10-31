@@ -189,7 +189,7 @@ try {
       await frozenVisuals(stage);
       await recover(); only = null;
     }
-    console.log(`fix6: ${width}px collapsed headers and all eight recovery gates passed`);
+    console.log(`fix6: ${width}px collapsed headers and all eight endpoint freezes/probe reloads passed`);
     stage = `${width}: fix13 Results 503 after re-sign-in`;
     await go('desk');
     expired = true; only = 'state.json';
@@ -215,7 +215,8 @@ try {
     assert.doesNotMatch(resultsFailure, /sign.in/i);
     nonAuthOnly = only = null; f.data.seq++; f.data.brokerAccount.equity.amount = priorEquity;
     await refresh(); await go('desk'); await settle();
-    console.log(`fix13: ${width}px Results 503 recovery shows 29001, restores interactions and retains the Results failure reason`);
+    console.log(`fix13: ${width}px probe reload shows 29001, restores interactions and explains cold Results 503`);
+    console.log(`probe reload: ${width}px Results 503 checked; account-history and callback regressions next`);
     stage = `${width}: later non-auth account-history failure shows its honest reason`;
     only = null; expired = true;
     await page.evaluate(`import('/joe/board-settings.js').then(m => m.refreshBoardSettings())`);
@@ -237,12 +238,13 @@ try {
       await page.evaluate(`if (window.__clipboardBefore) Object.defineProperty(navigator, 'clipboard', window.__clipboardBefore); else delete navigator.clipboard; delete window.__clipboardBefore;`);
       await recover();
     }
+    console.log(`probe reload: ${width}px clipboard regressions passed`);
     stage = `${width}: abandoned account-start save refetches before delayed POST`;
     await go('settings');
     await page.evaluate(`document.getElementById('accountStartEdit').click(); document.getElementById('accountStartAmount').value = '200000'; document.getElementById('accountStartDate').value = '2026-01-01'; document.getElementById('accountStartReview').click(); document.getElementById('accountStartConfirmed').click();`);
     const posted = new Promise(done => { settingsPaused = done; });
     await page.evaluate(`document.getElementById('accountStartSave').click()`);
-    const completeSave = await posted;
+    const completeSave = await Promise.race([posted, new Promise((_, reject) => { const timeout = setTimeout(() => reject(new Error('Account-start POST did not reach interception')), 10000); timeout.unref(); })]);
     expired = true; await page.evaluate(`window.__joedesk.refresh('state')`);
     const frozenSave = await capture();
     await completeSave(200, { ok: true, ...settingsValue }); await settle();

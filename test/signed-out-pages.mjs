@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
 import { reasons, authShapes, widths, screens, pageFixture, dirtyPreview, authResponse, renderedSnapshot, assertSignedOutPage, retainedDocument, blame } from './fixtures/signed-out-cases.mjs';
+import { freshPageSession } from './fixtures/board-session.mjs';
 const { boardSession } = await import('../public/joe/transport.js');
 const { createBoardFreeze } = await import('../public/joe/presentation.js');
 const { history: accountHistory } = await import('./fixtures/account-fixtures.mjs');
@@ -52,12 +53,12 @@ function snapshot(doc, width) {
   for (const n of [doc, ...doc.querySelectorAll('*')]) Object.defineProperty(n, 'innerText', { configurable: true, get: () => text(n) });
   return renderedSnapshot(doc, shown);
 }
-let instance = 0;
-async function preview(t, width, shape = '401', populated = true, { html = readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8') } = {}) {
+async function preview(t, width, shape = '401', populated = true, { html = readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'), cleanup = true } = {}) {
+  const restoreSession = freshPageSession();
   const controls = { ...R.RS };
   Object.assign(R.RS, { period: 'week', anchor: null, sel: null, desk: 'all', cal: null, moved: false });
   R.forgetResults();
-  const old = Object.fromEntries(['document', 'matchMedia', 'localStorage', 'innerHeight', 'scrollY', 'CSS', 'window', 'navigator'].map(k => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+  const old = Object.fromEntries(['document', 'matchMedia', 'localStorage', 'innerHeight', 'scrollY', 'CSS', 'window', 'navigator', 'fetch'].map(k => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
   const doc = htmlDocument(html);
   if (!populated) {
     // The historical oracle includes the Mac chart hint (⌘ rather than Ctrl).
@@ -81,7 +82,7 @@ async function preview(t, width, shape = '401', populated = true, { html = readF
   globalThis.window = { localStorage: globalThis.localStorage };
   forgetChartMemory();
   let refused = false, failed503 = false, pendingPost = null;
-  t.mock.method(globalThis, 'fetch', async (url, init) => {
+  globalThis.fetch = async (url, init) => {
     if (init?.method === 'POST' && pendingPost) return pendingPost;
     const path = String(url);
     if (failed503) return new Response('{}', { status: 503 });
@@ -91,9 +92,17 @@ async function preview(t, width, shape = '401', populated = true, { html = readF
       : path.includes('actions') ? { schema: 'inspr.joe.fleet-config.actions.v1', entries: [] }
       : path.includes('fleet-config') ? f['fleet-config'] : path.includes('account-history') ? accountHistory() : path.includes('history') ? f.history : f.results;
     return new Response(JSON.stringify(payload), { headers: { 'X-Joe-Received-At': f.data.receivedAt } });
-  });
-  // Fresh module instance gives each scenario its own settings draft/cache.
-  const S = await builders('settings.js', ['buildSkeleton', 'reviewAccountStart', 'saveAccountStart'], String(++instance));
+  };
+  // Reset the test module's state for each document without retaining thousands
+  // of ESM module instances (each holds its last rendered context).
+  const S = await builders('settings.js', ['buildSkeleton', 'reviewAccountStart', 'saveAccountStart'], 'signed-out-pages', `
+export function resetPreview() {
+  state = M.editState(); restored = false; fieldsKey = lastCtx = pinnedSec = lastNote = null;
+  gateStep = 1; accountReview = null; accountBusy = false;
+  accountSaveGeneration = 0; accountSaveAbandoned = false;
+  clearTimeout(toast.timer);
+}`);
+  S.resetPreview();
   addTerms(M.FIELD_TERMS);
   S.buildSkeleton();
   doc.getElementById('acctHero').innerHTML = A.accountSkeleton();
@@ -116,8 +125,8 @@ async function preview(t, width, shape = '401', populated = true, { html = readF
   for (const id of ['j', 'joe', 'joel', 'positions', 'kept', 'chart']) D.toggleDeskDisclosure(id);
   let renders = 0;
   let currentScreen = 'desk';
-  const render = (ctx, screen, recovery = false) => {
-    if (freeze.sync() && !recovery) return;
+  const render = (ctx, screen) => {
+    if (freeze.sync()) return;
     currentScreen = screen;
     renders++;
     for (const n of doc.querySelectorAll('.screen')) n.classList.toggle('on', n.id === `scr-${screen}`);
@@ -148,32 +157,22 @@ async function preview(t, width, shape = '401', populated = true, { html = readF
     ctx.actions = { entries: [], reason };
     return ctx;
   };
-  let recoveryTask = Promise.resolve();
-  const stopRecovery = boardSession.coordinateRecovery(() => {
-    recoveryTask = (async () => {
-      await Promise.all([feed.whenIdle(), A.accountHistoryIdle()]);
-      await Promise.all([feed.refresh(), feed.refreshActions(), refreshBoardSettings(), A.refreshAccountHistory()]);
-      boardSession.finishRecovery(() => { render(context(null), currentScreen, true); return true; });
-    })();
-    return recoveryTask;
-  });
   let closed = false;
   const close = () => {
     if (closed) return;
     closed = true;
-    stopRecovery(); feed.stop(); freeze.stop();
-    for (const route of ['state.json', 'history.json', 'history-continuity.json', 'results.json', 'fleet-config.json', 'fleet-config/actions.json', 'board-settings.json', 'account-history.json']) boardSession.observe('/joe/' + route, { evidence: 'AUTHENTICATED', auth: false });
+    feed.stop(); freeze.stop(); restoreSession();
     A.forgetAccountHistory(); A.store.next = Infinity;
     Object.assign(R.RS, controls); R.forgetResults();
     for (const id of ['j', 'joe', 'joel', 'positions', 'kept', 'chart']) D.toggleDeskDisclosure(id);
     for (const [key, descriptor] of Object.entries(old)) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; }
     forgetChartMemory();
   };
-  t.after(close);
+  if (cleanup) t.after(close);
   return { doc, render, context, close, settings: S, deferPost() { let resolve; pendingPost = new Promise(done => { resolve = done; }); return resolve; }, capture: () => retainedDocument(doc), renders: () => renders,
     async signOut() { refused = true; await feed.refresh(); await refreshBoardSettings(); },
     async fail503() { failed503 = true; await feed.refresh(); await refreshBoardSettings(); },
-    async recover() { refused = failed503 = false; await feed.refresh(); await refreshBoardSettings(); await recoveryTask; }, f };
+    async recover() { refused = failed503 = false; await feed.refresh(); await refreshBoardSettings(); }, f };
 }
 
 // Every earlier reproducer now exercises the same structural invariant; these
@@ -224,11 +223,12 @@ for (const [name, screen] of reproducers) test(`JOED-173 fix4 reproducer: ${name
 });
 
 for (const width of widths) for (const shape of authShapes) test(`JOED-173 fix4 entire document: ${width}px / ${shape} / every reason and page`, async t => {
-  const p = await preview(t, width, shape);
+  let p; t.after(() => p?.close());
   if (shape === 'followed cross-origin redirect') {
     // A followed response is outside the requested origin. Fix14 requires
     // NO_EVIDENCE: it neither expires a signed-in board nor proves re-sign-in.
     for (const reason of [null, ...reasons]) for (const screen of screens) {
+      p = await preview(t, width, shape, true, { cleanup: false });
       p.render(p.context(reason), screen);
       const before = p.capture(), tag = `${width}/${shape}/${reason}/${screen}`;
       await p.signOut();
@@ -240,11 +240,13 @@ for (const width of widths) for (const shape of authShapes) test(`JOED-173 fix4 
       await p.fail503();
       assertSignedOutPage(p.capture(), before, `${tag}: 503 alone cannot prove sign-in`);
       await p.recover();
-      assert.equal(p.capture().marked, false, `${tag}: validated same-origin responses recover`);
+      assertSignedOutPage(p.capture(), before, `${tag}: even valid responses cannot reopen this document`);
+      p.close();
     }
     return;
   }
   for (const reason of [null, ...reasons]) for (const screen of screens) {
+    p = await preview(t, width, shape, true, { cleanup: false });
     p.render(p.context(reason), screen);
     const before = p.capture(), count = p.renders(), tag = `${width}/${shape}/${reason}/${screen}`;
     await p.signOut();
@@ -258,9 +260,9 @@ for (const width of widths) for (const shape of authShapes) test(`JOED-173 fix4 
     assertSignedOutPage(p.capture(), before, `${tag}/503`);
     assert.equal(p.renders(), count, `${tag}: no failed render`);
     await p.recover();
-    assert.equal(p.capture().reload, false, `${tag}: recovery hides banner`);
-    assert.equal(p.capture().marked, false, `${tag}: recovery removes last-known marking`);
-    assert.equal(p.renders(), count + 1, `${tag}: authenticated recovery resumes rendering`);
+    assertSignedOutPage(p.capture(), before, `${tag}: all-200 never unfreezes`);
+    assert.equal(p.renders(), count, `${tag}: successful responses cannot render in place`);
+    p.close();
   }
 });
 
@@ -288,7 +290,7 @@ test('JOED-173 fix4 a toast timeout cannot erase retained visible text while sig
   await p.signOut(); t.mock.timers.tick(10000);
   assertSignedOutPage(p.capture(), before, 'toast timer');
   await p.recover();
-  assert.equal(p.doc.getElementById('toast').classList.contains('on'), false, 'expired toast dismisses after recovery');
+  assertSignedOutPage(p.capture(), before, 'successful feed responses cannot dismiss the frozen toast');
 });
 
 test('JOED-173 fix4 oracle rejects arbitrary added copy and every dropped element or form value', async t => {

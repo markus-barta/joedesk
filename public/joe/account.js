@@ -255,7 +255,7 @@ export const forgetAccountHistory = () => Object.assign(store, { value: null, re
 export const refreshAccountHistory = () => refresh();
 export const accountHistoryIdle = () => reader.reading ?? Promise.resolve();
 export function pollAccountHistory() {
-  if (!store.busy && performance.now() >= store.next && typeof fetch === 'function') return refresh();
+  if (!boardSession.signedOut() && !store.busy && performance.now() >= store.next && typeof fetch === 'function') return refresh();
 }
 // Forget the worker and its failures (tests): the next read starts a new one.
 export const forgetAccountWorker = () => {
@@ -584,7 +584,7 @@ export function renderAccount(ctx) {
   last.ctx = ctx;
   const root = $('#acctHero');
   if (!root) return;
-  if (!store.busy && performance.now() >= store.next && typeof fetch === 'function') refresh();
+  if (!boardSession.signedOut() && !store.busy && performance.now() >= store.next && typeof fetch === 'function') refresh();
   // The value and its panel state (fresh, stale, broken or not reported).
   const value = $('#acctValue'), state = ctx.states.paperAccount?.state ?? 'not reported';
   patch(value, valueHtml(ctx.states.paperAccount));

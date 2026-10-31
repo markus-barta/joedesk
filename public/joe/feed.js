@@ -252,8 +252,8 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     pollHistory();
     pollResults();
     timers = [
-      setInterval(pollState, POLL_DATA_MS),
-      setInterval(() => { pollHistory(); pollResults(); pollFleet(); if (actionsWanted() || session.signedOut()) pollActions(); }, POLL_HISTORY_MS),
+      setInterval(() => { if (!session.signedOut()) pollState(); }, POLL_DATA_MS),
+      setInterval(() => { if (!session.signedOut()) { pollHistory(); pollResults(); pollFleet(); if (actionsWanted()) pollActions(); } }, POLL_HISTORY_MS),
       setInterval(() => { if (!session.signedOut()) onChange('tick'); }, TICK_MS),
     ];
   }

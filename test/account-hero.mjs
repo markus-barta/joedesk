@@ -3,10 +3,12 @@
 // currencies, the ranges, the chart and its input, Controls and the hint.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { test } from 'node:test';
+import { test, beforeEach } from 'node:test';
 import { htmlDocument } from './fixtures/preview-dom.mjs';
 import { MIN, DAY, iso, valid, words, point, SNAP, NOW, history, ctxFor } from './fixtures/account-fixtures.mjs';
 
+import { freshPageSession } from './fixtures/board-session.mjs';
+beforeEach(t => { const restore = freshPageSession(); t.after(restore); });
 const { boardSession } = await import('../public/joe/transport.js');
 const M = await import('../public/joe/account-model.js');
 const A = await import('../public/joe/account.js');
@@ -180,11 +182,11 @@ test('JOED-156 hero: each range draws its own store; a range longer than the rec
 });
 
 test('JOED-156 hero: a failed read keeps the last good history and says so; without one the chart says it is unavailable', async t => {
-  let answer = { status: 401 };
+  let answer = { status: 503 };
   const p = page(t, { body: () => answer });
   await p.render();
-  assert.equal(boardSession.signedOut(), true);
-  assert.equal(document.querySelector('#acctHero').dataset.history, 'loading', 'auth failure leaves the prior loading render intact');
+  assert.equal(boardSession.signedOut(), false);
+  assert.match(p.text('#acctNote'), /unavailable|failed/i);
   answer = history();
   await A.refreshAccountHistory();
   await p.settle();
@@ -501,12 +503,6 @@ test('JOED-156 fix 4: a worker reads and converts the account history; the page 
   assert.deepEqual(sent[1], { read: 'account', have: 'k1' });
   assert.equal(p.svg().dataset.source, 'daily');
   assert.equal(document.querySelector('#acctHero').dataset.history, 'ok');
-  // An auth failure leaves the complete last good history render intact.
-  const beforeAuth = p.text('#acctNote');
-  reply = () => ({ kind: 'account', status: 401, reason: 'auth_required', value: null, key: null, ms: 1 });
-  await A.refreshAccountHistory();
-  assert.equal(p.text('#acctNote'), beforeAuth);
-  assert.equal(boardSession.signedOut(), true);
   // A failed worker is terminated and hands its read to the page at once.
   reply = () => 'fail';
   await A.refreshAccountHistory();
@@ -521,6 +517,11 @@ test('JOED-156 fix 4: a worker reads and converts the account history; the page 
   const posts = sent.length;
   await A.refreshAccountHistory();
   assert.deepEqual([made.length, sent.length, p.reads.length], [2, posts, 3], 'no third worker and no post to a dead one');
+  // Auth refuses the fallback too and permanently freezes the last render.
+  globalThis.fetch = async () => new Response('{}', { status: 401 });
+  const beforeAuth = p.text('#acctNote');
+  await A.refreshAccountHistory();
+  assert.equal(p.text('#acctNote'), beforeAuth); assert.equal(boardSession.signedOut(), true);
 });
 
 // Mocked timers never fire on their own: a test that waits on one stops at its timeout.
@@ -981,4 +982,14 @@ test('JOED-158 chart parity: normal motion halos, edge chevrons and custom notes
     assert.equal(moved.notes.some(([, text]) => text.includes('below')), below, amount);
     assert.deepEqual(await fresh(ctx), moved, `${amount}: fresh-draw parity`);
   }
+});
+
+test('JOED-173 fix15 cold account expiry stays at its prior loading render after a valid response', async t => {
+  let answer = { status: 401 };
+  const p = page(t, { body: () => answer }); await p.render();
+  assert.equal(boardSession.signedOut(), true);
+  const before = document.querySelector('#acctHero').innerHTML;
+  answer = history(); await A.refreshAccountHistory(); await p.settle();
+  assert.equal(document.querySelector('#acctHero').innerHTML, before);
+  assert.equal(boardSession.signedOut(), true);
 });

@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test, beforeEach } from 'node:test';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { htmlDocument, builders } from './fixtures/preview-dom.mjs';
+import { freshPageSession } from './fixtures/board-session.mjs';
+beforeEach(t => { const restore = freshPageSession(); t.after(restore); });
 const { createBoardSession, boardSession } = await import('../public/joe/transport.js');
 const { createBoardFreeze } = await import('../public/joe/presentation.js');
 const { sendFleetDraft } = await import('../public/joe/fleet-write.js');
@@ -45,21 +47,14 @@ test('JOED-173 fix5 every value section is explicitly marked stale', t => {
   for (const id of ['acctHero', 'deskHero', 'desk-j', 'desk-joe', 'desk-joel', 'positions', 'kept', 'rhero', 'tiles', 'breakdown', 'cal', 'daypanel', 'histChart', 'histCompare', 'jAcct', 'setMain'])
     assert.equal(p.doc.getElementById(id).hasAttribute('data-frozen'), true, id);
 });
-test('JOED-173 fix5 authenticated recovery renders fresh data before stale marking is removed', async t => {
-  const p = shell(t); let recover;
-  assert.equal(typeof p.session.coordinateRecovery, 'function');
-  p.session.coordinateRecovery(async () => { await new Promise(done => { recover = done; }); }, []);
-  p.expire(); p.session.observe('test', { evidence: 'AUTHENTICATED', auth: false }); await Promise.resolve();
-  assert.equal(p.session.signedOut(), true, 'authenticated evidence starts a refresh, not a live display');
-  assert.equal(p.doc.getElementById('app').hasAttribute('data-last-known'), true);
-  recover(); await Promise.resolve();
-  p.session.finishRecovery(() => {
-    assert.equal(p.doc.getElementById('app').hasAttribute('data-last-known'), true);
-    p.doc.getElementById('acctHero').textContent = 'fresh document';
-    p.freeze.rendered('2026-10-14T17:44:02.000Z');
-  });
-  assert.equal(p.doc.getElementById('acctHero').textContent, 'fresh document');
-  assert.equal(p.doc.getElementById('app').hasAttribute('data-last-known'), false);
+test('JOED-173 fix15 validated responses cannot remove stale marking or inert state', t => {
+  const p = shell(t); p.expire();
+  const before = p.doc.getElementById('app').innerHTML;
+  p.session.accept('/joe/state.json', { status: 200, payload: { feeds: { data: { value: valid.data } } } });
+  p.freeze.rendered('2026-10-14T17:44:02.000Z');
+  assert.equal(p.session.signedOut(), true);
+  assert.equal(p.doc.getElementById('app').hasAttribute('inert'), true);
+  assert.equal(p.doc.getElementById('app').innerHTML, before);
 });
 for (const file of ['account.js', 'history.js']) test(`JOED-173 fix5 pre-expiry touch/long-press timer is cancelled: ${file}`, async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
@@ -77,7 +72,7 @@ for (const shape of ['401', 'opaque redirect', 'HTML']) test(`JOED-173 fix5 flee
   await sendFleetDraft(valid['fleet-config'].rev, valid['fleet-config']);
   assert.equal(boardSession.signedOut(), true);
 });
-test('JOED-173 fix5 latest address is queued while frozen and followed after recovery', () => {
+test('JOED-173 fix15 address changes cannot render while frozen', () => {
   const app = source('app.js'), start = app.indexOf('  const follow = '), end = app.indexOf("  addEventListener('popstate'", start);
   const calls = [], state = { frozen: true, hash: '#results' };
   const scope = { places: { step: () => true, saved: () => 0 }, parseRoute: hash => ({ screen: hash.slice(1) }), location: state,
@@ -85,7 +80,7 @@ test('JOED-173 fix5 latest address is queued while frozen and followed after rec
     go: screen => { if (!state.frozen) calls.push(screen); }, queuedRoute: null };
   runInNewContext(app.slice(start, end) + '\nthis.follow = follow;', scope);
   scope.follow(); state.hash = '#history'; scope.follow();
-  assert.equal(scope.queuedRoute?.screen, 'history');
+  assert.deepEqual(calls, []);
 });
 test('JOED-173 fix5 system appearance callback cannot repaint a frozen version', () => {
   const text = source('version-display.js'), start = text.indexOf('export function paintVersions()');
@@ -95,17 +90,17 @@ test('JOED-173 fix5 system appearance callback cannot repaint a frozen version',
   assert.equal(reads, 0);
 });
 
-test('JOED-173 fix5 account-history retry polls while signed out, independent of rendering', async t => {
+test('JOED-173 fix5 account-history automatic polling stops while signed out; the single auth probe owns retries', async t => {
   const A = await builders('account.js', ['store'], 'fix5-poll');
   let reads = 0;
   t.mock.method(globalThis, 'fetch', async () => { reads++; return new Response('{}', { status: 401 }); });
   t.after(() => boardSession.observe('/joe/account-history.json', { evidence: 'AUTHENTICATED', auth: false }));
   boardSession.observe('/joe/account-history.json', { auth: true }); A.store.next = 0;
   assert.equal(typeof A.pollAccountHistory, 'function');
-  await A.pollAccountHistory(); assert.equal(reads, 1);
-  A.store.next = 0; await A.pollAccountHistory(); assert.equal(reads, 2);
+  await A.pollAccountHistory(); assert.equal(reads, 0);
+  A.store.next = 0; await A.pollAccountHistory(); assert.equal(reads, 0);
 });
-for (const kind of ['history', 'results']) test(`JOED-173 fix5 first successful ${kind} worker document survives recovery`, async t => {
+for (const kind of ['history', 'results']) test(`JOED-173 fix5 ${kind} worker discards successful documents while frozen`, async t => {
   const old = Object.getOwnPropertyDescriptor(globalThis, 'self');
   t.after(() => { if (old) Object.defineProperty(globalThis, 'self', old); else delete globalThis.self; });
   let resolve, refused = false, seq = valid[kind].seq;
@@ -117,26 +112,9 @@ for (const kind of ['history', 'results']) test(`JOED-173 fix5 first successful 
   const poll = () => new Promise(done => { resolve = done; handle({ data: kind === 'history' ? 'poll' : 'results' }); });
   await poll(); refused = true; await poll(); handle({ data: { frozen: true } });
   refused = false; seq++; const first = await poll();
-  assert.equal(first.valid, true, 'a validated document may report a previous server rejection');
-  assert.equal(first.kind, kind, 'a recovering body must not be posted as blocked');
-  assert.equal(kind === 'history' ? first.meta.seq : first.index.meta.seq, seq);
-});
-test('JOED-173 fix5 any authenticated feed can start recovery of an account-only expiry', async () => {
-  const session = createBoardSession(); let started = 0;
-  session.coordinateRecovery(async () => { started++; });
-  session.observe('/joe/account-history.json', { auth: true });
-  session.observe('/joe/state.json', { evidence: 'AUTHENTICATED', auth: false }); await Promise.resolve();
-  assert.equal(started, 1); assert.equal(session.signedOut(), true, 'refresh still has to complete and render');
-});
-test('JOED-173 fix5 failed recovery keeps stale markings until a later full refresh', async t => {
-  const p = shell(t); let complete;
-  p.session.coordinateRecovery(async () => { await new Promise(done => { complete = done; }); });
-  p.expire(); p.session.observe('other', { evidence: 'AUTHENTICATED', auth: false }); await Promise.resolve();
-  p.session.accept('state', { status: 503 });
-  let rendered = false;
-  assert.equal(p.session.finishRecovery(() => { rendered = true; }), false);
-  assert.equal(rendered, false); assert.equal(p.doc.getElementById('app').hasAttribute('inert'), true);
-  complete(); await Promise.resolve();
+  assert.equal(first.kind, 'blocked');
+  assert.equal(first.feed, kind);
+  assert.equal(first.meta, undefined); assert.equal(first.index, undefined);
 });
 
 test('JOED-173 fix5 account focusout cannot change retained Controls after expiry', async t => {
@@ -171,22 +149,14 @@ for (const id of ['acctChart', 'histChart', 'heroChart', 'curve']) test(`JOED-17
   assert.equal(tips, 0); assert.equal(doc.querySelector('.ctip').textContent, '');
 });
 
-for (const malformed of [false, true]) test(`JOED-173 fix5 recovery distinguishes recorded contract failure from invalid new data: malformed=${malformed}`, async t => {
+for (const malformed of [false, true]) test(`JOED-173 fix15 state response never leaves signed-out: malformed=${malformed}`, async t => {
   const { createFeed } = await import('../public/joe/feed.js');
   const session = createBoardSession();
-  let finish = () => {}, recovery;
-  session.coordinateRecovery(async () => { await new Promise(done => { finish = done; }); }, ['/joe/state.json', '/joe/history.json', '/joe/history-continuity.json', '/joe/results.json', '/joe/fleet-config.json']);
   const feed = createFeed(() => {}, () => {}, '', { session }); t.after(feed.stop);
-  t.mock.method(globalThis, 'fetch', async url => new Response(JSON.stringify(String(url).endsWith('state.json')
-    ? { serverNow: valid.data.receivedAt, feeds: { data: { value: malformed ? {} : valid.data, reason: 'contract_invalid' } }, panels: {} }
-    : String(url).includes('continuity') ? {} : String(url).includes('history') ? valid.history : String(url).includes('fleet-config') ? valid['fleet-config'] : valid.results),
-  // This regression concerns state.json's retained snapshot. History/Results
-  // failure headers are independently tested as retained feed failures.
-  { headers: { 'X-Joe-Received-At': valid.data.receivedAt,
-    ...(String(url).endsWith('state.json') ? { 'X-Joe-Feed-Reason': 'contract_invalid' } : {}) } }));
+  t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({ serverNow: valid.data.receivedAt,
+    feeds: { data: { value: malformed ? {} : valid.data, reason: 'contract_invalid' } } })));
   session.observe('/joe/state.json', { auth: true });
+  const frozen = structuredClone(feed.select());
   await feed.refreshState();
-  const rendered = session.finishRecovery(() => { recovery = true; });
-  assert.equal(rendered, !malformed); assert.equal(Boolean(recovery), !malformed);
-  finish(); await Promise.resolve();
+  assert.equal(session.signedOut(), true); assert.deepEqual(feed.select(), frozen);
 });

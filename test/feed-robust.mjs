@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { test } from 'node:test';
+import { test, beforeEach } from 'node:test';
 import './fixtures/preview-dom.mjs';
+import { freshPageSession } from './fixtures/board-session.mjs';
+beforeEach(t => { const restore = freshPageSession(); t.after(restore); });
 const { createFeed } = await import('../public/joe/feed.js');
 const { statusPresentation } = await import('../public/joe/health.js');
 const { readJSON, createBoardSession, boardSession } = await import('../public/joe/transport.js');
@@ -233,11 +235,11 @@ for (const [name, response] of Object.entries(authResponses)) test(`JOED-173 pro
   assert.equal(feed.signedOut(), true); assert.deepEqual(settings.snapshot(), before); assert.equal(feed.select(), selected);
   assert.equal((await settings.save({ accountStart: null })).ok, false, 'frozen display never grants write permission');
   fail503 = true; await settings.refresh(); await feed.refresh();
-  assert.equal(feed.signedOut(), false, '503 supersedes the auth refusal and the other reads prove sign-in');
+  assert.equal(feed.signedOut(), true, '503 and successful sibling reads cannot reopen the old document');
   await settings.refresh();
-  assert.equal(settings.snapshot().reason, 'refresh_failed', 'the recovered setting shows its own failure');
+  assert.deepEqual(settings.snapshot(), before, 'the settings baseline remains frozen');
   refused = fail503 = false; await settings.refresh();
-  assert.equal(feed.signedOut(), false); assert.deepEqual(settings.snapshot(), before);
+  assert.equal(feed.signedOut(), true); assert.deepEqual(settings.snapshot(), before);
 });
 
 test('JOED-173 fix1 Medium: HTTP 200 history_compacted metadata stays accepted in worker and page', async t => {
@@ -284,13 +286,12 @@ for (const route of ['state.json', 'history.json', 'results.json', 'account-hist
 }
 
 for (const route of ['state.json', 'history.json', 'history-continuity.json', 'results.json', 'fleet-config.json', 'fleet-config/actions.json']) {
-  test(`JOED-173 freeze, 503 after 401 and recovery: ${route}`, async t => {
+  test(`JOED-173 freeze survives 503 after 401 and all-200: ${route}`, async t => {
     const clock = scheduler(t); property(t, 'Worker', undefined);
     let refused = false, fail503 = false;
     t.mock.method(globalThis, 'fetch', async url => fail503 ? new Response('{}', { status: 503 })
       : refused && String(url).endsWith(route) ? authResponses['401']() : reply(url));
     const session = createBoardSession();
-    const stop = session.coordinateRecovery(() => new Promise(() => {})); t.after(stop);
     const feed = createFeed(() => {}, () => {}, '', { session }); t.after(feed.stop);
     await feed.refresh(); await feed.refreshActions();
     const selected = feed.select();
@@ -300,23 +301,20 @@ for (const route of ['state.json', 'history.json', 'history-continuity.json', 'r
     assert.ok(Object.values(feed.feeds).every(f => f.reason !== 'auth_required'), 'no auth failure enters a feed');
     fail503 = true; const frozenStores = structuredClone(feed.feeds);
     clock.advance(125000); await feed.refresh(); await feed.refreshActions();
-    assert.equal(feed.select(), selected, 'the selection stays frozen until recovery renders');
+    assert.equal(feed.select(), selected, 'the selection stays frozen for this document');
     for (const [name, record] of Object.entries(feed.feeds)) {
       assert.deepEqual(record.value, frozenStores[name].value, 'failed attempts keep the last-good document');
-      assert.equal(record.reason, session.recovering() ? 'refresh_failed' : frozenStores[name].reason,
-        'recovery stores honest failures; without positive auth evidence the store remains frozen');
+      assert.equal(record.reason, frozenStores[name].reason, 'no late response changes a frozen reason');
     }
     assert.equal(feed.now(), selected.now, 'the anchored presentation clock is frozen');
     assert.deepEqual(selected.feeds, stores, 'no value, reason or receipt in last rendered selection changes');
     refused = fail503 = false; await feed.refresh(); await feed.refreshActions();
-    assert.equal(session.finishRecovery(() => true), true);
-    assert.equal(feed.signedOut(), false); assert.notEqual(feed.select(), selected);
-    clock.advance(2000); const resumed = feed.select(); clock.advance(1000);
-    assert.notEqual(feed.select().now, resumed.now, 'clock resumes');
+    assert.equal(feed.signedOut(), true); assert.equal(feed.select(), selected);
+    clock.advance(2000); assert.equal(feed.now(), selected.now, 'clock never resumes in this document');
   });
 }
 
-test('JOED-173 a session recovers per endpoint; unrelated successes and network errors cannot clear it', () => {
+test('JOED-173 fix15 a session never recovers from any endpoint response', () => {
   const session = createBoardSession();
   let changes = 0;
   const stop = session.subscribe(() => changes++);
@@ -326,12 +324,12 @@ test('JOED-173 a session recovers per endpoint; unrelated successes and network 
   session.observe('state', { evidence: 'AUTHENTICATED', auth: false });
   assert.equal(session.signedOut(), true);
   session.observe('healthz', { evidence: 'AUTHENTICATED', auth: false });
-  assert.equal(session.signedOut(), false);
-  assert.equal(changes, 2, 'only board-level transitions announce');
+  assert.equal(session.signedOut(), true);
+  assert.equal(changes, 1, 'only expiry announces; successful responses do not transition');
   stop();
 });
 
-for (const route of ['history.json', 'history-continuity.json', 'results.json']) test(`JOED-173 actual history worker reports auth and recovery: ${route}`, async t => {
+for (const route of ['history.json', 'history-continuity.json', 'results.json']) test(`JOED-173 actual history worker freezes permanently on auth: ${route}`, async t => {
   let worker, refused = false;
   property(t, 'self', { postMessage(data) { worker.onmessage({ data }); } });
   await import(`../public/joe/history-worker.js?joed173-${route}`);
@@ -344,9 +342,9 @@ for (const route of ['history.json', 'history-continuity.json', 'results.json'])
   refused = true; await feed.refresh();
   assert.equal(feed.signedOut(), true);
   refused = false; await feed.refresh();
-  assert.equal(statusPresentation(feed.select()).reason, 'board_ok');
+  assert.equal(feed.signedOut(), true);
   await feed.refresh();
-  assert.equal(statusPresentation(feed.select()).reason, 'board_ok', 'unchanged worker replies preserve recovered sign-in');
+  assert.equal(feed.signedOut(), true, 'unchanged worker replies never restore sign-in');
 });
 
 for (const mode of ['page', 'worker']) test(`JOED-173 account history ${mode} participates in the board session`, async t => {
@@ -374,7 +372,7 @@ for (const mode of ['page', 'worker']) test(`JOED-173 account history ${mode} pa
   await feed.refresh();
   assert.equal(feed.signedOut(), true, 'main feed cannot clear an account read failure');
   refused = false; await refreshAccountHistory();
-  assert.equal(statusPresentation(feed.select()).reason, 'board_ok');
+  assert.equal(feed.signedOut(), true);
 });
 
 for (const [name, response, expected] of [

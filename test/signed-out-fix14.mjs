@@ -38,10 +38,14 @@ const response = r => {
   return res;
 };
 
-async function board(t, mode) {
+async function board(t, mode, sidecarFirst = false) {
   const route = '/joe/history.json', session = createBoardSession(), workers = [];
   const replies = new Map(Object.entries(responses).map(([url, payload]) => [url, good(payload)]));
-  const fetcher = async url => response(replies.get(String(url).replace(/^.*\/joe\//, '').replace(/^\.\//, '')) ?? bad);
+  const delay = url => String(url).includes('continuity') !== sidecarFirst;
+  const fetcher = async url => {
+    if (delay(url)) await new Promise(done => setImmediate(done));
+    return response(replies.get(String(url).replace(/^.*\/joe\//, '').replace(/^\.\//, '')) ?? bad);
+  };
   const oldWorker = Object.getOwnPropertyDescriptor(globalThis, 'Worker'), oldFetch = globalThis.fetch;
   globalThis.fetch = fetcher;
   globalThis.Worker = mode === 'fallback' ? undefined : class {
@@ -58,9 +62,10 @@ async function board(t, mode) {
         });`;
       this.node = new NodeWorker(new URL(`data:text/javascript,${encodeURIComponent(boot)}`), { env: { ...process.env, JOED_FIX14_WORKER: '1' } });
       workers.push(this.node);
-      this.node.on('message', data => {
+      this.node.on('message', async data => {
         if (!data.request) { this.onmessage?.({ data }); return; }
         const r = replies.get(data.url.replace('/joe/', '')) ?? bad;
+        if (delay(data.url)) await new Promise(done => setImmediate(done));
         this.node.postMessage({ response: data.request, error: r.network, status: r.status,
           body: r.body ?? JSON.stringify(r.payload), headers: { 'X-Joe-Server-Now': valid.history.receivedAt, ...r.headers } });
       });
@@ -72,10 +77,8 @@ async function board(t, mode) {
   const feed = createFeed(() => {}, () => {}, '', { session });
   const doc = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
   const freeze = createBoardFreeze(doc, session);
-  let release;
-  const stop = session.coordinateRecovery(() => new Promise(done => { release = done; }));
   t.after(async () => {
-    release?.(); stop(); freeze.stop(); feed.stop(); await Promise.all(workers.map(w => w.terminate()));
+    freeze.stop(); feed.stop(); await Promise.all(workers.map(w => w.terminate()));
     globalThis.fetch = oldFetch;
     if (oldWorker) Object.defineProperty(globalThis, 'Worker', oldWorker); else delete globalThis.Worker;
   });
@@ -89,83 +92,60 @@ async function board(t, mode) {
       replies.set('history.json', history); replies.set('history-continuity.json', sidecar);
       await feed.refreshHistory(); await feed.whenIdle();
     },
-    finish: () => session.finishRecovery(() => { feed.select(); freeze.rendered(feed.now()); return true; }),
   };
 }
 
 if (!process.env.JOED_FIX14_WORKER) {
-  for (const failure of ['503', '404', 'network', 'invalid JSON'])
-  test(`JOED-173 fix14 History success survives Continuity ${failure}, worker and fallback`, async t => {
-    for (const mode of ['worker', 'fallback']) await t.test(mode, async t => {
-      const b = await board(t, mode), next = { ...valid.history, seq: valid.history.seq + 1 };
-      const sidecar = failure === 'network' ? { network: true } : failure === 'invalid JSON' ? { status: 200, body: '{bad' } : { status: Number(failure), payload: {} };
-      await b.poll(good(next), sidecar); await b.poll(good(next), sidecar);
-      assert.equal(b.finish(), true, 'validated History proves sign-in independently of its sibling');
-      assert.equal(b.session.signedOut(), false);
-      assert.equal(b.feed.select().feeds.history.value.seq, next.seq);
-      assert.equal(b.doc.getElementById('signedOutBanner').hidden, true);
-      assert.equal(b.doc.getElementById('app').hasAttribute('inert'), false);
-    });
-  });
-  test('JOED-173 fix14 invalid Continuity intervals never prove sign-in, worker and fallback', async t => {
-    for (const mode of ['worker', 'fallback']) await t.test(mode, async t => {
-      const b = await board(t, mode);
-      const malformed = { ...continuity, intervals: [['bad', 'bad']] };
-      await b.poll(bad, good(malformed)); await b.poll(bad, good(malformed));
-      assert.equal(b.finish(), false, 'a 200 failing validContinuity is not sign-in evidence');
-      assert.equal(b.session.signedOut(), true);
-      assert.equal(b.doc.getElementById('signedOutBanner').hidden, false);
-      assert.equal(b.doc.getElementById('app').hasAttribute('inert'), true);
-    });
-  });
-  test('JOED-173 fix14 good Continuity beside History 401 survives subsequent both-503, worker and fallback', async t => {
-    for (const mode of ['worker', 'fallback']) await t.test(mode, async t => {
-      const b = await board(t, mode);
-      await b.poll({ status: 401, payload: {} }, good(continuity));
-      assert.equal(b.finish(), false, 'latest History 401 blocks despite good Continuity');
-      await b.poll(bad, bad); await b.poll(bad, bad);
-      assert.equal(b.finish(), true, 'the earlier validated Continuity response survives its sibling refusal');
-      assert.equal(b.session.signedOut(), false);
-      assert.equal(b.feed.select().states.history.reason, 'refresh_failed');
-    });
-  });
-  for (const endpoint of Object.keys(responses)) test(`JOED-173 fix14 endpoint validator and sign-in HTML: ${endpoint}`, async t => {
-    const key = `/joe/${endpoint}`, session = createBoardSession();
-    t.after(session.coordinateRecovery(() => new Promise(() => {})));
-    session.observe(key, { auth: true });
-    for (const r of [good({}), { status: 200, body: '<!doctype html><html><form>Sign in</form></html>' },
-      { status: 200, body: '<form>Sign in</form>', headers: { 'Content-Type': 'text/html' } },
-      { status: 200, body: '{bad' }, { status: 200, payload: responses[endpoint], crossedOrigin: true }, { status: 304 }, bad]) {
-      const result = await readJSON(key, {}, { fetcher: async () => response(r) });
-      session.accept(key, result);
-      assert.equal(session.finishRecovery(() => true), false, 'invalid, HTML and redirected bodies cannot prove sign-in');
-      assert.equal(session.signedOut(), true);
-      if (r.crossedOrigin) assert.equal(result.evidence, 'NO_EVIDENCE');
-    }
-    const result = await readJSON(key, {}, { fetcher: async () => response(good(responses[endpoint])) });
-    session.accept(key, result);
-    assert.equal(session.finishRecovery(() => true), true, 'only this endpoint’s valid body proves sign-in');
-    assert.equal(result.evidence, 'AUTHENTICATED');
-  });
-  test('JOED-173 fix14 worker/fallback parity uses the same table of endpoint sequences', async t => {
+  test('JOED-173 fix15 one worker/fallback parity table: every response sequence preserves the frozen display', async t => {
     const table = [
-      [bad, good({ ...continuity, intervals: [['bad', 'bad']] }), true],
-      [good({ ...valid.history, seq: valid.history.seq + 1 }), bad, false],
-      [{ status: 401, payload: {} }, good(continuity), true],
-      [bad, bad, false],
-      [{ status: 401, payload: {} }, bad, true],
-      [bad, { status: 200, body: '{bad' }, true],
-      [bad, good(continuity), false],
+      [good({ ...valid.history, seq: valid.history.seq + 1 }), bad],
+      [good(valid.history), { status: 404, payload: {} }],
+      [good(valid.history), { network: true }],
+      [good(valid.history), { status: 200, body: '{bad' }],
+      [{ status: 401, payload: {} }, good(continuity)],
+      [bad, bad],
+      [good(valid.history), { status: 401, payload: {} }],
+      [bad, bad],
+      [bad, good({ ...continuity, intervals: [['bad', 'bad']] })],
+      [good(valid.history), good(continuity), true],
+      [good(valid.history), good(continuity)],
     ];
     const states = {};
-    for (const mode of ['worker', 'fallback']) await t.test(mode, async t => {
-      const b = await board(t, mode); states[mode] = [];
-      for (const [history, sidecar, signedOut] of table) {
-        await b.poll(history, sidecar); await b.poll(history, sidecar); b.finish();
-        states[mode].push(b.session.signedOut());
-        assert.equal(b.session.signedOut(), signedOut);
+    for (const mode of ['worker', 'fallback']) for (const sidecarFirst of [false, true]) await t.test(`${mode} / ${sidecarFirst ? 'Continuity first' : 'History first'}`, async t => {
+      const b = await board(t, mode, sidecarFirst), key = `${mode}/${sidecarFirst}`;
+      const frozen = structuredClone(b.feed.select()), markup = b.doc.getElementById('app').innerHTML;
+      states[key] = [];
+      for (const [history, sidecar, resultsFailed] of table) {
+        await b.poll(history, sidecar); await b.poll(history, sidecar);
+        // All other feeds succeed together; neither order nor sibling matters.
+        for (const [url, payload] of Object.entries(responses)) if (!['history.json', 'history-continuity.json'].includes(url)) b.replies.set(url, good(payload));
+        const next = structuredClone(valid.data); next.seq++; next.brokerAccount.equity.amount = '29001';
+        b.replies.set('state.json', good({ serverNow: next.receivedAt, feeds: { data: { value: next } } }));
+        if (resultsFailed) b.replies.set('results.json', bad);
+        await b.feed.refresh(); await b.feed.refreshActions();
+        b.session.accept('/joe/board-settings.json', good(responses['board-settings.json']));
+        b.session.accept('/joe/account-history.json', good(responses['account-history.json']));
+        states[key].push(b.session.signedOut());
+        assert.equal(b.session.signedOut(), true);
+        assert.deepEqual(b.feed.select(), frozen);
+        assert.equal(b.doc.getElementById('app').innerHTML, markup);
+        assert.equal(b.doc.getElementById('app').hasAttribute('inert'), true);
+        assert.equal(b.doc.getElementById('signedOutBanner').hidden, false);
       }
     });
-    assert.deepEqual(states.worker, states.fallback);
+    assert.deepEqual(states['worker/false'], states['fallback/false']);
+    assert.deepEqual(states['worker/true'], states['fallback/true']);
+    assert.deepEqual(states['worker/false'], states['worker/true']);
+  });
+  for (const endpoint of Object.keys(responses)) test(`JOED-173 fix15 any protected read freezes until reload: ${endpoint}`, async () => {
+    const key = `/joe/${endpoint}`, session = createBoardSession();
+    session.observe(key, { auth: true });
+    for (const r of [good({}), { status: 200, body: '<form>Sign in</form>' }, { status: 200, body: '{bad' },
+      { status: 200, payload: responses[endpoint], crossedOrigin: true }, { status: 304 }, bad, good(responses[endpoint])]) {
+      const result = await readJSON(key, {}, { fetcher: async () => response(r) });
+      assert.equal(session.accept(key, result), false);
+      assert.equal(session.signedOut(), true);
+    }
+    assert.equal(createBoardSession().signedOut(), false, 'a new document has a new session');
   });
 }
