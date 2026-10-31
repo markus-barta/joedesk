@@ -1537,13 +1537,19 @@ test(`JOED-173 fix13 auth evidence: ${route} / ${failure}`, async t => {
   }
 });
 
-test('JOED-173 fix13 validation does not revoke an earlier authenticated response since expiry', async t => {
+for (const latest of ['validation', '503', '401 then 503'])
+test(`JOED-173 fix13 ${latest} does not revoke an earlier authenticated response since expiry`, async t => {
   const { createBoardSession } = await import('../public/joe/transport.js');
   const s = createBoardSession(), key = '/joe/results.json';
   t.after(s.coordinateRecovery(async () => {}));
   s.observe(key, { auth: true });
   s.accept(key, { auth: false, status: 200 });
-  s.accept(key, { auth: false, status: 200 }); s.invalidateRecovery(key);
+  if (latest === '401 then 503') {
+    s.accept(key, { auth: true, status: 401 });
+    assert.equal(s.finishRecovery(() => true), false);
+  }
+  s.accept(key, latest === 'validation' ? { auth: false, status: 200 } : { status: 503 });
+  s.invalidateRecovery(key);
   assert.equal(s.finishRecovery(() => true), true);
 });
 

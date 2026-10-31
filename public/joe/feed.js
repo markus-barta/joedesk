@@ -122,7 +122,6 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
           return;
         }
         if (evidence.some(([, status]) => !['auth', 'ok', 'error'].includes(status?.state))) {
-          for (const [key] of evidence) session.invalidateRecovery(key);
           return;
         }
         const acceptance = evidence.map(([key, status]) => {

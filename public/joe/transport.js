@@ -92,8 +92,9 @@ export function createBoardSession() {
     },
     observe(key, { auth } = {}) {
       const before = session.signedOut();
+      if (auth === true && !before) { authenticated.clear(); priorAuthentication.clear(); epoch++; }
+      priorAuthentication.set(key, authenticated.has(key));
       if (auth === true) {
-        if (!before) { authenticated.clear(); priorAuthentication.clear(); epoch++; }
         blocked.add(key);
         frozen = true;
       }
@@ -101,7 +102,6 @@ export function createBoardSession() {
       // A 503 can supersede a 401, but cannot itself prove a new sign-in.
       if (auth !== true) blocked.delete(key);
       if (auth === false) {
-        priorAuthentication.set(key, authenticated.has(key));
         if (before) authenticated.add(key);
       }
       if (before && auth !== true && authenticated.size) {

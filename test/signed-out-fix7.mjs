@@ -78,7 +78,7 @@ async function board(t, kind, { cold = false, mode = 'worker' } = {}) {
 // Importing this module in the worker installs hooks only, never starts nested tests.
 if (!process.env.JOED_FIX7_WORKER) {
   for (const kind of ['history', 'results']) for (const mode of ['worker', 'fallback', 'disabled'])
-    test(`JOED-173 fix9 ${kind} cold ${mode} retains a validated sequence_replayed body without proving recovery`, async t => {
+    test(`JOED-173 fix9 ${kind} cold ${mode} retains a validated sequence_replayed body with authentication tracked separately`, async t => {
       const b = await board(t, kind, { cold: true, mode });
       assert.equal(b.feed.feeds[kind], null);
       b.set({ status: 200, payload: valid[kind], headers: { 'X-Joe-Feed-Reason': 'sequence_replayed' } });
@@ -98,13 +98,13 @@ if (!process.env.JOED_FIX7_WORKER) {
       assert.equal(b.feed.feeds[kind].value.seq, newer.seq, 'an actual regression preserves the retained document');
       assert.equal(b.feed.feeds[kind].value.receivedAt, retained.receivedAt);
       b.expire(); await b.refresh();
-      assert.equal(b.finish(), false, 'a server failure label cannot prove recovery');
-      assert.equal(b.session.signedOut(), true);
+      assert.equal(b.finish(), kind === 'history', 'the continuity response proves authentication independently of the failed document');
+      assert.equal(b.session.signedOut(), kind !== 'history');
       assert.equal(b.feed.feeds[kind].value.seq, newer.seq);
       b.set({ status: 200, payload: newer, headers: { 'X-Joe-Feed-Reason': 'sequence_replayed' } }); await b.refresh();
       assert.equal(b.finish(), false, 'an equal retained body with a server failure still cannot recover');
       b.set({ status: 200, payload: newer }); await b.refresh();
-      assert.equal(b.finish(), true, 'a later clean equal document can recover');
+      assert.equal(b.finish(), kind !== 'history', 'a later clean equal document recovers Results or clears already-recovered History');
       assert.equal(b.feed.select().states[kind].state, 'fresh');
     });
   test('JOED-173 fix7 history recovery resends the document discarded across a continuity 503 and null-200 replay', async t => {
@@ -136,10 +136,12 @@ if (!process.env.JOED_FIX7_WORKER) {
           [b.path]: { ...data.status[b.path], document: { seq: valid[kind].seq + 1, receivedAt: valid[kind].receivedAt } } } };
       });
       await b.refresh();
-      assert.equal(b.finish(), false);
-      assert.equal(b.session.signedOut(), true);
-      assert.ok(b.doc.querySelectorAll('[data-frozen]').length);
-      b.transform(data => data); await b.refresh(); assert.equal(b.finish(), true);
+      const recovered = kind === 'history' && shape !== 'missing status';
+      assert.equal(b.finish(), recovered, 'a separate authenticated continuity response can recover the session');
+      assert.equal(b.session.signedOut(), !recovered);
+      assert.equal(Boolean(b.doc.querySelectorAll('[data-frozen]').length), !recovered);
+      assert.equal(b.feed.feeds[kind].value.seq, valid[kind].seq);
+      b.transform(data => data); await b.refresh(); assert.equal(b.finish(), !recovered);
     });
     test(`JOED-173 fix7 ${kind} accepts equal sequence and receipt on recovery`, async t => {
       const b = await board(t, kind); b.expire(); await b.refresh();
@@ -151,11 +153,12 @@ if (!process.env.JOED_FIX7_WORKER) {
       const b = await board(t, kind), original = valid[kind]; if (frozen) b.expire();
       b.set({ status: 200, payload: { ...original, seq: original.seq + 1, receivedAt: new Date(Date.parse(original.receivedAt) - 1000).toISOString() } });
       await b.refresh();
-      assert.equal(b.finish(), false);
-      assert.equal(b.session.signedOut(), frozen);
+      const recovered = frozen && kind === 'history';
+      assert.equal(b.finish(), recovered, 'continuity may prove authentication while the document remains rejected');
+      assert.equal(b.session.signedOut(), frozen && !recovered);
       assert.equal(b.messages.at(-1).status[b.path].reason, 'sequence_replayed');
       assert.equal(b.feed.feeds[kind].value.seq, original.seq);
-      assert.equal(Boolean(b.doc.querySelectorAll('[data-frozen]').length), frozen);
+      assert.equal(Boolean(b.doc.querySelectorAll('[data-frozen]').length), frozen && !recovered);
     });
     for (const mode of ['worker', 'fallback']) for (const failure of ['503', 'header failure', 'malformed', 'replay', 'receivedAt regression']) test(`JOED-173 fix7 ${kind} latest ${failure} retains its reason after an earlier authenticated success, ${mode}`, async t => {
       const b = await board(t, kind), original = valid[kind];
@@ -190,21 +193,22 @@ if (!process.env.JOED_FIX7_WORKER) {
     });
   }
   for (const kind of ['history', 'results']) {
-    test(`JOED-173 fix8 fallback ${kind} cannot recover a newer sequence with an older receivedAt after worker.onerror`, async t => {
+    test(`JOED-173 fix13 fallback ${kind} rejects a regressed receipt while a sibling read recovers authentication after worker.onerror`, async t => {
       const b = await board(t, kind), original = valid[kind];
       b.set({ status: 401, payload: {} }); await b.refresh();
       assert.equal(b.session.signedOut(), true);
       b.set({ status: 200, payload: { ...original, seq: original.seq + 1,
         receivedAt: new Date(Date.parse(original.receivedAt) - 1000).toISOString() } });
       await b.fallback();
-      assert.equal(b.finish(), false, 'receipt regression cannot end sign-out');
-      assert.equal(b.session.signedOut(), true);
+      assert.equal(b.finish(), true, 'the independent fallback read proves authentication');
+      assert.equal(b.session.signedOut(), false);
       assert.equal(b.feed.feeds[kind].value.seq, original.seq);
       assert.equal(b.feed.feeds[kind].value.receivedAt, original.receivedAt);
       assert.equal(b.feed.feeds[kind].reason, 'sequence_replayed');
-      assert.ok(b.doc.querySelectorAll('[data-frozen]').length);
+      assert.equal(b.doc.querySelectorAll('[data-frozen]').length, 0);
+      assert.equal(b.feed.select().states[kind].reason, 'sequence_replayed');
       b.set({ status: 200, payload: original }); await b.refresh();
-      assert.equal(b.finish(), true, 'a later equal valid document can recover');
+      assert.equal(b.finish(), false, 'already recovered; the later valid document clears its failure');
       assert.equal(b.feed.select().states[kind].state, 'fresh');
     });
   }
@@ -222,8 +226,9 @@ if (!process.env.JOED_FIX7_WORKER) {
           receivedAt: outcome === 'receivedAt regression' ? new Date(Date.parse(original.receivedAt) - 1000).toISOString() : original.receivedAt } });
       if (mode === 'fallback') await b.fallback(); else await b.refresh();
       const recovered = b.finish();
-      assert.equal(recovered, frozen && ok);
-      const signedOut = outcome === '401' || (frozen && !ok);
+      const positiveAuth = ok || kind === 'history' || mode === 'fallback';
+      assert.equal(recovered, frozen && outcome !== '401' && positiveAuth);
+      const signedOut = outcome === '401' || (frozen && !positiveAuth);
       assert.equal(b.session.signedOut(), signedOut);
       assert.equal(b.doc.getElementById('app').hasAttribute('data-last-known'), signedOut);
       assert.equal(Boolean(b.doc.querySelectorAll('[data-frozen]').length), signedOut);
