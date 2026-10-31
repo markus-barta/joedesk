@@ -1,10 +1,6 @@
 // All JSON reads use this boundary, on the page and in workers. Authentication
 // evidence is separate from a bad document or an unavailable board server.
 import { validateContract, REASONS } from './contracts/index.mjs';
-import { validContinuity } from './history-continuity.js';
-import { acceptAccountHistory } from './account-model.js';
-import { acceptActions } from './settings-model.js';
-import { validateBoardSettings } from './board-settings-validation.js';
 
 export const AUTH_FAILURE = 'AUTH_FAILURE';
 export const AUTHENTICATED = 'AUTHENTICATED';
@@ -13,18 +9,6 @@ export const NO_EVIDENCE = 'NO_EVIDENCE';
 // The endpoint owns validation; a parsed 200 alone never proves sign-in.
 function validBody(url, response) {
   const path = new URL(url, 'https://board/joe/').pathname, body = response.payload;
-  const contract = { '/joe/data.json': 'data', '/joe/history.json': 'history',
-    '/joe/results.json': 'results', '/joe/fleet-config.json': 'fleet-config', '/joe/healthz': 'healthz' }[path];
-  if (contract) return validateContract(contract, body).ok;
-  if (path === '/joe/history-continuity.json') return validContinuity(body);
-  if (path === '/joe/account-history.json') {
-    response.validated = acceptAccountHistory(body);
-    return true;
-  }
-  if (path === '/joe/fleet-config/actions.json') return acceptActions(body) !== null;
-  if (path === '/joe/board-settings.json') return body && !validateBoardSettings({ accountStart: body.accountStart }) &&
-    ['missing', 'invalid', 'unreadable', 'unset', null].includes(body.reason) &&
-    ((body.reason === null) === (body.accountStart !== null));
   if (path === '/joe/state.json') {
     const data = body?.feeds?.data;
     return Boolean(data && (data.value ? validateContract('data', data.value).ok
@@ -82,7 +66,7 @@ export async function readJSON(url, init = {}, { text = false, fetcher = (...arg
           ...(ok ? { auth: false } : {}), clock, at };
       })(),
     ]);
-    const evidence = classifyResponse(url, result);
+    const evidence = result.auth === true ? AUTH_FAILURE : NO_EVIDENCE;
     return { ...result, evidence };
   } catch { return { status: 0, evidence: NO_EVIDENCE, clock, at, ...(timedOut ? { timedOut: true } : {}) }; } finally { clearTimeout(timer); }
 }
@@ -94,77 +78,78 @@ export const readFailure = ({ auth, status }) => auth ? 'auth_required' : status
 export const documentRegressed = (retained, incoming) => Boolean(retained && incoming &&
   (incoming.seq < retained.seq || Date.parse(incoming.receivedAt) < Date.parse(retained.receivedAt)));
 
-// History/Results use this policy in the worker, on worker replies, and after
-// worker failure. The page's retained document remains the ordering floor even
-// when the fallback's raw-document cache has never received a value.
-export function acceptRecovery(retained, incoming, status) {
-  const valid = incoming && Number.isSafeInteger(incoming.seq) && Number.isFinite(Date.parse(incoming.receivedAt));
-  const ordered = valid && !documentRegressed(retained, incoming);
-  const reason = status?.auth === true ? 'auth_required'
-    : !valid ? status?.reason ?? 'contract_invalid'
-    : !ordered ? 'sequence_replayed'
-    : status?.valid === false ? status?.reason ?? 'contract_invalid'
-    : status?.state !== 'ok' || status?.auth !== false ? status?.reason ?? 'refresh_failed'
-    : status.reason ?? null;
-  return { ok: reason === null, reason };
-}
-
-// The shell coordinates recovery: any authenticated read can start a full
-// refresh, while the displayed document stays frozen until that refresh renders.
+// Expiry is a page-lifetime latch. Only a new document creates a live session.
 export function createBoardSession() {
-  const latest = new Map(), authenticated = new Set(), listeners = new Set();
-  const blocked = () => [...latest.values()].includes(AUTH_FAILURE);
-  let recover = null, recovering = false, recoveryOK = false, frozen = false, epoch = 0;
+  const listeners = new Set();
+  let frozen = false, epoch = 0;
   const session = {
-    signedOut: () => frozen || blocked(),
-    recovering: () => recovering,
+    signedOut: () => frozen,
     epoch: () => epoch,
-    accepting: () => !session.signedOut() || recovering,
-    coordinateRecovery(callback) { recover = callback; return () => { recover = null; recovering = false; frozen = false; }; },
-    finishRecovery(render) {
-      if (!recovering || !recoveryOK || blocked() || !authenticated.size) return false;
-      recovering = frozen = false;
-      try {
+    accepting: () => !frozen,
+    observe(_key, response = {}) {
+      if (!frozen && !response.crossedOrigin && (response.auth === true || AUTH.has(response.status) || response.evidence === AUTH_FAILURE)) {
+        frozen = true; epoch++;
         for (const listener of listeners) listener();
-        if (render() !== false) return true;
-      } catch { /* Keep the last marked document and retry after another read. */ }
-      frozen = true;
-      for (const listener of listeners) listener();
-      return false;
-    },
-    observe(key, response = {}) {
-      const evidence = response.evidence ?? classifyResponse(key, response);
-      const before = session.signedOut();
-      if (evidence === AUTH_FAILURE && !before) { authenticated.clear(); epoch++; }
-      latest.set(key, evidence);
-      if (evidence === AUTH_FAILURE) frozen = true;
-      // Track the latest attempt separately from positive authentication.
-      // A 503 can supersede a 401, but cannot itself prove a new sign-in.
-      if (evidence === AUTHENTICATED) {
-        if (before) authenticated.add(key);
       }
-      if (before && evidence !== AUTH_FAILURE && authenticated.size) {
-        if (!recover && !blocked()) frozen = false;
-        if (recover && !recovering) {
-          recovering = recoveryOK = true;
-          // Let the successful read finish acceptance before refreshing it.
-          queueMicrotask(async () => {
-            try { await recover(); } catch { recoveryOK = false; }
-            finally { recovering = false; }
-          });
-        }
-      }
-      if (before !== session.signedOut()) for (const listener of listeners) listener();
-      return evidence;
     },
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
-    // Auth responses never enter stores. During recovery each non-auth attempt
-    // contributes its own data or failure reason under the frozen selection.
-    accept(key, response) {
-      const evidence = session.observe(key, response);
-      return evidence !== AUTH_FAILURE && session.accepting();
-    },
+    accept(key, response) { session.observe(key, response); return !frozen; },
   };
   return session;
 }
 export const boardSession = createBoardSession();
+
+export const PROBE_RELOAD_KEY = 'joe-auth-probe-reloads-v1';
+const RELOAD_WINDOW_MS = 10 * 60 * 1000;
+// One normal, validated protected read. This never accepts data into a store.
+export function startAuthProbe(session, {
+  read = () => readJSON('/joe/state.json'),
+  reload = () => globalThis.location.reload(),
+  storage = () => globalThis.sessionStorage,
+  now = () => Date.now(),
+  schedule = (fn, ms) => setTimeout(fn, ms),
+  cancel = id => clearTimeout(id),
+} = {}) {
+  let timer = null, stopped = false, pending = false, delay = 30000, pageReloads = 0, storageFailed = false;
+  const history = () => {
+    if (storageFailed) return null;
+    try {
+      const value = JSON.parse(storage().getItem(PROBE_RELOAD_KEY) ?? '[]');
+      if (!Array.isArray(value) || value.some(at => !Number.isFinite(at))) throw new Error('Invalid reload history');
+      return value.filter(at => at > now() - RELOAD_WINDOW_MS);
+    } catch { storageFailed = true; return null; }
+  };
+  const allowed = entries => entries === null ? pageReloads < 1 : entries.length < 3;
+  const arm = () => {
+    if (stopped || pending || timer !== null || !session.signedOut()) return;
+    if (!allowed(history())) { stopped = true; return; }
+    timer = schedule(probe, delay);
+  };
+  async function probe() {
+    timer = null;
+    if (stopped || pending || !session.signedOut()) return;
+    pending = true;
+    try {
+      const response = await read();
+      if (stopped) return;
+      if (classifyResponse('/joe/state.json', response) === AUTHENTICATED) {
+        const entries = history();
+        if (!allowed(entries)) { stopped = true; return; }
+        if (entries !== null) {
+          try { storage().setItem(PROBE_RELOAD_KEY, JSON.stringify([...entries, now()])); }
+          catch { storageFailed = true; if (pageReloads >= 1) { stopped = true; return; } }
+        }
+        pageReloads++;
+        stopped = true;
+        reload();
+        return;
+      }
+    } catch { /* Network/storage/reload failure leaves the marked document. */ }
+    finally { pending = false; }
+    delay = Math.min(delay * 2, 120000);
+    arm();
+  }
+  const unsubscribe = session.subscribe(arm);
+  arm();
+  return () => { stopped = true; if (timer !== null) cancel(timer); timer = null; unsubscribe(); };
+}

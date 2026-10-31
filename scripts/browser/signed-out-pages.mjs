@@ -41,9 +41,6 @@ try {
       const path = url.pathname.slice('/joe/'.length);
       if (!endpoints.includes(path)) { await browser.send('Fetch.continueRequest', { requestId }, m.sessionId); return; }
       if (path === nonAuthOnly) { await send(503, path === 'results.json' ? { reason: 'feed_not_received' } : {}); return; }
-      // In an endpoint-only expiry, keep that latest auth refusal while its
-      // siblings fail normally. Replacing it with a 503 after a sibling's
-      // authenticated response would correctly end signed-out (fix 13).
       if (fail503 && (!only || path !== only)) { await send(503, '{}'); return; }
       if (expired && (!only || only === path)) {
         visited.add(`${shape}/${path}`);
@@ -68,6 +65,14 @@ try {
   await page.s('Page.addScriptToEvaluateOnNewDocument', { source: `if (location.origin === ${JSON.stringify(new URL(board.url).origin)}) {
     // A controlled monotonic clock lets the real registered timer callbacks
     // cross minute boundaries without suspending native worker event loops.
+    window.__pageGeneration = Number(sessionStorage.getItem('test-page-generation') ?? 0) + 1;
+    sessionStorage.setItem('test-page-generation', window.__pageGeneration);
+    sessionStorage.removeItem('joe-auth-probe-reloads-v1');
+    window.__probeTimers = new Map();
+    const nativeTimeout = window.setTimeout.bind(window), nativeClear = window.clearTimeout.bind(window);
+    let probeId = -1;
+    window.setTimeout = (fn, ms, ...args) => { if (ms >= 30000) { const id = probeId--; window.__probeTimers.set(id, () => { window.__probeTimers.delete(id); return fn(...args); }); return id; } return nativeTimeout(fn, ms, ...args); };
+    window.clearTimeout = id => { window.__probeTimers.delete(id); nativeClear(id); };
     window.__boardTime = 0; window.__boardIntervals = new Map();
     Object.defineProperty(performance, 'now', { value: () => window.__boardTime });
     let intervalId = 0;
@@ -105,13 +110,15 @@ try {
     document.getElementById('acctCtl').dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: document.querySelector('[data-sign-in-reload]') }));
   })()`);
   const capture = () => page.evaluate(`(${retainedDocument.toString()})(document)`);
-  const idleRecovery = () => page.evaluate(`(async () => { const { boardSession } = await import('/joe/transport.js'); for (let i = 0; boardSession.recovering(); i++) { if (i > 10000) throw new Error('Recovery did not finish'); await new Promise(done => setTimeout(done, 0)); } })()`);
   const recover = async () => {
-    await idleRecovery();
     expired = fail503 = false;
-    await refresh();
-    await waitFor(page, "!document.getElementById('app').hasAttribute('data-last-known')");
-    await settle();
+    const before = await capture(), generation = await page.evaluate('window.__pageGeneration');
+    await refresh(); await settle();
+    assert.deepEqual(await capture(), before, 'all successful feed responses leave the old page frozen');
+    await page.evaluate(`setTimeout(() => { for (const tick of [...window.__probeTimers.values()]) tick(); }, 0)`);
+    await waitFor(page, `window.__pageGeneration > ${generation} && document.documentElement.dataset.ready === '1' && !document.getElementById('app').hasAttribute('data-last-known')`);
+    assert.equal(await page.evaluate('window.__pageGeneration'), generation + 1, 'validated probe causes exactly one fresh page load');
+    await refresh(); await settle();
   };
   const go = async screen => {
     await page.evaluate(`location.hash = '#${screen}'`);
@@ -177,7 +184,7 @@ try {
       only = null; expired = true;
       await page.evaluate(`import('/joe/board-settings.js').then(m => m.refreshBoardSettings())`);
       only = endpoint;
-      await refresh(); await idleRecovery(); await settle();
+      await refresh(); await settle();
       assert.equal((await capture()).marked, true, `${endpoint} still 401 must keep all frozen marks`);
       await frozenVisuals(stage);
       await recover(); only = null;
@@ -191,7 +198,7 @@ try {
     const priorEquity = f.data.brokerAccount.equity.amount;
     f.data.seq++; f.data.brokerAccount.equity.amount = '29001';
     nonAuthOnly = 'results.json';
-    await recover(); await idleRecovery();
+    await recover();
     assert.deepEqual(await page.evaluate(`({
       signedOut: !document.getElementById('signedOutBanner').hidden,
       inert: document.getElementById('app').hasAttribute('inert'),
@@ -204,7 +211,7 @@ try {
     assert.notEqual(await page.evaluate(`document.getElementById('acctDetailsBtn').getAttribute('aria-expanded')`), expanded, 'recovered controls respond to a real click');
     await go('results'); await refresh(); await settle();
     const resultsFailure = await page.evaluate(`document.getElementById('resStatus').textContent`);
-    assert.match(resultsFailure, /Results refresh failed: no data received yet\. Showing the last good results from/);
+    assert.equal(resultsFailure, 'Results are unavailable: no data received yet.');
     assert.doesNotMatch(resultsFailure, /sign.in/i);
     nonAuthOnly = only = null; f.data.seq++; f.data.brokerAccount.equity.amount = priorEquity;
     await refresh(); await go('desk'); await settle();
@@ -212,7 +219,7 @@ try {
     stage = `${width}: later non-auth account-history failure shows its honest reason`;
     only = null; expired = true;
     await page.evaluate(`import('/joe/board-settings.js').then(m => m.refreshBoardSettings())`);
-    only = 'state.json'; await refresh(); await idleRecovery();
+    only = 'state.json'; await refresh();
     nonAuthOnly = 'account-history.json';
     await recover();
     assert.match(await page.evaluate(`document.getElementById('acctNote').textContent`), /could not|refresh|failed|update/i);
@@ -266,32 +273,18 @@ try {
     const closed = await capture(); await interact(); await settle();
     assert.deepEqual(await capture(), closed, 'closing a native modal/Controls once leaves an inert document');
     await recover();
-    // Account-only expiry must recover through normal polling; no explicit
-    // account-history retry from the audit is allowed in this reproducer.
-    stage = `${width}: account-only automatic recovery`;
+    stage = `${width}: account-only expiry requires a probe reload`;
     only = 'account-history.json'; expired = true;
     await page.evaluate('window.__joedesk.refreshAccount()');
     assert.equal((await capture()).inert, true);
-    expired = false;
-    await page.evaluate('window.__boardTime += 15001; for (const tick of window.__boardIntervals.values()) tick();');
-    await waitFor(page, "!document.getElementById('app').hasAttribute('data-last-known')");
-    only = null; await settle();
-    // Observe the exact unmark operation, not only the eventual page. At
-    // that operation the newly served account figure must already be in DOM.
-    stage = `${width}: recovery render precedes unmark`;
+    await recover(); only = null;
+    stage = `${width}: probe reload displays the new account value`;
     await go('desk'); expired = true;
     await page.evaluate(`import('/joe/board-settings.js').then(m => m.refreshBoardSettings())`);
     const amount = f.data.brokerAccount.equity.amount;
     f.data.brokerAccount.equity.amount = '29001'; f.data.seq++;
-    await page.evaluate(`window.__unmarkValues = []; window.__originalRemove = Element.prototype.removeAttribute;
-      Element.prototype.removeAttribute = function(key) {
-        if (this.id === 'app' && key === 'data-last-known') window.__unmarkValues.push({ value: document.getElementById('acctValue').textContent, marked: this.hasAttribute('data-last-known') && this.hasAttribute('inert'), sectionMarks: document.querySelectorAll('[data-frozen]').length });
-        return window.__originalRemove.call(this, key);
-      };`);
     await recover();
-    assert.deepEqual(await page.evaluate('window.__unmarkValues.map(s => s.value.replace(/\\s/g, ""))'), ['€29.001,00']);
-    assert.equal(await page.evaluate('window.__unmarkValues.every(s => s.marked && s.sectionMarks > 0)'), true, 'fresh document renders while still frozen and marked');
-    await page.evaluate('Element.prototype.removeAttribute = window.__originalRemove; delete window.__originalRemove;');
+    assert.match(await page.evaluate(`document.getElementById('acctValue').textContent`), /29.001/);
     f.data.brokerAccount.equity.amount = amount; f.data.seq++;
     await refresh(); await settle();
     stage = `${width}: latest frozen address`;
@@ -314,6 +307,13 @@ try {
       assertSignedOutPage(await capture(), sending, stage);
       await recover();
     }
+    stage = `${width}: manual Reload control`;
+    expired = true; only = null;
+    await page.evaluate(`window.__joedesk.refresh('state')`);
+    const manualGeneration = await page.evaluate('window.__pageGeneration');
+    await page.evaluate(`setTimeout(() => document.querySelector('[data-sign-in-reload]').click(), 0)`);
+    await waitFor(page, `window.__pageGeneration > ${manualGeneration} && document.documentElement.dataset.ready === '1' && document.getElementById('app').hasAttribute('data-last-known')`);
+    await recover();
     for (const auth of nativeShapes) {
       shape = auth; only = null;
       for (const failureReason of [null, ...reasons]) {

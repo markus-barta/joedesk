@@ -210,7 +210,7 @@ async function readOnPage() {
   const started = performance.now(), res = await read('./account-history.json');
   if (res.status !== 200) return { evidence: res.evidence, kind: 'account', status: res.status, reason: readFailure(res), value: null };
   try {
-    const value = res.validated; if (!value) throw new Error('contract_invalid');
+    const value = M.acceptAccountHistory(res.payload);
     timing('account-accept', performance.now() - started);
     return { evidence: res.evidence, kind: 'account', status: 200, reason: null, value };
   } catch { return { evidence: res.evidence, kind: 'account', status: 200, reason: 'contract_invalid', value: null }; }

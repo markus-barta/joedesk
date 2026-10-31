@@ -14,7 +14,7 @@
 // 64-bit FNV-1a hash of them): every time, amount, reason and day of both
 // stores. "unchanged" needs more than a matching key: the response must be
 // exactly the one this worker last sent the page.
-import { accountTransferables } from './account-model.js';
+import { acceptAccountHistory, accountTransferables } from './account-model.js';
 
 import { readJSON, readFailure } from './transport.js';
 const read = url => readJSON(url, {}, { text: true });
@@ -45,7 +45,7 @@ export async function readAccount(have = null) {
   const key = fingerprint(res.text);
   if (have !== null && have === key && sent?.key === key && sent.text === res.text) return { message: { evidence: res.evidence, kind: 'unchanged', feed: 'account', key, ms: ms() }, transfer: [] };
   let value;
-  try { value = res.validated; if (!value) throw new Error('contract_invalid'); } catch { return { message: { evidence: res.evidence, kind: 'account', status: 200, reason: 'contract_invalid', value: null, key: null, ms: ms() }, transfer: [] }; }
+  try { value = acceptAccountHistory(res.payload); } catch { return { message: { evidence: res.evidence, kind: 'account', status: 200, reason: 'contract_invalid', value: null, key: null, ms: ms() }, transfer: [] }; }
   sent = { key, text: res.text };
   return { message: { evidence: res.evidence, kind: 'account', status: 200, reason: null, value, key, ms: ms() }, transfer: accountTransferables(value) };
 }

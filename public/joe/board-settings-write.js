@@ -13,7 +13,7 @@ export function createBoardSettings({ fetcher = (...args) => fetch(...args), cha
   const snapshot = () => structuredClone(state);
   const publish = next => { state = next; changed(); };
   async function request(method, value) {
-    if (method === 'POST' && boardSession.signedOut()) return { ok: false, error: 'Sign-in expired. Reload to sign in.' };
+    if (boardSession.signedOut()) return { ok: false, error: 'Sign-in expired. Reload to sign in.' };
     if (saving) return { ok: false, error: 'Account start is being saved.' };
     const current = ++generation;
     saving = method === 'POST';

@@ -9,15 +9,12 @@ import { indexResults, transferables as resultsTransferables } from './results-m
 
 const previous = { history: null, results: null }, posted = { history: null, results: null };
 let frozen = false;
-import { readJSON, acceptRecovery, documentRegressed, AUTHENTICATED } from './transport.js';
+import { readJSON, documentRegressed } from './transport.js';
 const evidence = responses => Object.fromEntries(responses.map(([url, res]) => [url, res.auth]));
-// Auth, document acceptance and freshness are separate evidence. In particular,
-// a validated last-good body with a failure header is still a failed attempt.
-function outcome(res, accepted, retained = null) {
-  const status = { evidence: res.evidence, state: res.status === 200 ? 'ok' : 'error', auth: res.auth, reason: accepted.reason };
-  const recovery = acceptRecovery(retained, accepted.value, status);
-  return { state: res.auth === true ? 'auth' : recovery.ok ? 'ok' : 'error',
-    evidence: res.evidence, auth: res.auth, reason: recovery.reason,
+// Document outcome is independent of the page's permanent expiry latch.
+function outcome(res, accepted) {
+  return { state: res.auth === true ? 'auth' : accepted.reason ? 'error' : 'ok',
+    evidence: res.evidence, auth: res.auth, reason: accepted.reason ?? null,
     document: accepted.value ? { seq: accepted.value.seq, receivedAt: accepted.value.receivedAt } : null };
 }
 function accept(kind, res) {
@@ -28,8 +25,8 @@ function accept(kind, res) {
   previous[kind] = accepted;
   return accepted;
 }
-const sidecarOutcome = res => ({ evidence: res.evidence, state: res.auth === true ? 'auth' : res.evidence === AUTHENTICATED ? 'ok' : 'error',
-  auth: res.auth, reason: res.auth === true ? 'auth_required' : res.reason ?? (res.status === 200 ? res.evidence === AUTHENTICATED ? null : 'contract_invalid' : res.status === 404 ? 'route_not_found' : 'refresh_failed') });
+const sidecarOutcome = res => ({ evidence: res.evidence, state: res.auth === true ? 'auth' : res.status === 200 ? 'ok' : 'error',
+  auth: res.auth, reason: res.auth === true ? 'auth_required' : res.reason ?? (res.status === 200 ? null : res.status === 404 ? 'route_not_found' : 'refresh_failed') });
 async function read(url) {
   const res = await readJSON(url);
   return { ...res, reason: res.headers?.get('X-Joe-Feed-Reason') ?? (res.status === 200 ? undefined : res.payload?.reason),
@@ -42,6 +39,7 @@ const clockNow = res => (res.clock ? { at: new Date(Date.parse(res.clock.at) + p
 async function pollHistory(started) {
   const [res, sidecar] = await Promise.all([read('/joe/history.json'), read('/joe/history-continuity.json')]);
   const auth = evidence([['/joe/history.json', res], ['/joe/history-continuity.json', sidecar]]);
+  if (frozen) { self.postMessage({ kind: 'blocked', feed: 'history' }); return; }
   if (res.auth === true || sidecar.auth === true) { self.postMessage({ kind: 'blocked', feed: 'history', auth,
     status: { '/joe/history.json': outcome(res, { reason: res.auth ? 'auth_required' : 'refresh_failed' }), '/joe/history-continuity.json': sidecarOutcome(sidecar) } }); return; }
   const accepted = accept('history', res);
@@ -64,6 +62,7 @@ async function pollHistory(started) {
 async function pollResults(started) {
   const res = await read('/joe/results.json');
   const auth = evidence([['/joe/results.json', res]]);
+  if (frozen) { self.postMessage({ kind: 'blocked', feed: 'results' }); return; }
   if (res.auth === true) { self.postMessage({ kind: 'blocked', feed: 'results', auth, status: { '/joe/results.json': outcome(res, { reason: 'auth_required' }) } }); return; }
   const accepted = accept('results', res);
   const status = { '/joe/results.json': outcome(res, accepted) };
@@ -80,9 +79,6 @@ async function pollResults(started) {
 self.onmessage = ({ data }) => {
   if (typeof data?.frozen === 'boolean') {
     frozen = data.frozen;
-    // A document posted while another read was expiring may not have reached
-    // the page. Recovery sends complete columns instead of an unchanged hint.
-    posted.history = posted.results = null;
     return;
   }
   const started = performance.now();
