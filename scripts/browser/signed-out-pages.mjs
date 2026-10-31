@@ -41,7 +41,10 @@ try {
       const path = url.pathname.slice('/joe/'.length);
       if (!endpoints.includes(path)) { await browser.send('Fetch.continueRequest', { requestId }, m.sessionId); return; }
       if (path === nonAuthOnly) { await send(503, path === 'results.json' ? { reason: 'feed_not_received' } : {}); return; }
-      if (fail503) { await send(503, '{}'); return; }
+      // In an endpoint-only expiry, keep that latest auth refusal while its
+      // siblings fail normally. Replacing it with a 503 after a sibling's
+      // authenticated response would correctly end signed-out (fix 13).
+      if (fail503 && (!only || path !== only)) { await send(503, '{}'); return; }
       if (expired && (!only || only === path)) {
         visited.add(`${shape}/${path}`);
         // Manual 302/303 redirects are native opaqueredirect responses on
