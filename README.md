@@ -741,7 +741,7 @@ a screenshot alone.
 | `period-partial-day-hints` | results.js: renderHero, renderCalendar; results-model.js: countPartialDays | `period-hint/partial/1440/light` |
 | `trade-open-close-and-held` | results.js: held, tradeRows; format.js: timeHM | `trade-amount/rows/1440/light` |
 | `open-position-today-time` | results.js: dayContent; results-model.js: viennaDate | `partial-days/desk-filtered-reasoned/1440/light` |
-| `receipt-ingress-clock` | feed.js: serverClock, createFeed; history-worker.js: serverClock, clockNow | `ingress/live-stale-recovery/1440/light` |
+| `receipt-ingress-clock` | transport.js: serverClock, readJSON; feed.js: createFeed; history-worker.js: clockNow | `ingress/live-stale-recovery/1440/light` |
 | `stale-retained-ago` | results.js: renderStatus; format.js: age; ui.js: ageSpan | `states/stale-retained/1440/light` |
 | `worker-date-indexing` | history-worker.js: pollResults; results-model.js: indexResults, viennaDate | `ingress/live-stale-recovery/1440/light` |
 | `today-rollover-retained-receipt` | results.js: resultsToday, renderResults; results-model.js: addDays | `partial-days/retained-midnight/1440/light` |
@@ -2367,6 +2367,10 @@ calendar month total is marked and muted too. Values are muted and the board
 is desaturated. Freshness dots/halos disappear,
 animation classes are removed, and no clocks, ages or countdowns advance.
 Figures, comparisons, diagnostic text and draft form values stay intact.
+If Results has no accepted record at expiry, its empty-state sentence instead
+explains **Results are unavailable: sign-in expired — reload.** once, as the
+board freezes. Dashes remain dashes; an existing Results record and its sentence
+are retained exactly.
 
 The entire board is `inert`, with the banner outside it. Expiry closes native
 modals, chart inspectors and popovers so Reload remains reachable. Pending
@@ -2449,6 +2453,18 @@ cover History and Results in workers, after worker failure, and with workers
 disabled (`JOED_FIX7_BASELINE=5b788a8`). The version adapter binds `matchMedia`
 to the browser global, preserving expiry disposal and the sweep planner's
 literal-query boundary inventory without changing the pinned vendor bundle.
+
+The fix 12 regression checks normal identical Results polling in the actual
+worker and main-thread fallback: receipt age reaches five minutes, a failed
+refresh retains that age and its existing wording, and neither sequence nor
+receipt may go backwards. The P4 stale fixture advances server time while
+re-serving one fixed record and refreshing its independent money input; it
+does not manufacture an older receipt on the second read. P3's recovery fixture
+supplies an accepted Results record too, waits for the coordinated refresh,
+then checks that the next live account value appears. Its previous empty
+Results endpoint returned 503, which cannot prove successful recovery. All
+seven CI browser phases run in the same locked shell; signed-out checks retain
+failure while Results and Settings still run, and preview phases stay gated.
 
 The complete non-auth page snapshot fixes the footer's release coordinate to
 `261030154842.0.0`, the value rendered by `a941776`, as a harness input.

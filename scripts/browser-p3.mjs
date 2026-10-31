@@ -7,6 +7,7 @@ import { homedir, cpus } from 'node:os';
 import { join } from 'node:path';
 import * as nodeModule from 'node:module';
 import { retainedDocument, assertSignedOutPage } from '../test/fixtures/signed-out-cases.mjs';
+import { designResults } from './browser/results.mjs';
 import { launch, openPage } from './browser/cdp.mjs';
 import { startBoard, scenario, accountScenario, NOW, at, ACTOR, valid, fixture, ingress, singleMissingDesk, coupledUnavailable, acceptSnapshot, panelStates, advance, measureHistory } from './browser/board.mjs';
 import { VIEWPORTS, THEMES, configure, load as loadPage, go as goPage, screenshot, settle, waitFor, pointerMedia, MOUSE, TOUCH, copyText } from './browser/shots.mjs';
@@ -1151,6 +1152,7 @@ try {
     const b = await newBoard({ history, accountHistory: accountScenario(NOW) });
     b.setNow(NOW);
     check('signed-out', 'sign-in regression snapshot accepted', (await b.push(snapshot)).status === 200);
+    check('signed-out', 'sign-in regression Results record accepted', (await b.pushResults(ingress(designResults(NOW)))).status === 200);
     b.setNow(at(NOW, 9));
     for (const viewport of VIEWPORTS) for (const theme of THEMES) {
       const tag = `${viewport.name} ${theme} signed out`;
@@ -1169,8 +1171,17 @@ try {
         await waitFor(page, `performance.getEntriesByType('navigation')[0]?.type === 'reload' && !document.getElementById('signedOutBanner').hidden`);
         check('signed-out', `${tag}: Reload performs a real page reload and cold auth remains signed out`, true);
       } finally { await unroute(); }
-      await page.evaluate('window.__joedesk.refresh()'); await settle(page);
+      await page.evaluate('window.__joedesk.refresh()');
+      await waitFor(page, `document.getElementById('signedOutBanner').hidden && !document.getElementById('app').hasAttribute('data-last-known')`);
+      await settle(page);
       check('signed-out', `${tag}: successful authenticated reads resume the board`, await page.evaluate(`document.getElementById('signedOutBanner').hidden && !document.getElementById('app').hasAttribute('data-last-known')`));
+      const next = structuredClone(snapshot); next.seq++;
+      next.brokerAccount.equity.amount = String(Number(next.brokerAccount.equity.amount) + 1);
+      Object.assign(snapshot, next);
+      if ((await b.push(snapshot)).status !== 200) throw new Error('post-recovery live snapshot rejected');
+      const beforeValue = await page.evaluate(`document.getElementById('acctValue').textContent`);
+      await page.evaluate('window.__joedesk.refresh()'); await settle(page);
+      check('signed-out', `${tag}: the recovered board displays the next live account value`, await page.evaluate(`document.getElementById('acctValue').textContent !== ${JSON.stringify(beforeValue)}`));
     }
   }
 

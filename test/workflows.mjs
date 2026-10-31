@@ -71,14 +71,14 @@ test('runner expression stays hosted by default and for fork PRs even when opted
 });
 
 const ci = parse(workflows.get('ci.yml'));
-test('CI retains every run and locks all six browser phases once with room for three typical queued jobs', () => {
+test('CI retains every run and locks all seven browser phases once with room for three typical queued jobs', () => {
   assert.equal(ci.concurrency, undefined, 'workflow concurrency must not replace pending PR runs');
   for (const job of Object.values(ci.jobs)) assert.equal(job.concurrency, undefined);
-  const steps = ci.jobs.browser.steps.filter(step => /scripts\/(?:browser-p[3456]|preview-capture(?:-ci)?)\.mjs|npm run test:results/.test(step.run ?? ''));
+  const steps = ci.jobs.browser.steps.filter(step => /scripts\/(?:browser-p[3456]|browser\/signed-out-pages|preview-capture(?:-ci)?)\.mjs|npm run test:results/.test(step.run ?? ''));
   assert.equal(steps.length, 1, 'no browser execution outside the combined step');
   assert.equal(steps[0].shell, 'bash scripts/with-browser-lock.sh {0}');
   assert.equal(ci.jobs.browser.steps.filter(step => step.shell?.includes('with-browser-lock.sh')).length, 1);
-  for (const script of ['browser-p3', 'browser-p5', 'browser-p6', 'preview-capture', 'preview-capture-ci']) {
+  for (const script of ['browser-p3', 'browser/signed-out-pages', 'browser-p5', 'browser-p6', 'preview-capture', 'preview-capture-ci']) {
     assert.ok(steps[0].run.includes(`scripts/${script}.mjs`));
   }
   assert.equal(ci.jobs.browser['timeout-minutes'], 60 + 45 + 15);
@@ -117,24 +117,25 @@ test('combined browser step preserves all phase arguments, Results zone plans an
   for (const event of ['push', 'pull_request', 'workflow_dispatch']) {
     const { result, dir, commands } = simulateBrowserPhases(t, { event });
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(commands.length, 6, 'all browser phases execute inside the one shell');
+    assert.equal(commands.length, 7, 'all browser phases execute inside the one shell');
     assert.equal(commands[0][0], `scripts/browser-p3.mjs ${event === 'pull_request' ? '--subset' : '--full'}`);
     assert.equal(commands[0][1], join(dir, 'qa/p3'));
-    assert.equal(commands[1][1], join(dir, 'qa/p4'));
-    assert.ok(commands[1][0].startsWith('run test:results -- '));
-    assert.deepEqual(parseResultsGateArgs(commands[1][0].split(' ').slice(3)), event === 'push'
+    assert.deepEqual(commands[1], ['scripts/browser/signed-out-pages.mjs', '', 'UTC']);
+    assert.equal(commands[2][1], join(dir, 'qa/p4'));
+    assert.ok(commands[2][0].startsWith('run test:results -- '));
+    assert.deepEqual(parseResultsGateArgs(commands[2][0].split(' ').slice(3)), event === 'push'
       ? ['UTC', 'Europe/Vienna', 'America/New_York'].map(timeZone => ({ timeZone, mode: 'full' }))
       : [{ timeZone: 'Europe/Vienna', mode: 'full' }, { timeZone: 'UTC', mode: 'subset' }, { timeZone: 'America/New_York', mode: 'subset' }]);
-    assert.deepEqual(commands[2], ['scripts/browser-p5.mjs', join(dir, 'qa/p5'), 'UTC']);
-    assert.match(commands[3][0], /^scripts\/preview-capture.mjs --base-url http:\/\/127.0.0.1:1\/joe\/ --out /);
-    assert.deepEqual(commands[4], [`scripts/preview-capture-ci.mjs ${dir}/joedesk-preview-capture/proxy ${dir}/joedesk-preview-capture/actor`, '', 'UTC']);
-    assert.deepEqual(commands[5], ['scripts/browser-p6.mjs', join(dir, 'qa/p6a'), 'UTC']);
+    assert.deepEqual(commands[3], ['scripts/browser-p5.mjs', join(dir, 'qa/p5'), 'UTC']);
+    assert.match(commands[4][0], /^scripts\/preview-capture.mjs --base-url http:\/\/127.0.0.1:1\/joe\/ --out /);
+    assert.deepEqual(commands[5], [`scripts/preview-capture-ci.mjs ${dir}/joedesk-preview-capture/proxy ${dir}/joedesk-preview-capture/actor`, '', 'UTC']);
+    assert.deepEqual(commands[6], ['scripts/browser-p6.mjs', join(dir, 'qa/p6a'), 'UTC']);
   }
 });
 
 test('combined step retains failures, runs Results/Settings after earlier failures and gates previews/carry-overs', t => {
-  for (const [fail, count] of [['browser-p3.mjs', 3], ['run test:results', 3], ['browser-p5.mjs', 3],
-    ['preview-capture.mjs', 4], ['preview-capture-ci.mjs', 5], ['browser-p6.mjs', 6]]) {
+  for (const [fail, count] of [['browser-p3.mjs', 4], ['browser/signed-out-pages.mjs', 4], ['run test:results', 4], ['browser-p5.mjs', 4],
+    ['preview-capture.mjs', 5], ['preview-capture-ci.mjs', 6], ['browser-p6.mjs', 7]]) {
     const { result, commands, outputs } = simulateBrowserPhases(t, { fail });
     assert.notEqual(result.status, 0, fail);
     assert.equal(commands.length, count, `${fail}: subsequent phases follow the previous failure policy`);

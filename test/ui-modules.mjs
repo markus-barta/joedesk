@@ -1438,6 +1438,90 @@ test('JOED-30 reads: the actual results worker and fallback both preserve partia
   }
 });
 
+test('JOED-173 fix12 recovery resumes live data only after the Results read also succeeds', async t => {
+  const { createBoardSession } = await import('../public/joe/transport.js');
+  const session = createBoardSession();
+  const oldWorker = Object.getOwnPropertyDescriptor(globalThis, 'Worker');
+  globalThis.Worker = undefined;
+  t.after(() => { if (oldWorker) Object.defineProperty(globalThis, 'Worker', oldWorker); else delete globalThis.Worker; });
+  let expired = false, missingResults = true, rendered = null, recovery = Promise.resolve();
+  const data = structuredClone(valid.data);
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (expired && String(url).endsWith('state.json')) return new Response('{}', { status: 401 });
+    if (missingResults && String(url).endsWith('results.json')) return new Response('{"reason":"feed_not_received"}', { status: 503 });
+    const body = String(url).endsWith('state.json') ? { serverNow: data.receivedAt, feeds: { data: { value: data } } }
+      : String(url).endsWith('history-continuity.json') ? null
+      : String(url).endsWith('actions.json') ? { schema: 'inspr.joe.fleet-config.actions.v1', entries: [] }
+      : String(url).endsWith('history.json') ? valid.history
+      : String(url).endsWith('fleet-config.json') ? valid['fleet-config'] : valid.results;
+    return new Response(JSON.stringify(body), { headers: { 'X-Joe-Server-Now': data.receivedAt, 'X-Joe-Received-At': data.receivedAt } });
+  });
+  const feed = createFeed(() => {}, () => {}, '', { session }); t.after(feed.stop);
+  const stop = session.coordinateRecovery(() => {
+    recovery = (async () => {
+      await feed.whenIdle();
+      await Promise.all([feed.refresh(), feed.refreshActions()]);
+      for (const route of ['account-history', 'board-settings']) session.accept(`/joe/${route}.json`, { auth: false });
+      return session.finishRecovery(() => { rendered = feed.select(); return true; });
+    })();
+    return recovery;
+  }); t.after(stop);
+  await feed.refresh();
+  expired = true; await feed.refreshState();
+  assert.equal(session.signedOut(), true);
+  expired = false; await feed.refresh(); await recovery;
+  assert.equal(session.signedOut(), true, 'the original P3 fixture still has an unsuccessful Results read');
+  assert.equal(rendered, null);
+  missingResults = false; await feed.refresh(); await recovery;
+  assert.equal(session.signedOut(), false);
+  assert.equal(rendered.feeds.data.value.brokerAccount.equity.amount, data.brokerAccount.equity.amount);
+  data.seq++; data.brokerAccount.equity.amount = '29001';
+  await feed.refreshState();
+  assert.equal(feed.select().feeds.data.value.brokerAccount.equity.amount, '29001', 'the recovered board accepts the next live snapshot');
+});
+
+for (const mode of ['worker', 'fallback']) test(`JOED-173 fix12 Results identical polling ages the original receipt, retains failures and rejects regressions: ${mode}`, async t => {
+  const { createBoardSession } = await import('../public/joe/transport.js');
+  const { renderStatus } = await builders('results.js', ['renderStatus']);
+  const original = structuredClone(valid.results);
+  let payload = original, stamp = original.receivedAt, status = 200, worker;
+  t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify(status === 200 ? payload : {}), {
+    status, headers: { 'X-Joe-Server-Now': stamp },
+  }));
+  const old = new Map(['Worker', 'self', 'document'].map(k => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+  t.after(() => { for (const [key, descriptor] of old) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; } });
+  if (mode === 'worker') {
+    globalThis.self = { postMessage: (data, transfer) => worker.onmessage({ data: structuredClone(data, { transfer }) }) };
+    await import('../public/joe/history-worker.js?fix12-identical');
+    const handle = self.onmessage;
+    globalThis.Worker = class { constructor() { worker = this; } postMessage(data) { handle({ data }); } };
+  } else globalThis.Worker = undefined;
+  const feed = createFeed(() => {}, () => {}, '', { session: createBoardSession() }); t.after(feed.stop);
+  await feed.refreshResults();
+  assert.equal(feed.select().states.results.state, 'fresh');
+  stamp = at(original.receivedAt, 300);
+  await feed.refreshResults(); await feed.refreshResults();
+  const stale = feed.select().states.results;
+  assert.equal(stale.reason, 'snapshot_stale');
+  assert.equal(Math.floor(stale.ageSeconds), 300);
+  assert.equal(feed.feeds.results.value.receivedAt, original.receivedAt);
+  globalThis.document = htmlDocument('<div id="resStatus"></div>');
+  renderStatus({ ix: true, cell: stale });
+  assert.equal(document.getElementById('resStatus').textContent, 'Stale · Results as of 5 min ago · updates are late.');
+  status = 503; await feed.refreshResults();
+  renderStatus({ ix: true, cell: feed.select().states.results });
+  assert.equal(document.getElementById('resStatus').textContent, 'Stale · Results refresh failed: update failed. Showing the last good results from 5 min ago.');
+  status = 200;
+  for (const backwards of [{ ...original, seq: original.seq - 1 }, { ...original, seq: original.seq + 1, receivedAt: at(original.receivedAt, -1) }]) {
+    payload = backwards; await feed.refreshResults();
+    assert.equal(feed.feeds.results.reason, 'sequence_replayed');
+    assert.equal(feed.feeds.results.value.seq, original.seq);
+    assert.equal(feed.feeds.results.value.receivedAt, original.receivedAt);
+  }
+  payload = original; await feed.refreshResults();
+  assert.equal(feed.feeds.results.reason, null, 'an equal clean re-serve clears the rejection without refreshing its receipt');
+});
+
 test('refresh: await the worker before the next results push, including unchanged replies', async () => {
   const realWorker = globalThis.Worker, realFetch = globalThis.fetch;
   const { indexResults } = await import('../public/joe/results-model.js');

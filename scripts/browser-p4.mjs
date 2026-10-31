@@ -980,11 +980,11 @@ try {
 
   if (run('states')) {
     // 3 · No push yet (the server's own answer), unavailable, stale, retained, KEEP mismatch.
-    const { board } = await designBoard();
     const record = designResults(NOW);
     const shiftOf = async () => rects(page, SHIFT);
     for (const [viewport, theme] of VIEWPORTS.flatMap(v => THEMES.map(t => [v, t]))) {
       if (!hasViews('states', viewport, theme, ['not-received', 'stale-retained', 'auth', 'invalid'])) continue;
+      const { board } = await designBoard();
       const tag = `${viewport.name} ${theme}`;
       await configure(page, viewport, theme);
       if (view('states', 'not-received', viewport, theme)) {
@@ -1011,10 +1011,19 @@ try {
       if (theme === 'dark') continue;
       if (view('states', 'stale-retained', viewport, theme)) {
         // Fresh, then stale: the record's own age, in the chart's box; nothing moves.
-        await serve(served(record, board));
+        const freshNow = board.clock();
+        const receivedAt = at(freshNow, -18);
+        const unchangedRecord = () => ({ body: { ...record, receivedAt }, clock: board.clock });
+        await serve(unchangedRecord);
         await load(page, board.url, 'results');
         const fresh = await page.evaluate(RES), freshRects = await shiftOf();
-        await serve(served(record, board, 300));
+        // Normal polling re-serves the same document. Advance the server clock
+        // instead of moving its receipt backwards (a real rejected regression).
+        board.setNow(at(receivedAt, 300));
+        // Keep the independent money input current, as in the original case.
+        // Only the closed-trade record should become stale here.
+        const currentData = scenario(board.clock()).snapshot; currentData.seq++;
+        if ((await board.push(currentData)).status !== 200) throw new Error('stale Results money input rejected');
         await page.evaluate('window.__joedesk.refresh()');
         await waitFor(page, `document.getElementById('resStatus').innerText.length > 0`);
         await settle(page);

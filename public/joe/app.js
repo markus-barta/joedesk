@@ -12,7 +12,7 @@ import { createObservedEvents } from './events.js';
 import { renderDesk, headerHealth, healthPop, forgetCharts, toggleDeskDisclosure, initBarTaps, cancelBarInteractions } from './desk.js';
 import { initAccount, renderAccount, refreshAccountHistory, pollAccountHistory, accountHistoryIdle, cancelInteractions as cancelAccountInteractions } from './account.js';
 import { renderHistory, historyChart, HS, historyPreset, toggleFollow, initHistoryInput, initHistoryControls, historyQuery, readHistoryRoute, cancelInteractions as cancelHistoryInteractions } from './history.js';
-import { renderResults, RS, stepPeriod, choosePeriod, chooseDesk, selectDay, showMonth, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText, requestResultsRoute, resultsUrl } from './results.js';
+import { renderResults, RS, stepPeriod, choosePeriod, chooseDesk, selectDay, showMonth, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText, requestResultsRoute, resultsUrl, explainResultsSignIn } from './results.js';
 import { boardHealthPresentation } from './health.js';
 import { sinceStarts } from './performance.js';
 import { setTheme, toggleTheme, syncThemeButton } from './theme.js';
@@ -35,6 +35,7 @@ if (!isCanonicalJoeHost(location.hostname)) {
 
 function start() {
   const freeze = createBoardFreeze(document, boardSession, { cancelInteractions: () => {
+    explainResultsSignIn(context());
     cancelAccountInteractions(); cancelHistoryInteractions(); cancelBarInteractions(); tips.cancel();
   } });
   let recoveringRender = false, queuedRoute = null;
