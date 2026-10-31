@@ -82,7 +82,8 @@ export function retainedDocument(document) {
     label: document.getElementById('lastKnownLabel').textContent,
     inert: app.hasAttribute('inert'), bannerInert: Boolean(banner.closest('[inert]')), openDialogs: document.querySelectorAll('dialog[open]').length,
     motionClasses: document.querySelectorAll('#app .dot-live, #app .live-dot, #app .draw-in, #app .fade-in').length,
-    frozenSections: [...document.querySelectorAll('[data-frozen]')].map(n => n.id) };
+    frozenSections: [...document.querySelectorAll('[data-frozen]')].map(n => n.id).filter(Boolean),
+    unmarkedHeaders: [...document.querySelectorAll('#app .sec-h, #app .sec-head, #app .scr-h, #app .desk-disclosure')].filter(n => !n.closest('[data-frozen]')).map(n => n.textContent) };
 }
 export function assertSignedOutPage(after, before, tag) {
   assert.match(after.headline, /^Signed out — data as of (?:\d{2}:\d{2}:\d{2}|unknown) \(Vienna\), not updating — reload to sign in$/, tag);
@@ -90,7 +91,8 @@ export function assertSignedOutPage(after, before, tag) {
   assert.equal(after.inert, true, `${tag}: retained region is inert`);
   assert.equal(after.bannerInert, false, `${tag}: banner is outside inert region`);
   assert.equal(after.openDialogs, 0, `${tag}: no modal blocks Reload`);
-  assert.deepEqual(after.frozenSections.toSorted(), ['acctHero', 'deskHero', 'desk-j', 'desk-joe', 'desk-joel', 'positions', 'kept', 'rhero', 'tiles', 'breakdown', 'cal', 'daypanel', 'histChart', 'histCompare', 'jAcct', 'setMain'].toSorted(), `${tag}: every value section is marked stale`);
+  assert.deepEqual(after.frozenSections.toSorted(), ['acctHero', 'deskHero', 'desk-j', 'desk-joe', 'desk-joel', 'positions', 'kept', 'rhero', 'tiles', 'breakdown', 'cal', 'daypanel', 'histChart', 'histCompare', 'jAcct', 'setMain', 'calSum', 'j-accounting'].toSorted(), `${tag}: every value section is marked stale`);
+  assert.deepEqual(after.unmarkedHeaders, [], `${tag}: every section header is marked, including collapsed disclosures`);
   assert.equal(after.reload, true, `${tag}: Reload visible`);
   assert.equal(after.marked, true, `${tag}: main describes the entire board as last known`);
   assert.equal(after.label, 'Last known — signed out', tag);

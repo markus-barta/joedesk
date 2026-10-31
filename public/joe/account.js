@@ -171,13 +171,13 @@ export function useAccountHistory(body, at = performance.now()) {
 // A worker's or the page's reply; returns whether the history is current.
 function useReply(reply) {
   if (!boardSession.accept('/joe/account-history.json', { auth: reply?.reason === 'auth_required' ? true
-    : reply?.kind === 'unchanged' || reply?.status === 200 || reply?.value ? false : undefined })) return false;
+    : reply?.kind === 'unchanged' || reply?.status === 200 || reply?.value ? false : undefined, status: reply?.status })) return false;
   if (reply?.kind === 'unchanged' && store.value) { store.reason = null; store.loadedAt = performance.now(); return true; }
   if (reply?.kind === 'account' && reply.value) {
     Object.assign(store, { value: reply.value, reason: null, loadedAt: performance.now(), key: reply.key ?? null, version: store.version + 1 });
     return true;
   }
-  boardSession.invalidateRecovery();
+  if (reply?.status === 200) boardSession.invalidateRecovery('/joe/account-history.json');
   store.reason = reply?.reason ?? 'refresh_failed';
   return false;
 }

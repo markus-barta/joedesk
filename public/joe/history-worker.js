@@ -9,7 +9,6 @@ import { indexResults, transferables as resultsTransferables } from './results-m
 
 const previous = { history: null, results: null }, posted = { history: null, results: null };
 import { readJSON } from './transport.js';
-let frozen = false;
 const evidence = responses => Object.fromEntries(responses.map(([url, res]) => [url, res.auth]));
 async function read(url) {
   const res = await readJSON(url);
@@ -23,7 +22,7 @@ const clockNow = res => (res.clock ? { at: new Date(Date.parse(res.clock.at) + p
 async function pollHistory(started) {
   const [res, sidecar] = await Promise.all([read('/joe/history.json'), read('/joe/history-continuity.json')]);
   const auth = evidence([['/joe/history.json', res], ['/joe/history-continuity.json', sidecar]]);
-  if (res.auth === true || sidecar.auth === true || (frozen && (res.auth !== false || res.status !== 200 || sidecar.auth !== false || sidecar.status !== 200))) { self.postMessage({ kind: 'blocked', feed: 'history', auth }); return; }
+  if (res.auth === true || sidecar.auth === true) { self.postMessage({ kind: 'blocked', feed: 'history', auth }); return; }
   const accepted = acceptRead('history', res, previous.history);
   previous.history = accepted;
   const value = accepted.value;
@@ -44,7 +43,7 @@ async function pollHistory(started) {
 async function pollResults(started) {
   const res = await read('/joe/results.json');
   const auth = evidence([['/joe/results.json', res]]);
-  if (res.auth === true || (frozen && (res.auth !== false || res.status !== 200))) { self.postMessage({ kind: 'blocked', feed: 'results', auth }); return; }
+  if (res.auth === true) { self.postMessage({ kind: 'blocked', feed: 'results', auth }); return; }
   const accepted = acceptRead('results', res, previous.results);
   previous.results = accepted;
   const value = accepted.value;
@@ -59,7 +58,6 @@ async function pollResults(started) {
 
 self.onmessage = ({ data }) => {
   if (typeof data?.frozen === 'boolean') {
-    frozen = data.frozen;
     // A document posted while another read was expiring may not have reached
     // the page. Recovery sends complete columns instead of an unchanged hint.
     posted.history = posted.results = null;

@@ -35,7 +35,7 @@ export async function readJSON(url, init = {}, { text = false, fetcher = (...arg
             if (ok && HTML.test(body)) return { status: 401, auth: true, clock, at };
             if (!text) payload = JSON.parse(body);
           } else { payload = await response.json(); if (text) body = JSON.stringify(payload); }
-        } catch { if (ok) return { status: 0, clock, at }; }
+        } catch { if (ok) return { status: 0, httpStatus: response.status, clock, at }; }
         return { status: response.status, payload, ...(text ? { text: body } : {}), headers: response.headers,
           ...(ok ? { auth: false } : {}), clock, at };
       })(),
@@ -48,31 +48,38 @@ export const readFailure = ({ auth, status }) => auth ? 'auth_required' : status
 // The shell coordinates recovery: any authenticated read can start a full
 // refresh, while the displayed document stays frozen until that refresh renders.
 export function createBoardSession() {
-  const blocked = new Set(), listeners = new Set();
-  let recover = null, recovering = false, recoveryOK = false;
+  const blocked = new Set(), authenticated = new Set(), listeners = new Set();
+  const required = ['state', 'history', 'history-continuity', 'results', 'account-history', 'board-settings', 'fleet-config', 'fleet-config/actions'].map(name => `/joe/${name}.json`);
+  let recover = null, recovering = false, recoveryOK = false, frozen = false, requiredFeeds = required, epoch = 0;
   const session = {
-    signedOut: () => blocked.size > 0,
+    signedOut: () => frozen || blocked.size > 0,
     recovering: () => recovering,
-    invalidateRecovery: () => { recoveryOK = false; },
+    epoch: () => epoch,
+    invalidateRecovery: key => { if (key) authenticated.delete(key); else recoveryOK = false; },
     accepting: () => !session.signedOut() || recovering,
-    coordinateRecovery(callback) { recover = callback; return () => { recover = null; recovering = false; }; },
+    coordinateRecovery(callback, feeds = required) { recover = callback; requiredFeeds = feeds; return () => { recover = null; recovering = false; frozen = false; }; },
     finishRecovery(render) {
-      if (!recovering || !recoveryOK) return false;
-      recovering = false; blocked.clear();
-      for (const listener of listeners) listener();
+      if (!recovering || !recoveryOK || blocked.size || requiredFeeds.some(key => !authenticated.has(key))) return false;
+      recovering = frozen = false;
       try {
+        for (const listener of listeners) listener();
         if (render() !== false) return true;
       } catch { /* Keep the last marked document and retry after another read. */ }
-      blocked.add('recovery-render');
+      frozen = true;
       for (const listener of listeners) listener();
       return false;
     },
-    observe(key, { auth, status } = {}) {
-      const before = blocked.size > 0;
-      if (auth === true) { blocked.add(key); if (recovering) recoveryOK = false; }
+    observe(key, { auth } = {}) {
+      const before = session.signedOut();
+      if (auth === true) {
+        if (!before) { authenticated.clear(); epoch++; }
+        blocked.add(key); authenticated.delete(key);
+        if (recover) frozen = true;
+      }
       if (auth === false) {
-        if (!recover) blocked.delete(key);
-        else if (before && !recovering) {
+        blocked.delete(key);
+        if (before) authenticated.add(key);
+        if (recover && before && !recovering) {
           recovering = recoveryOK = true;
           // Let the successful read finish acceptance before refreshing it.
           queueMicrotask(async () => {
@@ -81,16 +88,15 @@ export function createBoardSession() {
           });
         }
       }
-      if (recovering && auth !== false && auth !== true && status !== undefined) recoveryOK = false;
-      if (before !== (blocked.size > 0)) for (const listener of listeners) listener();
+      if (before !== session.signedOut()) for (const listener of listeners) listener();
     },
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
-    // Auth responses never enter stores. During a coordinated refresh only
-    // authenticated replies can update the next selection; the displayed
-    // selection stays frozen until finishRecovery renders it.
+    // Auth responses never enter stores. A non-auth failure can update the
+    // normal reason only after that feed's post-freeze authenticated success.
+    // The displayed selection stays frozen until finishRecovery renders it.
     accept(key, response) {
       session.observe(key, response);
-      return response?.auth !== true && session.accepting() && (!session.signedOut() || response?.auth === false);
+      return response?.auth !== true && session.accepting() && (!session.signedOut() || response?.auth === false || authenticated.has(key));
     },
   };
   return session;

@@ -1,7 +1,9 @@
 // The last rendered document stays inert and visibly stale until a complete
 // authenticated refresh has rendered. Only transient controls close on expiry.
 const sections = ['acctHero', 'deskHero', 'desk-j', 'desk-joe', 'desk-joel', 'positions', 'kept',
-  'rhero', 'tiles', 'breakdown', 'cal', 'daypanel', 'histChart', 'histCompare', 'jAcct', 'setMain'];
+  'rhero', 'tiles', 'breakdown', 'cal', 'daypanel', 'histChart', 'histCompare', 'jAcct', 'setMain',
+  'calSum'];
+const headers = '.sec-h, .sec-head, .scr-h, .desk-disclosure';
 const vienna = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Vienna', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
 export function createBoardFreeze(document, session, { cancelInteractions = () => {} } = {}) {
   const app = document.getElementById('app');
@@ -37,6 +39,7 @@ export function createBoardFreeze(document, session, { cancelInteractions = () =
     app.setAttribute('data-last-known', '');
     app.setAttribute('inert', '');
     for (const id of sections) document.getElementById(id)?.setAttribute('data-frozen', '');
+    for (const node of app.querySelectorAll(headers)) node.setAttribute('data-frozen', '');
     const time = renderedAt && Number.isFinite(Date.parse(renderedAt)) ? vienna.format(new Date(renderedAt)) : 'unknown';
     banner.querySelector('strong').textContent = `Signed out — data as of ${time} (Vienna), not updating — reload to sign in`;
     banner.hidden = false;
@@ -57,7 +60,7 @@ export function createBoardFreeze(document, session, { cancelInteractions = () =
     }
     app.removeAttribute('data-last-known');
     app.removeAttribute('inert');
-    for (const id of sections) document.getElementById(id)?.removeAttribute('data-frozen');
+    for (const node of app.querySelectorAll('[data-frozen]')) node.removeAttribute('data-frozen');
   };
   const unsubscribe = session.subscribe(sync);
   sync();

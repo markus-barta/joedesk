@@ -33,6 +33,15 @@ let feed = null, tips = null, rerender = () => {};
 let state = M.editState();
 let restored = false, fieldsKey = null, lastCtx = null, pinnedSec = null, gateStep = 1, lastNote = null;
 let accountReview = null, accountBusy = false;
+let accountSaveGeneration = 0, accountSaveAbandoned = false;
+boardSession.subscribe(() => {
+  if (boardSession.signedOut()) {
+    accountSaveGeneration++;
+    accountSaveAbandoned = accountBusy;
+    accountBusy = false;
+    if (state.busy) state = { ...state, busy: false, reviewed: null, confirmed: null };
+  }
+});
 
 // Long keys may break after a dot or the file name, never inside a word.
 const breakable = text => esc(text).replace(/([.#/])/g, '$1<wbr>');
@@ -127,6 +136,10 @@ function accountStartSection() {
 
 function renderAccountStart() {
   if (boardSession.signedOut()) return;
+  if (accountSaveAbandoned) {
+    accountSaveAbandoned = false;
+    resetAccountReview();
+  }
   const snapshot = boardSettingsState(), row = M.accountStartRow(snapshot);
   patch($('#accountStartSummary'), esc(row.text));
   patch($('#accountStartReason'), esc(row.note));
@@ -196,7 +209,9 @@ async function saveAccountStart(event) {
   }
   accountBusy = true; renderAccountStart();
   $('#accountStartMessage').textContent = 'Saving account start…';
+  const generation = ++accountSaveGeneration;
   const result = await saveBoardSettings(accountReview.value);
+  if (generation !== accountSaveGeneration || result.abandoned) return;
   accountBusy = false;
   if (boardSession.signedOut()) return;
   accountReview = null;
@@ -661,10 +676,7 @@ async function send() {
   state = M.start(state);
   renderBar(lastCtx);
   const answer = await sendFleetDraft(baseRev, candidate);
-  if (boardSession.signedOut()) {
-    state = { ...state, busy: false, reviewed: null, confirmed: null };
-    return;
-  }
+  if (boardSession.signedOut() || answer.abandoned) return;
   let outcome = M.sendOutcome(answer.status, answer.body, keys);
   if (outcome.ok && (!validateContract('fleet-config', outcome.config).ok || outcome.config.mode !== 'paper')) {
     outcome = { ok: false, keys, reason: 'the written settings could not be checked; reload before retrying' };

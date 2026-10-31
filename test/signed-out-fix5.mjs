@@ -48,8 +48,8 @@ test('JOED-173 fix5 every value section is explicitly marked stale', t => {
 test('JOED-173 fix5 authenticated recovery renders fresh data before stale marking is removed', async t => {
   const p = shell(t); let recover;
   assert.equal(typeof p.session.coordinateRecovery, 'function');
-  p.session.coordinateRecovery(async () => { await new Promise(done => { recover = done; }); });
-  p.expire(); p.session.observe('other-feed', { auth: false }); await Promise.resolve();
+  p.session.coordinateRecovery(async () => { await new Promise(done => { recover = done; }); }, []);
+  p.expire(); p.session.observe('test', { auth: false }); await Promise.resolve();
   assert.equal(p.session.signedOut(), true, 'authenticated evidence starts a refresh, not a live display');
   assert.equal(p.doc.getElementById('app').hasAttribute('data-last-known'), true);
   recover(); await Promise.resolve();
@@ -71,7 +71,7 @@ for (const file of ['account.js', 'history.js']) test(`JOED-173 fix5 pre-expiry 
   assert.equal(inspected, false); assert.equal(m.input.touch, null);
 });
 for (const shape of ['401', 'opaque redirect', 'HTML']) test(`JOED-173 fix5 fleet write auth freezes before submission error UI: ${shape}`, async t => {
-  t.after(() => boardSession.observe('/joe/fleet-config/propagate', { auth: false }));
+  t.after(() => boardSession.observe('/joe/fleet-config.json', { auth: false }));
   t.mock.method(globalThis, 'fetch', async () => shape === '401' ? new Response('{}', { status: 401 })
     : shape === 'HTML' ? new Response('<form>Sign in</form>') : { type: 'opaqueredirect', status: 0 });
   await sendFleetDraft(valid['fleet-config'].rev, valid['fleet-config']);
@@ -175,7 +175,7 @@ for (const malformed of [false, true]) test(`JOED-173 fix5 recovery distinguishe
   const { createFeed } = await import('../public/joe/feed.js');
   const session = createBoardSession();
   let finish, recovery;
-  session.coordinateRecovery(async () => { await new Promise(done => { finish = done; }); });
+  session.coordinateRecovery(async () => { await new Promise(done => { finish = done; }); }, ['/joe/state.json', '/joe/history.json', '/joe/history-continuity.json', '/joe/results.json', '/joe/fleet-config.json']);
   const feed = createFeed(() => {}, () => {}, '', { session }); t.after(feed.stop);
   t.mock.method(globalThis, 'fetch', async url => new Response(JSON.stringify(String(url).endsWith('state.json')
     ? { serverNow: valid.data.receivedAt, feeds: { data: { value: malformed ? {} : valid.data, reason: 'contract_invalid' } }, panels: {} }
@@ -183,6 +183,7 @@ for (const malformed of [false, true]) test(`JOED-173 fix5 recovery distinguishe
   { headers: { 'X-Joe-Received-At': valid.data.receivedAt, 'X-Joe-Feed-Reason': 'contract_invalid' } }));
   session.observe('expiry', { auth: true });
   await feed.refresh();
+  session.observe('expiry', { auth: false });
   const rendered = session.finishRecovery(() => { recovery = true; });
   assert.equal(rendered, !malformed); assert.equal(Boolean(recovery), !malformed);
   finish(); await Promise.resolve();

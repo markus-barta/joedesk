@@ -140,7 +140,7 @@ async function preview(t, width, shape = '401', populated = true) {
   const stopRecovery = boardSession.coordinateRecovery(() => {
     recoveryTask = (async () => {
       await Promise.all([feed.whenIdle(), A.accountHistoryIdle()]);
-      await Promise.all([feed.refresh(), refreshBoardSettings(), A.refreshAccountHistory()]);
+      await Promise.all([feed.refresh(), feed.refreshActions(), refreshBoardSettings(), A.refreshAccountHistory()]);
       boardSession.finishRecovery(() => { render(context(null), currentScreen, true); return true; });
     })();
     return recoveryTask;

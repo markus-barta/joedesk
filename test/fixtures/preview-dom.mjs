@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import * as nodeModule from 'node:module';
 
 const baseline = process.env.JOED_PRESENTATION_BASELINE;
-if (baseline && !['a941776', '204b83d'].includes(baseline)) throw new Error('Unsupported presentation baseline');
+if (baseline && !['a941776', '204b83d', 'd83f7ff'].includes(baseline)) throw new Error('Unsupported presentation baseline');
 const sourceAt = url => baseline ? execFileSync('git', ['show', `${baseline}:public/joe/${new URL(url).pathname.split('/public/joe/')[1]}`], { encoding: 'utf8' }) : fs.readFileSync(url, 'utf8');
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&

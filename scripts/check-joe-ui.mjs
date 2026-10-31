@@ -71,7 +71,7 @@ for (const [name, text] of modules) {
   required(/const ROUTE = '\.\/fleet-config\/propagate';/.test(writer) && /readJSON\(ROUTE,/.test(writer), `${WRITER}: the request goes only to the propagate route`);
   required(/config\.mode !== 'paper'/.test(writer) && /config\.rev !== baseRev/.test(writer) && /throw new Error/.test(writer), `${WRITER}: a non-paper draft, or one not based on the version it names, is refused before any request`);
   required(!/\/inbox/.test(writer), `${WRITER}: never the inbox`);
-  required(/boardSession\.accept\('\/joe\/fleet-config\/propagate', response\)/.test(writer), `${WRITER}: auth classification precedes submission UI`);
+  required(/boardSession\.accept\('\/joe\/fleet-config\.json', response\)/.test(writer), `${WRITER}: auth classification precedes submission UI and recovery requires the fleet read`);
 }
 for (const [name, text] of modules) {
   required(!/\bmode\s*[:=]\s*['"`](live|LIVE)['"`]/.test(text) && !/\.mode\s*=\s*(?!['"`]paper['"`])['"`]/.test(text), `${name}: no code path sets a live mode`);

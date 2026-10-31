@@ -11,11 +11,13 @@ export async function sendFleetDraft(baseRev, config) {
     throw new Error('refused: only a paper draft of the version it names can be sent');
   }
   if (boardSession.signedOut()) return { status: 401, body: null };
+  const epoch = boardSession.epoch();
   const response = await readJSON(ROUTE, {
       method: 'POST', credentials: 'same-origin', cache: 'no-store', redirect: 'manual',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ baseRev, config }),
     });
-  const accepted = boardSession.accept('/joe/fleet-config/propagate', response);
-  return { status: response.status, body: accepted ? response.payload : null };
+  if (epoch !== boardSession.epoch()) return { abandoned: true };
+  const accepted = boardSession.accept('/joe/fleet-config.json', response);
+  return { status: response.httpStatus ?? response.status, body: accepted ? response.payload : null };
 }

@@ -15,7 +15,8 @@ const endpoints = ['state.json', 'history.json', 'history-continuity.json', 'res
 try {
   browser = await launch({ commandTimeout: 30000 });
   const page = await openPage(browser, { headers: { 'x-auth-request-user': ACTOR } });
-  let expired = false, fail503 = false, shape = '401', reason = null, only = null, fleetPaused = null;
+  let expired = false, fail503 = false, shape = '401', reason = null, only = null, fleetPaused = null, settingsPaused = null, nonAuthOnly = null;
+  let settingsValue = { accountStart: { amountEur: 100000, date: '2026-01-01' }, reason: null };
   const panels = () => Object.fromEntries(f.data.desks.flatMap(desk => ['equity', 'dayPnl', 'openPnl', 'totalPnl'].map(key =>
     [`desks.${desk.id}.${key}`, { value: desk.money[key], state: 'broken', reason, retained: false, ageSeconds: 125 }])));
   browser.on(async m => {
@@ -29,12 +30,17 @@ try {
       if (url.origin === new URL(board.url).origin && request.method === 'POST' && url.pathname === '/joe/fleet-config/propagate' && fleetPaused) {
         fleetPaused(send); fleetPaused = null; return;
       }
+      if (url.origin === new URL(board.url).origin && request.method === 'POST' && url.pathname === '/joe/board-settings.json' && settingsPaused) {
+        settingsValue = { ...JSON.parse(request.postData), reason: null };
+        settingsPaused(send); settingsPaused = null; return;
+      }
       if (url.origin !== new URL(board.url).origin || request.method !== 'GET') {
         failures.push('unexpected external request or write');
         await browser.send('Fetch.failRequest', { requestId, errorReason: 'BlockedByClient' }, m.sessionId); return;
       }
       const path = url.pathname.slice('/joe/'.length);
       if (!endpoints.includes(path)) { await browser.send('Fetch.continueRequest', { requestId }, m.sessionId); return; }
+      if (path === nonAuthOnly) { await send(503, '{}'); return; }
       if (fail503) { await send(503, '{}'); return; }
       if (expired && (!only || only === path)) {
         visited.add(`${shape}/${path}`);
@@ -49,7 +55,7 @@ try {
       }
       const value = path === 'state.json' ? { serverNow: f.data.receivedAt, feeds: { data: { value: f.data, reason } }, panels: reason ? panels() : {} }
         : path === 'history.json' ? f.history : path === 'results.json' ? f.results : path === 'fleet-config.json' ? f['fleet-config']
-        : path === 'board-settings.json' ? { accountStart: { amountEur: 100000, date: '2026-01-01' }, reason: null }
+        : path === 'board-settings.json' ? settingsValue
         : path === 'account-history.json' ? account
         : path === 'fleet-config/actions.json' ? { schema: 'inspr.joe.fleet-config.actions.v1', entries: [] } : {};
       await send(200, value);
@@ -77,11 +83,13 @@ try {
       button.focus(); const r = button.getBoundingClientRect();
       return { sections: sections.length, labels: sections.every(n => getComputedStyle(n, '::before').content.includes('Stale')),
         muted: values.every(n => Number(getComputedStyle(n).opacity) < 1 || Boolean(n.closest('.chart, .acct-value, .acct-change, .bars'))),
+        headers: [...app.querySelectorAll('.sec-h, .sec-head, .scr-h, .desk-disclosure')].filter(n => n.getClientRects().length).every(n => n.closest('[data-frozen]') && getComputedStyle(n, '::before').content.includes('Stale')),
+        collapsed: [...app.querySelectorAll('[data-desk-disclosure="positions"], [data-desk-disclosure="kept"]')].filter(n => n.getClientRects().length && n.getAttribute('aria-expanded') === 'false').every(n => n.hasAttribute('data-frozen') && getComputedStyle(n, '::before').content.includes('Stale')),
         desaturated: getComputedStyle(app).filter.includes('grayscale(1)'),
         animations: [...app.querySelectorAll('*')].some(n => getComputedStyle(n).animationName !== 'none'),
         reload: document.activeElement === button && button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)) };
     })()`);
-    assert.ok(view.sections && view.labels && view.muted && view.desaturated && !view.animations && view.reload, `${tag}: frozen visual guard ${JSON.stringify(view)}`);
+    assert.ok(view.sections && view.labels && view.headers && view.collapsed && view.muted && view.desaturated && !view.animations && view.reload, `${tag}: frozen visual guard ${JSON.stringify(view)}`);
   };
   const interact = () => page.evaluate(`(() => {
     for (const node of document.querySelectorAll('#acctChart, #histChart, #heroChart, #curve')) {
@@ -94,7 +102,9 @@ try {
     document.getElementById('acctCtl').dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: document.querySelector('[data-sign-in-reload]') }));
   })()`);
   const capture = () => page.evaluate(`(${retainedDocument.toString()})(document)`);
+  const idleRecovery = () => page.evaluate(`(async () => { const { boardSession } = await import('/joe/transport.js'); for (let i = 0; boardSession.recovering(); i++) { if (i > 10000) throw new Error('Recovery did not finish'); await new Promise(done => setTimeout(done, 0)); } })()`);
   const recover = async () => {
+    await idleRecovery();
     expired = fail503 = false;
     await refresh();
     await waitFor(page, "!document.getElementById('app').hasAttribute('data-last-known')");
@@ -152,6 +162,59 @@ try {
     await waitFor(page, "document.documentElement.dataset.ready === '1'");
     await refresh(); await settle();
     await page.evaluate('document.fonts.ready.then(() => true)');
+    stage = `${width}: every feed gates recovery`;
+    await go('desk');
+    if (width === 390) {
+      await page.evaluate(`for (const b of document.querySelectorAll('[data-desk-disclosure="positions"], [data-desk-disclosure="kept"]')) if (b.getAttribute('aria-expanded') === 'true') b.click();`);
+      assert.deepEqual(await page.evaluate(`['positions', 'kept'].map(id => document.querySelector('[data-desk-disclosure="' + id + '"]').getAttribute('aria-expanded'))`), ['false', 'false']);
+    }
+    for (const endpoint of endpoints) {
+      stage = `${width}: one feed still 401: ${endpoint}`;
+      only = null; expired = true;
+      await page.evaluate(`import('/joe/board-settings.js').then(m => m.refreshBoardSettings())`);
+      only = endpoint;
+      await refresh(); await idleRecovery(); await settle();
+      assert.equal((await capture()).marked, true, `${endpoint} still 401 must keep all frozen marks`);
+      await frozenVisuals(stage);
+      await recover(); only = null;
+    }
+    console.log(`fix6: ${width}px collapsed headers and all eight recovery gates passed`);
+    stage = `${width}: later non-auth account-history failure shows its honest reason`;
+    only = null; expired = true;
+    await page.evaluate(`import('/joe/board-settings.js').then(m => m.refreshBoardSettings())`);
+    only = 'state.json'; await refresh(); await idleRecovery();
+    nonAuthOnly = 'account-history.json';
+    await recover();
+    assert.match(await page.evaluate(`document.getElementById('acctNote').textContent`), /could not|refresh|failed|update/i);
+    nonAuthOnly = only = null; await refresh(); await settle();
+    for (const pendingCopy of [false, true]) {
+      stage = `${width}: version copy at freeze, pending=${pendingCopy}`;
+      await page.evaluate(`window.__clipboardBefore = Object.getOwnPropertyDescriptor(navigator, 'clipboard'); Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => ${pendingCopy ? "new Promise((_, reject) => { window.__lateClipboard = reject; })" : "Promise.resolve()"} } }); document.querySelector('[data-product-version]').click();`);
+      await settle();
+      expired = true; await page.evaluate(`import('/joe/board-settings.js').then(m => m.refreshBoardSettings())`);
+      const copyFrozen = await capture();
+      if (pendingCopy) await page.evaluate(`window.__lateClipboard(new Error('clipboard failed after sign-out'))`);
+      await page.evaluate(`new Promise(done => setTimeout(done, 2100))`); await settle();
+      assert.deepEqual(await capture(), copyFrozen, 'version confirmation timers and clipboard promises cannot mutate the freeze');
+      assert.equal(await page.evaluate(`document.querySelector('[data-product-version]').hasAttribute('data-copy-state')`), false);
+      await page.evaluate(`if (window.__clipboardBefore) Object.defineProperty(navigator, 'clipboard', window.__clipboardBefore); else delete navigator.clipboard; delete window.__clipboardBefore;`);
+      await recover();
+    }
+    stage = `${width}: abandoned account-start save refetches before delayed POST`;
+    await go('settings');
+    await page.evaluate(`document.getElementById('accountStartEdit').click(); document.getElementById('accountStartAmount').value = '200000'; document.getElementById('accountStartDate').value = '2026-01-01'; document.getElementById('accountStartReview').click(); document.getElementById('accountStartConfirmed').click();`);
+    const posted = new Promise(done => { settingsPaused = done; });
+    await page.evaluate(`document.getElementById('accountStartSave').click()`);
+    const completeSave = await posted;
+    expired = true; await page.evaluate(`window.__joedesk.refresh('state')`);
+    await recover();
+    assert.match(await page.evaluate(`document.getElementById('accountStartSummary').textContent`), /200[.]000/);
+    const afterRead = await capture();
+    await completeSave(200, { ok: true, ...settingsValue });
+    await settle();
+    assert.deepEqual(await capture(), afterRead, 'abandoned save has no late success or error UI');
+    settingsValue = { accountStart: { amountEur: 100000, date: '2026-01-01' }, reason: null };
+    await refresh(); await settle();
     // Confirm the native modal/top-layer and long-press reproducers before
     // the matrix; snapshots after expiry retain every data/form property.
     if (width === 390) {
@@ -192,11 +255,12 @@ try {
     f.data.brokerAccount.equity.amount = '29001'; f.data.seq++;
     await page.evaluate(`window.__unmarkValues = []; window.__originalRemove = Element.prototype.removeAttribute;
       Element.prototype.removeAttribute = function(key) {
-        if (this.id === 'app' && key === 'data-last-known') window.__unmarkValues.push(document.getElementById('acctValue').textContent);
+        if (this.id === 'app' && key === 'data-last-known') window.__unmarkValues.push({ value: document.getElementById('acctValue').textContent, marked: this.hasAttribute('data-last-known') && this.hasAttribute('inert'), sectionMarks: document.querySelectorAll('[data-frozen]').length });
         return window.__originalRemove.call(this, key);
       };`);
     await recover();
-    assert.deepEqual(await page.evaluate('window.__unmarkValues.map(s => s.replace(/\\s/g, ""))'), ['€29.001,00']);
+    assert.deepEqual(await page.evaluate('window.__unmarkValues.map(s => s.value.replace(/\\s/g, ""))'), ['€29.001,00']);
+    assert.equal(await page.evaluate('window.__unmarkValues.every(s => s.marked && s.sectionMarks > 0)'), true, 'fresh document renders while still frozen and marked');
     await page.evaluate('Element.prototype.removeAttribute = window.__originalRemove; delete window.__originalRemove;');
     f.data.brokerAccount.equity.amount = amount; f.data.seq++;
     await refresh(); await settle();
