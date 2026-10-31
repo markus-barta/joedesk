@@ -95,6 +95,7 @@ jobs:
           board_mode=--full
           if [ "$GITHUB_EVENT_NAME" = 'pull_request' ]; then board_mode=--subset; fi
           JOED_QA_DIR="$JOED_QA_ROOT/p3" node scripts/browser-p3.mjs "$board_mode" || status=$?
+          TZ=UTC node scripts/browser/signed-out-pages.mjs || status=$?
           if [ "$GITHUB_EVENT_NAME" = 'push' ]; then
             JOED_QA_DIR="$JOED_QA_ROOT/p4" npm run test:results -- UTC Europe/Vienna America/New_York || status=$?
           else

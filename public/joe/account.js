@@ -15,6 +15,7 @@ import { drawChart, chartAxis, chartDots, axis, eurAxis, overviewTargets, create
 import { panWindow, zoomWindow, placeWindow, endsAtNewest, atLiveEdge, easeOut, lerpWindow, toStrip, fromStrip } from './history-model.js';
 import { zonedInstant, VIENNA } from './time.mjs';
 import * as M from './account-model.js';
+import { readJSON, readFailure, boardSession } from './transport.js';
 
 const TONE_ICON = { ok: 'ok', warn: 'half', bad: 'stop', none: 'ring' };
 const MIN = 60e3;
@@ -158,22 +159,7 @@ const timing = (reason, ms) => {
   list.push({ reason, ms, at: performance.now() });
   if (list.length > 200) list.shift();
 };
-async function read(url) {
-  const controller = new AbortController();
-  let timer;
-  try {
-    return await Promise.race([
-      new Promise(resolve => { timer = setTimeout(() => { controller.abort(); resolve({ status: 0 }); }, TIMEOUT_MS); }),
-      (async () => {
-        const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', redirect: 'manual', signal: controller.signal });
-        if (response.type === 'opaqueredirect') return { status: 302 };
-        if (response.status !== 200) return { status: response.status };
-        return { status: 200, body: await response.json() };
-      })(),
-    ]);
-  } catch { return { status: 0 }; } finally { clearTimeout(timer); }
-}
-const readReason = status => ([301, 302, 303, 307, 308, 401, 403].includes(status) ? 'auth_required' : status === 404 ? 'route_not_found' : 'refresh_failed');
+const read = readJSON;
 // Takes an endpoint body read on the page; on a refused one the last good series stays.
 export function useAccountHistory(body, at = performance.now()) {
   try {
@@ -184,6 +170,7 @@ export function useAccountHistory(body, at = performance.now()) {
 }
 // A worker's or the page's reply; returns whether the history is current.
 function useReply(reply) {
+  if (!boardSession.accept('/joe/account-history.json', reply)) return false;
   if (reply?.kind === 'unchanged' && store.value) { store.reason = null; store.loadedAt = performance.now(); return true; }
   if (reply?.kind === 'account' && reply.value) {
     Object.assign(store, { value: reply.value, reason: null, loadedAt: performance.now(), key: reply.key ?? null, version: store.version + 1 });
@@ -221,12 +208,12 @@ function startWorker() {
 }
 async function readOnPage() {
   const started = performance.now(), res = await read('./account-history.json');
-  if (res.status !== 200) return { kind: 'account', status: res.status, reason: readReason(res.status), value: null };
+  if (res.status !== 200) return { evidence: res.evidence, kind: 'account', status: res.status, reason: readFailure(res), value: null };
   try {
-    const value = M.acceptAccountHistory(res.body);
+    const value = M.acceptAccountHistory(res.payload);
     timing('account-accept', performance.now() - started);
-    return { kind: 'account', status: 200, reason: null, value };
-  } catch { return { kind: 'account', status: 200, reason: 'contract_invalid', value: null }; }
+    return { evidence: res.evidence, kind: 'account', status: 200, reason: null, value };
+  } catch { return { evidence: res.evidence, kind: 'account', status: 200, reason: 'contract_invalid', value: null }; }
 }
 // One read at a time: a read asked for while one runs is that read, so no
 // reply can go to the wrong caller (and leave a healthy worker timed out).
@@ -260,11 +247,16 @@ async function readHistory() {
   const ok = useReply(reply ?? await readOnPage());
   store.busy = false;
   store.next = performance.now() + (ok ? READ_MS : RETRY_MS);
-  if (last.ctx) renderAccount(last.ctx);
+  if (last.ctx && !boardSession.signedOut()) renderAccount(last.ctx);
+  return ok;
 }
 export const forgetAccountHistory = () => Object.assign(store, { value: null, reason: 'loading', loadedAt: null, key: null, version: store.version + 1, busy: false, next: 0 });
 // Read now (a retry, the budget run, a test), whatever the schedule says.
 export const refreshAccountHistory = () => refresh();
+export const accountHistoryIdle = () => reader.reading ?? Promise.resolve();
+export function pollAccountHistory() {
+  if (!boardSession.signedOut() && !store.busy && performance.now() >= store.next && typeof fetch === 'function') return refresh();
+}
 // Forget the worker and its failures (tests): the next read starts a new one.
 export const forgetAccountWorker = () => {
   try { reader.worker?.terminate?.(); } catch { /* already gone */ }
@@ -333,7 +325,7 @@ function frameWindow(target) {
   return lerpWindow(motion.from, target, easeOut(k));
 }
 function requestDraw() {
-  if (last.frame || typeof requestAnimationFrame !== 'function') return;
+  if (boardSession.signedOut() || last.frame || typeof requestAnimationFrame !== 'function') return;
   last.frame = requestAnimationFrame(() => { last.frame = 0; draw(); });
 }
 const whenText = ms => { const at = new Date(Math.round(ms)).toISOString(); return `${dayDDM(at)}, ${timeHM(at)}`; };
@@ -387,6 +379,7 @@ function chartLabel(source, range, choice = { mode: 'auto' }) {
     : `The whole paper account, kept holdings included, zoomed: ${spanLabel(AS.shown, source, false)} Vienna time, in euros${axisWords}`;
 }
 function draw() {
+  if (boardSession.signedOut()) return;
   const el = $('#acctChart'), size = el ? sizeOf(el) : null;
   if (!el || !size.w) { syncWindowParts(); return; }
   const ctx = last.ctx, inspect = { description: 'acctInspectHelp', live: $('#acctLive'), points: [] }, pad = padFor();
@@ -546,6 +539,7 @@ function drawStrip(series, full, [a, b], settled) {
 // The change line (or the value's state), the pressed range and the line
 // under the chart, kept in step with the window drawn.
 function syncWindowParts() {
+  if (boardSession.signedOut()) return;
   const ctx = last.ctx;
   if (!ctx) return;
   const cell = ctx.states.paperAccount, state = stateLine(cell), source = M.sourceOf(AS.range);
@@ -586,10 +580,11 @@ const isMac = () => /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? '')
 
 // ---------- Rendering ----------
 export function renderAccount(ctx) {
+  if (boardSession.signedOut()) return;
   last.ctx = ctx;
   const root = $('#acctHero');
   if (!root) return;
-  if (!store.busy && performance.now() >= store.next && typeof fetch === 'function') refresh();
+  if (!boardSession.signedOut() && !store.busy && performance.now() >= store.next && typeof fetch === 'function') refresh();
   // The value and its panel state (fresh, stale, broken or not reported).
   const value = $('#acctValue'), state = ctx.states.paperAccount?.state ?? 'not reported';
   patch(value, valueHtml(ctx.states.paperAccount));
@@ -713,6 +708,14 @@ export function chooseRange(range) {
 function fitAll() { if (!AS.full) return; glide(); AS.view = AS.full.slice(); AS.follow = true; seen(); requestDraw(); }
 const unpin = () => { if (input.pinned) { input.pinned = false; last.scale?.release(); } };
 
+export function cancelInteractions() {
+  clearTimeout(input.touch?.timer);
+  if (last.frame) cancelAnimationFrame(last.frame);
+  last.frame = 0; motion.from = null;
+  input.touch = input.drag = input.lastTap = null; input.pinned = false;
+  input.cancelPointers?.();
+}
+
 function bindChart(chart, track) {
   const plotWidth = () => last.scale?.pw ?? Math.max(1, chart.clientWidth - padFor().l - padFor().r);
   const perPx = () => (AS.shown ? (AS.shown[1] - AS.shown[0]) / plotWidth() : 0);
@@ -738,6 +741,7 @@ function bindChart(chart, track) {
   // Safari reports a trackpad pinch as gesture events, not as a Ctrl wheel.
   const touches = new Map();
   let gesture = null;
+  input.cancelPointers = () => { touches.clear(); gesture = null; };
   chart.addEventListener('gesturestart', e => { if (!AS.shown || touches.size) return; const start = current(); e.preventDefault(); stop(); gesture = { start, at: chartTime(e.clientX, start) }; });
   chart.addEventListener('gesturechange', e => { if (!gesture) return; e.preventDefault(); setView(zoomBy(gesture.start, 1 / Math.max(0.05, e.scale), gesture.at)); });
   chart.addEventListener('gestureend', () => { gesture = null; });
@@ -759,7 +763,7 @@ function bindChart(chart, track) {
     clearTimeout(input.touch?.timer);
     if (touches.size === 1) {
       const t = { phase: 'pending', id: e.pointerId, x: e.clientX, y: e.clientY, lastX: e.clientX, down: e.timeStamp, start, perPx: perPx() };
-      t.timer = setTimeout(() => { if (input.touch === t && t.phase === 'pending') { t.phase = 'scrub'; input.pinned = true; last.scale?.inspectAt(t.lastX); } }, 350);
+      t.timer = setTimeout(() => { if (!boardSession.signedOut() && input.touch === t && t.phase === 'pending') { t.phase = 'scrub'; input.pinned = true; last.scale?.inspectAt(t.lastX); } }, 350);
       input.touch = t;
     } else if (touches.size === 2) {
       const [p, q] = [...touches.values()], mid = (p.x + q.x) / 2;
@@ -983,6 +987,7 @@ export function applyCustomAxis() {
   return true;
 }
 function openControls(open) {
+  if (boardSession.signedOut()) return;
   const pop = $('#acctPop'), button = $('#acctCtl');
   if (!pop || !button) return;
   if (open && !pop.innerHTML) {

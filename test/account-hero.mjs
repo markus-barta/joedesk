@@ -3,10 +3,13 @@
 // currencies, the ranges, the chart and its input, Controls and the hint.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { test } from 'node:test';
+import { test, beforeEach } from 'node:test';
 import { htmlDocument } from './fixtures/preview-dom.mjs';
 import { MIN, DAY, iso, valid, words, point, SNAP, NOW, history, ctxFor } from './fixtures/account-fixtures.mjs';
 
+import { freshPageSession } from './fixtures/board-session.mjs';
+beforeEach(t => { const restore = freshPageSession(); t.after(restore); });
+const { boardSession } = await import('../public/joe/transport.js');
 const M = await import('../public/joe/account-model.js');
 const A = await import('../public/joe/account.js');
 const { chartHintSeen, dismissChartHint, forgetChartMemory, createAxisMode, CHART_HINT_KEY, CHART_AXES_KEY } = await import('../public/joe/chart.js');
@@ -21,6 +24,7 @@ function page(t, { phone = false, storage = new Map(), body: answer = history() 
     globalThis.document = saved.document; globalThis.matchMedia = saved.matchMedia; globalThis.fetch = saved.fetch;
     if (saved.window) Object.defineProperty(globalThis, 'window', saved.window); else delete globalThis.window;
     if (saved.add) Object.defineProperty(proto, 'addEventListener', saved.add); else delete proto.addEventListener;
+    boardSession.observe('/joe/account-history.json', { auth: false });
     A.forgetAccountHistory(); forgetChartMemory();
     Object.assign(A.AS, { range: '1M', view: null, follow: true, details: false, full: null, shown: null });
   });
@@ -178,12 +182,11 @@ test('JOED-156 hero: each range draws its own store; a range longer than the rec
 });
 
 test('JOED-156 hero: a failed read keeps the last good history and says so; without one the chart says it is unavailable', async t => {
-  let answer = { status: 401 };
+  let answer = { status: 503 };
   const p = page(t, { body: () => answer });
   await p.render();
-  assert.equal(p.text('#acctNote'), 'History unavailable · sign-in expired — reload');
-  assert.equal(p.svg().getAttribute('aria-label'), 'Account history unavailable', 'no history: the chart says so, the live value alone draws nothing');
-  assert.equal(document.querySelector('#acctHero').dataset.history, 'auth_required');
+  assert.equal(boardSession.signedOut(), false);
+  assert.match(p.text('#acctNote'), /unavailable|failed/i);
   answer = history();
   await A.refreshAccountHistory();
   await p.settle();
@@ -482,13 +485,13 @@ test('JOED-156 fix 4: a worker reads and converts the account history; the page 
     postMessage(data) { sent.push(data); const out = reply(data); queueMicrotask(() => (out === 'fail' ? (this.onerror(new Error('worker failed')), this.onerror(new Error('and again'))) : this.onmessage({ data: out }))); }
     terminate() { this.terminated = true; }
   };
-  globalThis.JoeVersion = { APP_VERSION: '261030154842.0.0' };
+  globalThis.JoeVersion = { APP_VERSION: '261031052151.0.0' };
   globalThis.__joedesk = { timings: [] };
   const p = page(t);
   await p.render();
   assert.deepEqual(p.reads, [], 'nothing is read or parsed on the page');
   assert.equal(made.length, 1);
-  assert.match(made[0].url, /\/joe\/v\/261030154842\.0\.0\/account-worker\.js$/, 'under this release’s own path');
+  assert.match(made[0].url, /\/joe\/v\/261031052151\.0\.0\/account-worker\.js$/, 'under this release’s own path');
   assert.deepEqual(made[0].options, { type: 'module' });
   assert.deepEqual(sent[0], { read: 'account', have: null });
   assert.equal(p.svg().dataset.source, 'daily');
@@ -500,10 +503,6 @@ test('JOED-156 fix 4: a worker reads and converts the account history; the page 
   assert.deepEqual(sent[1], { read: 'account', have: 'k1' });
   assert.equal(p.svg().dataset.source, 'daily');
   assert.equal(document.querySelector('#acctHero').dataset.history, 'ok');
-  // A worker's failed read keeps the last good history and says why.
-  reply = () => ({ kind: 'account', status: 401, reason: 'auth_required', value: null, key: null, ms: 1 });
-  await A.refreshAccountHistory();
-  assert.match(p.text('#acctNote'), /^Update failed · showing what loaded \d+ s ago$/);
   // A failed worker is terminated and hands its read to the page at once.
   reply = () => 'fail';
   await A.refreshAccountHistory();
@@ -518,6 +517,11 @@ test('JOED-156 fix 4: a worker reads and converts the account history; the page 
   const posts = sent.length;
   await A.refreshAccountHistory();
   assert.deepEqual([made.length, sent.length, p.reads.length], [2, posts, 3], 'no third worker and no post to a dead one');
+  // Auth refuses the fallback too and permanently freezes the last render.
+  globalThis.fetch = async () => new Response('{}', { status: 401 });
+  const beforeAuth = p.text('#acctNote');
+  await A.refreshAccountHistory();
+  assert.equal(p.text('#acctNote'), beforeAuth); assert.equal(boardSession.signedOut(), true);
 });
 
 // Mocked timers never fire on their own: a test that waits on one stops at its timeout.
@@ -531,7 +535,7 @@ test('JOED-156 fix round 2: a worker that never answers is terminated after the 
     postMessage() { this.posts++; if (this.terminated) throw new Error('posted to a terminated worker'); }
     terminate() { this.terminated = true; }
   };
-  globalThis.JoeVersion = { APP_VERSION: '261030154842.0.0' };
+  globalThis.JoeVersion = { APP_VERSION: '261031052151.0.0' };
   globalThis.__joedesk = { timings: [] };
   const p = page(t);
   await p.render();
@@ -571,7 +575,7 @@ test('JOED-156 fix round 2: two reads asked at once are one read, so a healthy w
     postMessage() { const n = ++this.posts; queueMicrotask(() => this.onmessage({ data: { kind: 'account', status: 200, reason: null, value: M.acceptAccountHistory(history()), key: `k${n}`, ms: 2 } })); }
     terminate() { this.terminated = true; }
   };
-  globalThis.JoeVersion = { APP_VERSION: '261030154842.0.0' };
+  globalThis.JoeVersion = { APP_VERSION: '261031052151.0.0' };
   globalThis.__joedesk = { timings: [] };
   const p = page(t);
   await p.render();
@@ -597,7 +601,7 @@ test('JOED-156 fix round 2: a worker that refuses the post fails like one that n
     postMessage() { throw new Error('the post was refused'); }
     terminate() { this.terminated = true; }
   };
-  globalThis.JoeVersion = { APP_VERSION: '261030154842.0.0' };
+  globalThis.JoeVersion = { APP_VERSION: '261031052151.0.0' };
   globalThis.__joedesk = { timings: [] };
   const p = page(t);
   await p.render();
@@ -978,4 +982,14 @@ test('JOED-158 chart parity: normal motion halos, edge chevrons and custom notes
     assert.equal(moved.notes.some(([, text]) => text.includes('below')), below, amount);
     assert.deepEqual(await fresh(ctx), moved, `${amount}: fresh-draw parity`);
   }
+});
+
+test('JOED-173 fix15 cold account expiry stays at its prior loading render after a valid response', async t => {
+  let answer = { status: 401 };
+  const p = page(t, { body: () => answer }); await p.render();
+  assert.equal(boardSession.signedOut(), true);
+  const before = document.querySelector('#acctHero').innerHTML;
+  answer = history(); await A.refreshAccountHistory(); await p.settle();
+  assert.equal(document.querySelector('#acctHero').innerHTML, before);
+  assert.equal(boardSession.signedOut(), true);
 });

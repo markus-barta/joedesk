@@ -1,6 +1,7 @@
 // Shared pieces: icons from the inline sprite, terms, big numbers, desk marks
 // and the one opaque tip. Everything returns escaped HTML strings.
 import { TERMS } from './terms.js';
+import { boardSession } from './transport.js';
 import { esc, money, eur, digits, tone, arrowOf, isZero, known, age, dayFull, MINUS, currencySymbol, cashAmount } from './format.js';
 import { cellReason, capital, CELL_REASON } from './health.js';
 import { NOT_EXACT_REASONS, notExactDash } from './board-state.js';
@@ -106,6 +107,7 @@ export function initTips({ now = () => null, since = () => null } = {}) {
   };
   const delayDismissal = () => { cancelDismissal(); dismissal = setTimeout(() => hide(false), 150); };
   function place(el) {
+    if (boardSession.signedOut()) return;
     const r = el.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
     const x = Math.max(10, Math.min(innerWidth - w - 10, el.dataset.learn ? r.right - w : r.left));
     let y = r.bottom + 8;
@@ -129,6 +131,7 @@ export function initTips({ now = () => null, since = () => null } = {}) {
     return true;
   }
   function show(el, pin) {
+    if (boardSession.signedOut()) return;
     if (!fill(el)) return;
     focusPlacement = null;
     restoreFocus?.();
@@ -147,6 +150,7 @@ export function initTips({ now = () => null, since = () => null } = {}) {
     el.setAttribute('aria-expanded', 'true'); el.setAttribute('aria-describedby', 'tip');
   }
   function hide(force) {
+    if (boardSession.signedOut()) return;
     cancelDismissal();
     if (pinned && !force) return;
     focusPlacement = null;
@@ -263,7 +267,8 @@ export function initTips({ now = () => null, since = () => null } = {}) {
     if (el.closest('dialog[open]')) e.preventDefault();
     e.stopImmediatePropagation();
   }, true);
-  return { hide: root => { if (!root || root.contains(anchor)) hide(true); } };
+  return { hide: root => { if (!root || root.contains(anchor)) hide(true); },
+    cancel: () => { cancelDismissal(); focusPlacement = null; anchor = null; pinned = false; restoreFocus = null; } };
 }
 
 // Dialogs open modal. Opened by a pointer, focus goes to the dialog's heading

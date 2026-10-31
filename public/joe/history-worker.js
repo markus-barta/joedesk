@@ -8,39 +8,29 @@ import { toColumns, transferables, sessionCloses, DESK_IDS } from './history-mod
 import { indexResults, transferables as resultsTransferables } from './results-model.js';
 
 const previous = { history: null, results: null }, posted = { history: null, results: null };
-const AUTH = new Set([301, 302, 303, 307, 308, 401, 403]);
-const READ_TIMEOUT_MS = 15000;
-// The board server's clock from a response: its own stamp, else the HTTP date.
-function serverClock(headers) {
-  const own = headers.get('X-Joe-Server-Now');
-  if (own && Number.isFinite(Date.parse(own))) return { at: own, precise: true };
-  const date = headers.get('Date');
-  return date && Number.isFinite(Date.parse(date)) ? { at: new Date(Date.parse(date)).toISOString(), precise: false } : null;
+let frozen = false;
+import { readJSON, documentRegressed } from './transport.js';
+const evidence = responses => Object.fromEntries(responses.map(([url, res]) => [url, res.auth]));
+// Document outcome is independent of the page's permanent expiry latch.
+function outcome(res, accepted) {
+  return { state: res.auth === true ? 'auth' : accepted.reason ? 'error' : 'ok',
+    evidence: res.evidence, auth: res.auth, reason: accepted.reason ?? null,
+    document: accepted.value ? { seq: accepted.value.seq, receivedAt: accepted.value.receivedAt } : null };
 }
-
+function accept(kind, res) {
+  const prior = previous[kind];
+  let accepted = acceptRead(kind, res, prior);
+  if (documentRegressed(prior?.value, accepted.value))
+    accepted = { ...prior, reason: 'sequence_replayed' };
+  previous[kind] = accepted;
+  return accepted;
+}
+const sidecarOutcome = res => ({ evidence: res.evidence, state: res.auth === true ? 'auth' : res.status === 200 ? 'ok' : 'error',
+  auth: res.auth, reason: res.auth === true ? 'auth_required' : res.reason ?? (res.status === 200 ? null : res.status === 404 ? 'route_not_found' : 'refresh_failed') });
 async function read(url) {
-  const controller = new AbortController();
-  let timer, clock = null, at;
-  try {
-    const deadline = new Promise((_, reject) => {
-      timer = setTimeout(() => { controller.abort(); reject(new Error('Read timed out')); }, READ_TIMEOUT_MS);
-    });
-    return await Promise.race([deadline, (async () => {
-      const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', redirect: 'manual', signal: controller.signal });
-      at = performance.now();
-      if (response.type === 'opaqueredirect') return { status: 302, redirected: true };
-      clock = serverClock(response.headers);
-      if (AUTH.has(response.status)) return { status: response.status, clock, at };
-      const reason = response.headers.get('X-Joe-Feed-Reason') ?? undefined;
-      let payload = null;
-      try { payload = await response.json(); } catch { if (response.ok) return { status: 0, clock, at }; }
-      return { ...(response.ok ? { status: 200, payload, reason,
-        generatedAdvancedAt: response.headers.get('X-Joe-Generated-Advanced-At') ?? undefined }
-        : { status: response.status, payload, reason: payload?.reason ?? undefined }), clock, at };
-    })()]);
-  } catch {
-    return { status: 0, clock, at };
-  } finally { clearTimeout(timer); }
+  const res = await readJSON(url);
+  return { ...res, reason: res.headers?.get('X-Joe-Feed-Reason') ?? (res.status === 200 ? undefined : res.payload?.reason),
+    generatedAdvancedAt: res.headers?.get('X-Joe-Generated-Advanced-At') ?? undefined };
 }
 
 // The server's time when this message leaves: its stamp plus the time spent here.
@@ -48,38 +38,49 @@ const clockNow = res => (res.clock ? { at: new Date(Date.parse(res.clock.at) + p
 
 async function pollHistory(started) {
   const [res, sidecar] = await Promise.all([read('/joe/history.json'), read('/joe/history-continuity.json')]);
-  const accepted = acceptRead('history', res, previous.history);
-  previous.history = accepted;
+  const auth = evidence([['/joe/history.json', res], ['/joe/history-continuity.json', sidecar]]);
+  if (frozen) { self.postMessage({ kind: 'blocked', feed: 'history' }); return; }
+  if (res.auth === true || sidecar.auth === true) { self.postMessage({ kind: 'blocked', feed: 'history', auth,
+    status: { '/joe/history.json': outcome(res, { reason: res.auth ? 'auth_required' : 'refresh_failed' }), '/joe/history-continuity.json': sidecarOutcome(sidecar) } }); return; }
+  const accepted = accept('history', res);
+  const status = { '/joe/history.json': outcome(res, accepted), '/joe/history-continuity.json': sidecarOutcome(sidecar) };
   const value = accepted.value;
   const meta = value ? { schema: value.schema, seq: value.seq, generatedAt: value.generatedAt, receivedAt: value.receivedAt,
     sizeBytes: value.sizeBytes, compactedThrough: value.compactedThrough ?? null, reason: value.reason ?? null, points: value.points.length } : null;
   const provenance = sidecar.status === 200 ? sidecar.payload : null;
   const key = JSON.stringify([meta, accepted.reason, provenance]);
-  if (key === posted.history) { self.postMessage({ kind: 'unchanged', feed: 'history', clock: clockNow(res), ms: performance.now() - started }); return; }
+  if (!frozen && key === posted.history) { self.postMessage({ status, reason: accepted.reason ?? null, valid: res.status !== 200 || accepted.value === res.payload, auth: { ...auth }, kind: 'unchanged', feed: 'history', clock: clockNow(res), ms: performance.now() - started }); return; }
   posted.history = key;
-  if (!value) { self.postMessage({ kind: 'history', reason: accepted.reason ?? null, meta: null, clock: clockNow(res), ms: performance.now() - started }); return; }
+  if (!value) { self.postMessage({ status, valid: res.status !== 200 || accepted.value === res.payload, auth: { ...auth }, kind: 'history', reason: accepted.reason ?? null, meta: null, clock: clockNow(res), ms: performance.now() - started }); return; }
   const columns = toColumns(value.points, provenance, value.seq);
   const closes = Object.fromEntries(DESK_IDS.map(id => [id, sessionCloses(columns, id, 'totalPnl', 9)]));
-  self.postMessage({ kind: 'history', reason: accepted.reason ?? null, meta, columns, closes, clock: clockNow(res), ms: performance.now() - started }, transferables(columns));
+  self.postMessage({ status, valid: res.status !== 200 || accepted.value === res.payload, auth: { ...auth }, kind: 'history', reason: accepted.reason ?? null, meta, columns, closes, clock: clockNow(res), ms: performance.now() - started }, transferables(columns));
 }
 
 // The closed-trade record: indexed once per accepted value (spec r3 §4.2 is
 // computed from the index on the page); an unchanged record is not re-sent.
 async function pollResults(started) {
   const res = await read('/joe/results.json');
-  const accepted = acceptRead('results', res, previous.results);
-  previous.results = accepted;
+  const auth = evidence([['/joe/results.json', res]]);
+  if (frozen) { self.postMessage({ kind: 'blocked', feed: 'results' }); return; }
+  if (res.auth === true) { self.postMessage({ kind: 'blocked', feed: 'results', auth, status: { '/joe/results.json': outcome(res, { reason: 'auth_required' }) } }); return; }
+  const accepted = accept('results', res);
+  const status = { '/joe/results.json': outcome(res, accepted) };
   const value = accepted.value;
   const key = JSON.stringify([value ? [value.seq, value.generatedAt, value.receivedAt] : null, accepted.reason ?? null]);
-  if (key === posted.results) { self.postMessage({ kind: 'unchanged', feed: 'results', clock: clockNow(res), ms: performance.now() - started }); return; }
+  if (!frozen && key === posted.results) { self.postMessage({ status, reason: accepted.reason ?? null, generatedAdvancedAt: accepted.generatedAdvancedAt, valid: res.status !== 200 || accepted.value === res.payload, auth: { ...auth }, kind: 'unchanged', feed: 'results', clock: clockNow(res), ms: performance.now() - started }); return; }
   posted.results = key;
-  if (!value) { self.postMessage({ kind: 'results', reason: accepted.reason ?? null, index: null, clock: clockNow(res), ms: performance.now() - started }); return; }
+  if (!value) { self.postMessage({ status, valid: res.status !== 200 || accepted.value === res.payload, auth: { ...auth }, kind: 'results', reason: accepted.reason ?? null, index: null, clock: clockNow(res), ms: performance.now() - started }); return; }
   const index = indexResults(value);
-  self.postMessage({ kind: 'results', reason: accepted.reason ?? null, generatedAdvancedAt: accepted.generatedAdvancedAt,
+  self.postMessage({ status, valid: res.status !== 200 || accepted.value === res.payload, auth: { ...auth }, kind: 'results', reason: accepted.reason ?? null, generatedAdvancedAt: accepted.generatedAdvancedAt,
     index, clock: clockNow(res), ms: performance.now() - started }, resultsTransferables(index));
 }
 
 self.onmessage = ({ data }) => {
+  if (typeof data?.frozen === 'boolean') {
+    frozen = data.frozen;
+    return;
+  }
   const started = performance.now();
   if (data === 'poll') pollHistory(started);
   if (data === 'results') pollResults(started);

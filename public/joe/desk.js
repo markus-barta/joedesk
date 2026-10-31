@@ -1050,7 +1050,8 @@ export function barTapAction(open, { bar = null, touch = false, inTip = false, o
 // The tapped bar's tip: its own hover tip's words, then the way to Results.
 export const barTipHtml = (words, href) => `${words}<a class="bars-go" href="${esc(href)}">Open in Results${icon('chev-r')}</a>`;
 const barKey = bar => `${bar.closest('.dcard')?.id ?? ''}|${bar.dataset.day ?? ''}`;
-let tapped = null;
+let tapped = null, barTimer = null;
+export function cancelBarInteractions() { clearTimeout(barTimer); barTimer = null; tapped = null; }
 function closeBarTip() {
   tapped = null;
   for (const tip of document.querySelectorAll('.desk-sessions .bars-tap')) if (!tip.hidden) { tip.hidden = true; tip.innerHTML = ''; }
@@ -1089,7 +1090,7 @@ export function initBarTaps() {
     const action = barTapAction(tapped, { bar: bar && barKey(bar), touch, inTip: Boolean(tip && e.target.closest('.bars-go')), onTip: Boolean(tip) });
     if (action === 'open') { e.preventDefault(); openBarTip(bar); }
     // Following a link closes the tip after the link has done its work.
-    else if (action === 'follow') setTimeout(closeBarTip);
+    else if (action === 'follow') (barTimer = setTimeout(closeBarTip));
     else if (action) closeBarTip();
   }, true);
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && tapped) closeBarTip(); });

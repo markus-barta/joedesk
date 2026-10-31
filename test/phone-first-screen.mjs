@@ -270,7 +270,7 @@ test('native disclosure clicks use the real tooltip API and toggle the matching 
   syncDeskDisclosures(true);
   for (const open of [true, false]) {
     // Enter, Space and pointer activation all dispatch this native click path.
-    listeners[0]({ target: { closest: () => control } });
+    listeners[0]({ target: { closest: selector => selector === '[data-desk-disclosure]' ? control : null } });
     assert.equal(control.getAttribute('aria-expanded'), String(open));
     assert.equal(detail.hidden, !open);
     assert.equal(doc.activeElement, control);

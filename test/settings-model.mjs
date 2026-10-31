@@ -525,7 +525,7 @@ test('JOED-117 warm refresh failure: last-good settings keep the draft but canno
   }
 });
 
-test('JOED-117 fleet transport: a validated same-revision 304 clears rejection without freshening the receipt', async () => {
+test('JOED-117 fleet transport: same-revision 304 clears feed rejection without proving sign-in or freshening the receipt', async () => {
   const { createFeed } = await import('../public/joe/feed.js');
   const realFetch = globalThis.fetch;
   const config = design(), tag = `"${config.rev}"`, receipt = valid.data.receivedAt;
@@ -537,21 +537,37 @@ test('JOED-117 fleet transport: a validated same-revision 304 clears rejection w
       const feed = createFeed(key => notifications.push(key));
       answer = () => new Response(JSON.stringify(config), { headers: { ETag: tag, 'X-Joe-Server-Now': receipt, 'X-Joe-Received-At': receipt } });
       await feed.refreshFleet();
-      const saved = feed.feeds['fleet-config'].value;
+      let saved = feed.feeds['fleet-config'].value;
       answer = () => { if (!status) throw new TypeError('offline'); return new Response('{}', { status }); };
       await feed.refreshFleet();
-      assert.equal(feed.feeds['fleet-config'].reason, status === 401 ? 'auth_required' : 'refresh_failed');
+      assert.equal(feed.feeds['fleet-config'].reason, status === 401 ? null : 'refresh_failed');
+      const frozen = status === 401 ? feed.select() : null;
       const later = new Date(Date.parse(receipt) + 60000).toISOString();
       answer = () => new Response(null, { status: 304, headers: { ETag: tag, 'X-Joe-Server-Now': later, 'X-Joe-Received-At': later } });
       const before = notifications.length;
       await feed.refreshFleet();
+      if (status === 401) {
+        assert.equal(feed.signedOut(), true, '304 has no validated body and cannot prove a new sign-in');
+        assert.equal(notifications.length, before, 'no recovery notification without authentication evidence');
+        answer = () => new Response(JSON.stringify(config), { headers: {
+          ETag: tag, 'X-Joe-Server-Now': later, 'X-Joe-Received-At': receipt,
+        } });
+        await feed.refreshFleet();
+        assert.equal(feed.signedOut(), true, 'a validated 200 cannot reopen this document; the probe must reload it');
+        assert.equal(feed.feeds['fleet-config'].value, saved);
+        assert.equal(feed.feeds['fleet-config'].receivedAt, receipt);
+        assert.equal(feed.select(), frozen, 'valid bodies and later HTTP clocks cannot alter the frozen selection');
+        assert.deepEqual(notifications.slice(before), [], 'no in-place recovery notification or fleet update');
+        feed.stop(); continue;
+      }
       assert.equal(requestedTag, tag);
       assert.equal(feed.feeds['fleet-config'].reason, null);
       assert.equal(feed.feeds['fleet-config'].value, saved);
       assert.equal(feed.feeds['fleet-config'].receivedAt, receipt);
       assert.equal(feed.select().states['fleet-config'].state, 'stale', 'revalidation does not reset receipt age');
       assert.ok(feed.select().states['fleet-config'].ageSeconds >= 60);
-      assert.deepEqual(notifications.slice(before), ['fleet'], 'recovery redraws Settings');
+      assert.deepEqual(notifications.slice(before), ['fleet'], 'normal revalidation redraws only Fleet');
+      assert.equal(feed.select().states.session, undefined, 'normal revalidation leaves the signed-in session live');
       answer = () => new Response(null, { status: 304, headers: { ETag: '"unrelated"' } });
       await feed.refreshFleet();
       assert.equal(feed.feeds['fleet-config'].reason, 'refresh_failed', 'an unrelated 304 cannot validate the saved value');

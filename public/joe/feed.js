@@ -12,46 +12,27 @@ import { acceptActions } from './settings-model.js';
 export const POLL_DATA_MS = 15000;
 export const POLL_HISTORY_MS = 30000;
 export const TICK_MS = 1000;
-const READ_TIMEOUT_MS = 15000;
 // Before any server clock is known no feed holds a value (every read that
 // brings one also brings the clock), so no state can depend on the instant;
 // this fixed one only satisfies the selector's input.
 const NO_CLOCK = '1970-01-01T00:00:00.000Z';
 
-// The server's clock from a response: its own stamp, else the HTTP date.
-export function serverClock(headers) {
-  const own = headers?.get('X-Joe-Server-Now');
-  if (own && Number.isFinite(Date.parse(own))) return { at: own, precise: true };
-  const date = headers?.get('Date');
-  return date && Number.isFinite(Date.parse(date)) ? { at: new Date(Date.parse(date)).toISOString(), precise: false } : null;
-}
+export { serverClock } from './transport.js';
+import { readJSON, createBoardSession, documentRegressed, AUTH_FAILURE } from './transport.js';
 
-const AUTH = new Set([301, 302, 303, 307, 308, 401, 403]);
-async function read(url, init = {}) {
-  const controller = new AbortController();
-  let timer, clock = null, at;
-  try {
-    // One deadline bounds both the response headers and consumption of its body.
-    const deadline = new Promise((_, reject) => {
-      timer = setTimeout(() => { controller.abort(); reject(new Error('Read timed out')); }, READ_TIMEOUT_MS);
-    });
-    return await Promise.race([deadline, (async () => {
-      const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', redirect: 'manual', ...init, signal: controller.signal });
-      at = performance.now();
-      if (response.type === 'opaqueredirect') return { status: 302, redirected: true };
-      clock = serverClock(response.headers);
-      if (AUTH.has(response.status) || response.status === 304) return { status: response.status, headers: response.headers, clock, at };
-      let payload = null;
-      try { payload = await response.json(); } catch { if (response.ok) return { status: 0, clock, at }; }
-      return { status: response.status, payload, headers: response.headers, clock, at };
-    })()]);
-  } catch {
-    return { status: 0, clock, at };
-  } finally { clearTimeout(timer); }
-}
-
-export function createFeed(onChange, measure = () => {}, version = '', { actionsWanted = () => false } = {}) {
+export function createFeed(onChange, measure = () => {}, version = '', { actionsWanted = () => false, session = createBoardSession() } = {}) {
   let anchor = null, serverPanels = {}, fleetTag = null;
+  let frozen = null, selected = null;
+  const unsubscribe = session.subscribe(() => {
+    frozen = session.signedOut() ? selected ?? select() : null;
+    worker?.postMessage({ frozen: session.signedOut() });
+    onChange('session');
+  });
+  const read = async (url, init) => {
+    const res = await readJSON(url, init);
+    session.accept(new URL(url, 'https://board/joe/').pathname, res);
+    return res.evidence === AUTH_FAILURE ? null : res;
+  };
   // Where the server read the fleet settings from, and its change log.
   let fleetSource = null, actions = null;
   const feeds = { data: null, history: null, results: null, 'fleet-config': null };
@@ -63,7 +44,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     reads.set(kind, promise);
     return promise;
   };
-  const now = () => (anchor ? new Date(Math.round(anchor.serverMs + performance.now() - anchor.perf)).toISOString() : null);
+  const now = () => frozen ? frozen.now : (anchor ? new Date(Math.round(anchor.serverMs + performance.now() - anchor.perf)).toISOString() : null);
   const settle = (key, value) => { feeds[key] = value; };
 
   // state.json's serverNow owns the clock once it has answered; until then
@@ -79,6 +60,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
 
   function pollState() { return poll('state', async () => {
     const res = await read('./state.json');
+    if (!res || !session.accepting()) return;
     if (res.status !== 200 || !res.payload?.feeds) {
       // Keep the last good snapshot and its original receipts; only the reason changes.
       anchorFrom(res);
@@ -118,15 +100,39 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
   try {
     worker = new Worker(new URL(`./v/${encodeURIComponent(version)}/history-worker.js`, import.meta.url), { type: 'module' });
     worker.onmessage = ({ data }) => {
-      const kind = data.kind === 'unchanged' ? data.feed : data.kind;
+      const kind = ['unchanged', 'blocked'].includes(data.kind) ? data.feed : data.kind;
       const pending = workerReads.get(kind);
       workerReads.delete(kind);
       try {
+        const paths = kind === 'history' ? ['/joe/history.json', '/joe/history-continuity.json'] : ['/joe/results.json'];
+        const evidence = paths.map(key => [key, data.status?.[key]]);
+        // Native auth refusals freeze the page even beside successful siblings.
+        for (const [key, status] of evidence) {
+          if (status) session.accept(key, status);
+        }
+        if (data.kind === 'blocked') return;
+        if (evidence.some(([, status]) => !['auth', 'ok', 'error'].includes(status?.state))) return;
+        const status = data.status?.[`/joe/${kind}.json`], document = status?.document;
+        const prior = feeds[kind]?.value;
+        const reason = status?.reason ?? data.reason ?? null;
+        if (!session.accepting() || evidence.some(([, s]) => s?.auth === true)) return;
         if (data.clock) anchorTo(data.clock.at, data.clock.precise ? 'stamp' : 'date');
         measure(`${kind}-worker`, data.ms);
-        if (data.kind === 'unchanged') return;
-        if (kind === 'results') { settle('results', resultsFeed(data.index, data.reason, data.generatedAdvancedAt)); onChange('results'); return; }
-        settle('history', { value: data.meta ? { ...data.meta, columns: data.columns, closes: data.closes } : null, reason: data.reason });
+        // An unchanged hint still carries the attempt's reason and receipt.
+        // It can confirm only the document already held by this page.
+        if (data.kind === 'unchanged') {
+          if (!prior || document?.seq !== prior.seq || document?.receivedAt !== prior.receivedAt) {
+            return;
+          }
+          settle(kind, { ...feeds[kind], reason: reason,
+            ...(data.generatedAdvancedAt ? { generatedAdvancedAt: data.generatedAdvancedAt } : {}) });
+          onChange(kind); return;
+        }
+        if (documentRegressed(prior, document)) {
+          settle(kind, { ...feeds[kind], reason: 'sequence_replayed' }); onChange(kind); return;
+        }
+        if (kind === 'results') { settle('results', resultsFeed(data.index, reason, data.generatedAdvancedAt)); onChange('results'); return; }
+        settle('history', { value: data.meta ? { ...data.meta, columns: data.columns, closes: data.closes } : null, reason });
         onChange('history');
       } finally { pending?.resolve(); }
     };
@@ -142,16 +148,20 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
   function pollHistory() { return poll('history', async () => {
     if (worker) return readInWorker('history', 'poll');
     const [res, sidecar] = await Promise.all([read('./history.json'), read('./history-continuity.json')]);
+    if (!res || !sidecar || !session.accepting()) return;
     anchorFrom(res);
     const reason = res.headers?.get('X-Joe-Feed-Reason') ?? undefined;
     const started = performance.now();
     const accepted = acceptRead('history', res.status === 200 ? { status: 200, payload: res.payload, reason }
       : { status: res.status, redirected: res.redirected, payload: res.payload, reason: res.payload?.reason ?? undefined }, fallback);
+    if (documentRegressed(feeds.history?.value, accepted.value) || (!accepted.value && feeds.history?.value)) {
+      settle('history', { ...feeds.history, reason: documentRegressed(feeds.history.value, accepted.value) ? 'sequence_replayed' : accepted.reason }); onChange('history'); return;
+    }
     fallback = accepted;
     const v = accepted.value;
     const columns = v ? toColumns(v.points, sidecar.status === 200 ? sidecar.payload : null, v.seq) : null;
     settle('history', { value: v ? { schema: v.schema, seq: v.seq, generatedAt: v.generatedAt, receivedAt: v.receivedAt, compactedThrough: v.compactedThrough ?? null, reason: v.reason ?? null,
-      points: v.points.length, columns, closes: Object.fromEntries(DESK_IDS.map(id => [id, sessionCloses(columns, id, 'totalPnl', 9)])) } : null, reason: accepted.reason ?? null });
+      points: v.points.length, columns, closes: Object.fromEntries(DESK_IDS.map(id => [id, sessionCloses(columns, id, 'totalPnl', 9)])) } : null, reason: accepted.reason });
     measure('history-accept', performance.now() - started);
     onChange('history');
   }); }
@@ -164,6 +174,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
   function pollResults() { return poll('results', async () => {
     if (worker) return readInWorker('results', 'results');
     const res = await read('./results.json');
+    if (!res || !session.accepting()) return;
     anchorFrom(res);
     const reason = res.headers?.get('X-Joe-Feed-Reason') ?? undefined;
     const started = performance.now();
@@ -171,10 +182,13 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     const accepted = acceptRead('results', res.status === 200 ? { status: 200, payload: res.payload, reason,
       generatedAdvancedAt: res.headers?.get('X-Joe-Generated-Advanced-At') ?? undefined }
       : { status: res.status, redirected: res.redirected, payload: res.payload, reason: res.payload?.reason ?? undefined }, previous);
+    if (documentRegressed(feeds.results?.value, accepted.value) || (!accepted.value && feeds.results?.value)) {
+      settle('results', { ...feeds.results, reason: documentRegressed(feeds.results.value, accepted.value) ? 'sequence_replayed' : accepted.reason }); onChange('results'); return;
+    }
     resultsFallback = accepted;
     const v = accepted.value;
     const same = v && previous?.value === v && feeds.results?.value;
-    settle('results', same ? { ...feeds.results, reason: accepted.reason ?? null }
+    settle('results', same ? { ...feeds.results, reason: accepted.reason }
       : resultsFeed(v ? indexResults(v) : null, accepted.reason, accepted.generatedAdvancedAt));
     measure('results-accept', performance.now() - started);
     onChange('results');
@@ -182,6 +196,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
 
   function pollFleet() { return poll('fleet', async () => {
     const res = await read('./fleet-config.json', fleetTag ? { headers: { 'If-None-Match': fleetTag } } : {});
+    if (!res || !session.accepting()) return;
     anchorFrom(res);
     // Only a conditional response for the validated saved document can clear
     // a rejection. Its receipt still belongs to the original read.
@@ -208,9 +223,10 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
   // A failed read keeps the last good log and says why.
   function pollActions() { return poll('actions', async () => {
     const res = await read('./fleet-config/actions.json');
+    if (!res || !session.accepting()) return;
     anchorFrom(res);
     const entries = res.status === 200 ? acceptActions(res.payload) : null;
-    actions = entries ? { entries, reason: null } : { entries: actions?.entries ?? null, reason: AUTH.has(res.status) ? 'auth_required' : res.status === 200 ? 'contract_invalid' : 'refresh_failed' };
+    actions = entries ? { entries, reason: null } : { entries: actions?.entries ?? null, reason: res.auth ? 'auth_required' : res.status === 200 ? 'contract_invalid' : 'refresh_failed' };
     onChange('actions');
   }); }
 
@@ -219,11 +235,12 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
   // Without any server clock each panel still gets its state and reason: a
   // value that arrived without one cannot be dated, so it is not shown.
   function select() {
+    if (frozen) return frozen;
     const at = now();
     const input = Object.fromEntries(Object.entries(feeds).filter(([, feed]) => feed));
-    if (at) return { now: at, feeds: input, states: boardStates(input, at, serverPanels), fleetSource, actions };
+    if (at) return (selected = { now: at, feeds: input, states: boardStates(input, at, serverPanels), fleetSource, actions });
     const undated = Object.fromEntries(Object.entries(input).map(([key, feed]) => [key, feed.value == null ? feed : { value: null, reason: feed.reason ?? null }]));
-    return { now: null, feeds: undated, states: boardStates(undated, NO_CLOCK, {}), fleetSource, actions };
+    return (selected = { now: null, feeds: undated, states: boardStates(undated, NO_CLOCK, {}), fleetSource, actions });
   }
   // Every first read (state, history, closed-trade record, fleet settings) has
   // answered, with a value or a reason; the page then marks itself ready.
@@ -235,12 +252,12 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     pollHistory();
     pollResults();
     timers = [
-      setInterval(pollState, POLL_DATA_MS),
-      setInterval(() => { pollHistory(); pollResults(); pollFleet(); if (actionsWanted()) pollActions(); }, POLL_HISTORY_MS),
-      setInterval(() => onChange('tick'), TICK_MS),
+      setInterval(() => { if (!session.signedOut()) pollState(); }, POLL_DATA_MS),
+      setInterval(() => { if (!session.signedOut()) { pollHistory(); pollResults(); pollFleet(); if (actionsWanted()) pollActions(); } }, POLL_HISTORY_MS),
+      setInterval(() => { if (!session.signedOut()) onChange('tick'); }, TICK_MS),
     ];
   }
-  const stop = () => { timers.forEach(clearInterval); timers = []; };
+  const stop = () => { timers.forEach(clearInterval); timers = []; worker?.terminate?.(); unsubscribe(); };
   const refresh = () => Promise.all([pollFleet(), pollState(), pollHistory(), pollResults()]);
-  return { start, stop, select, now, settled, refresh, refreshHistory: pollHistory, refreshResults: pollResults, refreshFleet: pollFleet, refreshActions: pollActions, usesWorker: () => Boolean(worker), feeds };
+  return { start, stop, whenIdle: () => Promise.all([...reads.values()]), select, now, settled, signedOut: session.signedOut, refresh, refreshState: pollState, refreshHistory: pollHistory, refreshResults: pollResults, refreshFleet: pollFleet, refreshActions: pollActions, usesWorker: () => Boolean(worker), feeds };
 }

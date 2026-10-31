@@ -6,6 +6,8 @@ import { readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir, cpus } from 'node:os';
 import { join } from 'node:path';
 import * as nodeModule from 'node:module';
+import { retainedDocument, assertSignedOutPage } from '../test/fixtures/signed-out-cases.mjs';
+import { designResults } from './browser/results.mjs';
 import { launch, openPage } from './browser/cdp.mjs';
 import { startBoard, scenario, accountScenario, NOW, at, ACTOR, valid, fixture, ingress, singleMissingDesk, coupledUnavailable, acceptSnapshot, panelStates, advance, measureHistory } from './browser/board.mjs';
 import { VIEWPORTS, THEMES, configure, load as loadPage, go as goPage, screenshot, settle, waitFor, pointerMedia, MOUSE, TOUCH, copyText } from './browser/shots.mjs';
@@ -707,12 +709,28 @@ try {
       if (id === 'e-layout-storage-unavailable') storageScript = (await page.s('Page.addScriptToEvaluateOnNewDocument', { source: STORAGE_OFF })).identifier;
       b.setNow(f.transportReason ? valid.data.receivedAt : f.now);
       await load(page, b.url, 'desk');
+      let retainedBeforeAuth;
+      if (f.transportReason === 'auth_required') {
+        await page.evaluate(`(() => { const at = performance.now(); Object.defineProperty(performance, 'now', { value: () => at }); return window.__joedesk.refresh(); })()`);
+        await settle(page);
+        retainedBeforeAuth = await page.evaluate(`(${retainedDocument.toString()})(document)`);
+      }
       if (f.transportReason) {
         b.setNow(f.now);
         if (f.transportReason === 'auth_required') await page.setHeaders({});
         if (f.transportReason === 'route_not_found') unroute = await route([{ path: 'state.json', status: 404, body: '{"ok":false,"error":"not found"}' }]);
-        await page.evaluate('window.__joedesk.refresh()');
-        await settle(page);
+        if (f.transportReason === 'auth_required') {
+          await page.evaluate('window.__joedesk.refresh()');
+        } else { await page.evaluate('window.__joedesk.refresh()'); await settle(page); }
+      }
+      if (f.transportReason === 'auth_required') {
+        const after = await page.evaluate(`(${retainedDocument.toString()})(document)`);
+        let identical = true;
+        try { assertSignedOutPage(after, retainedBeforeAuth, id); } catch { identical = false; }
+        check('fixtures', `${id}: expired sign-in freezes the entire last good document`, identical);
+        await page.setHeaders({ 'x-auth-request-user': ACTOR });
+        page.errors.length = 0;
+        continue;
       }
       if (viewport.width <= 480) {
         await setDeskDisclosures(page, false);
@@ -1064,12 +1082,17 @@ try {
         await load(page, cold.url, 'desk');
         await settle(page);
         const words = cellReason(reason);
+        const signedOut = reason === 'auth_required';
+        if (signedOut) {
+          check('cold', `${tag}: initial content is frozen under the sign-in banner`, await page.evaluate(`!document.getElementById('signedOutBanner').hidden && document.getElementById('app').hasAttribute('data-last-known') && document.getElementById('main').getAttribute('aria-describedby').includes('lastKnownLabel')`));
+          await unroute(); page.errors.length = 0; continue;
+        }
         const ui = await page.evaluate(DESK_TEXT);
         const cellsOk = Object.values(ui.cells).every(c => c.state === 'broken') && Object.entries(ui.cells).filter(([k]) => k !== 'hero.day').every(([, c]) => c.cap === `Unavailable · ${words}`) &&
           ui.account.state === 'broken' && ui.account.line === `Unavailable · ${words}`;
-        check('cold', `${tag}: no clock, yet every panel shows broken with its reason`, ui.label === 'No board data' && /^Time not known/.test(ui.marketSub) && cellsOk && ui.say === `No numbers: ${words}.` &&
+        check('cold', `${tag}: no clock, yet every panel shows broken with its reason`, ui.label === (signedOut ? 'Signed out — reload to sign in' : 'No board data') && /^Time not known/.test(ui.marketSub) && cellsOk && ui.say === `No numbers: ${words}.` &&
           ui.cards.every(c => c.status === `Numbers: unavailable · ${words}` && c.nums.every(x => x === 'broken')) && ui.positions === `Position detail is unavailable: ${words}.` &&
-          ui.kept === `Kept holdings are unavailable: ${words}.` && ui.strip.includes(`No data · ${words}`) && !/Data from|refreshes every/.test(ui.foot) && ui.alert.startsWith('No board data') && !page.errors.length, { ui, errors: page.errors.slice(0, 3) });
+          ui.kept === `Kept holdings are unavailable: ${words}.` && ui.strip.includes(`No data · ${words}`) && !/Data from|refreshes every/.test(ui.foot) && ui.alert.startsWith(signedOut ? 'Signed out — reload to sign in' : 'No board data') && !page.errors.length, { ui, errors: page.errors.slice(0, 3) });
         if (name === 'auth') {
           await auditScreen(page, viewport, theme, 'desk (cold, no clock)');
           if (viewport.name === '1440' || viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-desk-state-cold-no-clock`, 'Desk, cold start: sign-in expired before any data or clock');
@@ -1122,6 +1145,46 @@ try {
       page.errors.length = 0;
     }
   }
+  }
+
+  if (run('signed-out')) {
+    const { snapshot, history } = scenario(NOW);
+    const b = await newBoard({ history, accountHistory: accountScenario(NOW) });
+    b.setNow(NOW);
+    check('signed-out', 'sign-in regression snapshot accepted', (await b.push(snapshot)).status === 200);
+    check('signed-out', 'sign-in regression Results record accepted', (await b.pushResults(ingress(designResults(NOW)))).status === 200);
+    b.setNow(at(NOW, 9));
+    for (const viewport of VIEWPORTS) for (const theme of THEMES) {
+      const tag = `${viewport.name} ${theme} signed out`;
+      await configure(page, viewport, theme); await load(page, b.url);
+      await page.evaluate(`(() => { const at = performance.now(); Object.defineProperty(performance, 'now', { value: () => at }); return window.__joedesk.refresh(); })()`);
+      await settle(page);
+      const before = await page.evaluate(`(${retainedDocument.toString()})(document)`);
+      const unroute = await route([{ path: 'state.json', status: 302, headers: [{ name: 'Location', value: 'https://auth.inspr.at/sign-in' }] }]);
+      try {
+        await page.evaluate('window.__joedesk.refresh()');
+        const after = await page.evaluate(`(${retainedDocument.toString()})(document)`);
+        let identical = true;
+        try { assertSignedOutPage(after, before, tag); } catch { identical = false; }
+        check('signed-out', `${tag}: a 302 freezes the complete document with one banner and last-known marking`, identical && !page.errors.length);
+        await page.evaluate(`setTimeout(() => document.querySelector('#signedOutBanner [data-sign-in-reload]').click(), 0); true`);
+        await waitFor(page, `performance.getEntriesByType('navigation')[0]?.type === 'reload' && !document.getElementById('signedOutBanner').hidden`);
+        check('signed-out', `${tag}: Reload performs a real page reload and cold auth remains signed out`, true);
+      } finally { await unroute(); }
+      await page.evaluate('window.__joedesk.refresh()');
+      check('signed-out', `${tag}: authenticated feed responses keep the old page frozen`, await page.evaluate(`!document.getElementById('signedOutBanner').hidden && document.getElementById('app').hasAttribute('data-last-known')`));
+      await page.s('Page.reload');
+      await waitFor(page, `document.documentElement.dataset.ready === '1' && document.getElementById('signedOutBanner').hidden && !document.getElementById('app').hasAttribute('data-last-known')`);
+      await settle(page);
+      check('signed-out', `${tag}: a fresh authenticated page load resumes the board`, await page.evaluate(`document.getElementById('signedOutBanner').hidden && !document.getElementById('app').hasAttribute('data-last-known')`));
+      const next = structuredClone(snapshot); next.seq++;
+      next.brokerAccount.equity.amount = String(Number(next.brokerAccount.equity.amount) + 1);
+      Object.assign(snapshot, next);
+      if ((await b.push(snapshot)).status !== 200) throw new Error('post-recovery live snapshot rejected');
+      const beforeValue = await page.evaluate(`document.getElementById('acctValue').textContent`);
+      await page.evaluate('window.__joedesk.refresh()'); await settle(page);
+      check('signed-out', `${tag}: the recovered board displays the next live account value`, await page.evaluate(`document.getElementById('acctValue').textContent !== ${JSON.stringify(beforeValue)}`));
+    }
   }
 
   if (run('passthrough')) {

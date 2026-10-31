@@ -1,9 +1,9 @@
 {
   "product": "JoeDesk",
   "version_scheme": "inspr-calver-3",
-  "version": "261030154842.0.0",
+  "version": "261031052151.0.0",
   "release_channel": "stable",
-  "release_sequence": 41,
+  "release_sequence": 42,
   "status": "candidate",
-  "note": "Faster Results switching on the build machine: fit rows by measuring once, legacy fitting only where a row overflows (JOED-170)"
+  "note": "Signed out: the board freezes at its last good figures, says so plainly and never reads as live (JOED-173)"
 }

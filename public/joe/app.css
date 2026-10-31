@@ -163,6 +163,8 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 .status-alert > button > .i { flex: none; width: 16px; height: 16px; }
 .status-alert > button > span { display: block; flex: 1; min-width: 0; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-alert[data-visible] > button { visibility: visible; }
+.status-alert > #statusAlertControl { flex: 1; min-width: 0; }
+
 .theme-btn { flex: none; }
 .icon-btn { width: 36px; height: 36px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line); }
 @media (hover: hover) { .icon-btn:hover { background: var(--row-hover); color: var(--ink); } }
@@ -1686,3 +1688,32 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   .acct-foot { margin-top: 4px; }
   #acctAxis button { min-width: 64px; }
 }
+
+/* The retained board is one last-known document; no timer or light advances. */
+.signed-out-banner { position: sticky; top: 0; z-index: 100; background: var(--surface, #fff); color: var(--ink, #202020); border-bottom: 1px solid var(--warn, #b97700); }
+.signed-out-banner[hidden] { display: none; }
+.signed-out-banner > .page { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding-block: 12px; }
+#lastKnownLabel { font-size: 13px; }
+#app[data-last-known] *, #app[data-last-known] *::before, #app[data-last-known] *::after { animation-play-state: paused !important; }
+#app[data-last-known] [data-age]::after,
+#app[data-last-known] #hdrHealth::after,
+#app[data-last-known] #statusAlertText::after,
+#app[data-last-known] #heroSession::after,
+#app[data-last-known] #chartTitle .dis-sub::after,
+#app[data-last-known] #acctNote::after { content: " · last known"; font-size: 12px; font-weight: 400; }
+/* Keep the banner above a scrolling retained header, and place the header's
+   timer annotation below its pill instead of over its frozen sentence. */
+#app[data-last-known] .top { position: relative; }
+#app[data-last-known] #hdrHealth::after { position: absolute; inset: auto 0 -11px auto; font-size: 10px; line-height: 12px; padding-inline: 3px; background: var(--surface); border-radius: 3px; }
+/* Frozen data is visibly stale at each value section, including charts and
+   saved Settings values. Desaturation also removes every green live cue. */
+#app[data-last-known] { filter: grayscale(1); }
+#app[data-last-known] [data-frozen] { color: var(--ink-3); }
+#app[data-last-known] [data-frozen]::before { content: "Stale · not updating"; display: block; color: var(--ink-2); font-size: 12px; font-weight: 600; line-height: 20px; }
+#app[data-last-known] :is(.desk-disclosure, #calSum)::before { white-space: normal; }
+#app[data-last-known] .desk-disclosure[data-frozen] { flex-wrap: wrap; }
+#app[data-last-known] .desk-disclosure[data-frozen]::before { flex-basis: 100%; text-align: left; }
+#app[data-last-known] :is(#positionsTitle, #keptTitle, #calSum) { opacity: .6; }
+#app[data-last-known] :is(.bn, .num, .acct-value, .acct-change, .cash-amount, .v, .pct, .tval, .chart, .bars, .position-summary, .position-mobile, .f-saved, input, select, textarea) { opacity: .6; }
+#app[data-last-known] *, #app[data-last-known] *::before, #app[data-last-known] *::after { animation: none !important; transition: none !important; }
+#app[data-last-known] :is(.dot-live, .live-dot, [data-frozen-motion~="dot-live"], [data-frozen-motion~="live-dot"]) { visibility: hidden !important; }

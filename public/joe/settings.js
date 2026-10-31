@@ -13,6 +13,7 @@ import { sendFleetDraft } from './fleet-write.js';
 import { boardSettingsState, refreshBoardSettings, onBoardSettingsChange } from './board-settings.js';
 import { saveBoardSettings } from './board-settings-write.js';
 import * as M from './settings-model.js';
+import { boardSession } from './transport.js';
 
 export const SECTIONS = Object.freeze([
   { id: 'set-mode', nav: 'Mode', icon: 'shield' },
@@ -32,6 +33,15 @@ let feed = null, tips = null, rerender = () => {};
 let state = M.editState();
 let restored = false, fieldsKey = null, lastCtx = null, pinnedSec = null, gateStep = 1, lastNote = null;
 let accountReview = null, accountBusy = false;
+let accountSaveGeneration = 0, accountSaveAbandoned = false;
+boardSession.subscribe(() => {
+  if (boardSession.signedOut()) {
+    accountSaveGeneration++;
+    accountSaveAbandoned = accountBusy;
+    accountBusy = false;
+    if (state.busy) state = { ...state, busy: false, reviewed: null, confirmed: null };
+  }
+});
 
 // Long keys may break after a dot or the file name, never inside a word.
 const breakable = text => esc(text).replace(/([.#/])/g, '$1<wbr>');
@@ -43,12 +53,18 @@ const loadedConfig = ctx => ctx?.feeds['fleet-config']?.value ?? null;
 
 // ---------- Toast: one opaque line, bottom right, never pushing content ----------
 export function toast(message) {
+  if (boardSession.signedOut()) return;
   const el = $('#toast');
   if (!el) return;
   el.innerHTML = `${icon('info')}<span>${esc(message)}</span>`;
   el.classList.add('on');
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => el.classList.remove('on'), TOAST_MS);
+  toast.timer = setTimeout(() => {
+    if (!boardSession.signedOut()) { el.classList.remove('on'); return; }
+    const stop = boardSession.subscribe(() => {
+      if (!boardSession.signedOut()) { stop(); el.classList.remove('on'); }
+    });
+  }, TOAST_MS);
 }
 
 // ---------- Static sections, built once ----------
@@ -119,6 +135,11 @@ function accountStartSection() {
 }
 
 function renderAccountStart() {
+  if (boardSession.signedOut()) return;
+  if (accountSaveAbandoned) {
+    accountSaveAbandoned = false;
+    resetAccountReview();
+  }
   const snapshot = boardSettingsState(), row = M.accountStartRow(snapshot);
   patch($('#accountStartSummary'), esc(row.text));
   patch($('#accountStartReason'), esc(row.note));
@@ -188,8 +209,12 @@ async function saveAccountStart(event) {
   }
   accountBusy = true; renderAccountStart();
   $('#accountStartMessage').textContent = 'Saving account start…';
+  const generation = ++accountSaveGeneration;
   const result = await saveBoardSettings(accountReview.value);
-  accountBusy = false; accountReview = null;
+  if (generation !== accountSaveGeneration || result.abandoned) return;
+  accountBusy = false;
+  if (boardSession.signedOut()) return;
+  accountReview = null;
   $('#accountStartConfirmed').checked = false;
   $('#accountStartReviewBox').hidden = true;
   if (result.ok) {
@@ -539,6 +564,7 @@ function renderBar(ctx) {
 
 // ---------- Rendering ----------
 export function renderSettings(ctx) {
+  if (boardSession.signedOut()) return;
   lastCtx = ctx;
   renderAccountStart();
   const config = loadedConfig(ctx);
@@ -556,7 +582,7 @@ export function renderSettings(ctx) {
     }
   }
   const rebuilt = renderFields(state.config !== before.config);
-  if (!rebuilt && state !== before) syncDraft();
+  if (!rebuilt) syncDraft();
   const hint = ctx.feeds.data?.value?.brokerAccount?.accountHint;
   patch($('#modeLede'), `Every order goes to the practice account${hint ? ` ${term('account', hint)}` : ' on Interactive Brokers'}. No real money moves, and nothing on JoeDesk can change that.`);
   patch($('#rtRows'), runtimeHtml(ctx));
@@ -577,6 +603,7 @@ export function syncTheme() {
 // The section in view: the last whose top has passed the header; a section
 // chosen in the sub-nav stays marked while its top is in view.
 export function markSection() {
+  if (boardSession.signedOut()) return;
   if (document.body.dataset.screen !== 'settings') return;
   const line = ($('header.top')?.getBoundingClientRect().bottom ?? 58) + 24;
   let cur = SECTIONS[0].id;
@@ -649,6 +676,7 @@ async function send() {
   state = M.start(state);
   renderBar(lastCtx);
   const answer = await sendFleetDraft(baseRev, candidate);
+  if (boardSession.signedOut() || answer.abandoned) return;
   let outcome = M.sendOutcome(answer.status, answer.body, keys);
   if (outcome.ok && (!validateContract('fleet-config', outcome.config).ok || outcome.config.mode !== 'paper')) {
     outcome = { ok: false, keys, reason: 'the written settings could not be checked; reload before retrying' };
