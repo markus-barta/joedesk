@@ -128,7 +128,7 @@ if (!process.env.JOED_FIX7_WORKER) {
   });
   for (const kind of ['history', 'results']) {
     for (const shape of ['missing status', 'missing auth', 'unchanged wrong document']) test(`JOED-173 fix7 ${kind} message arrival alone cannot prove recovery: ${shape}`, async t => {
-      const b = await board(t, kind); b.expire(); await b.refresh();
+      const b = await board(t, kind); b.expire();
       b.transform(data => {
         if (shape === 'missing status') { delete data.status; return data; }
         if (shape === 'missing auth') { delete data.status[b.path].auth; return data; }
@@ -157,7 +157,7 @@ if (!process.env.JOED_FIX7_WORKER) {
       assert.equal(b.feed.feeds[kind].value.seq, original.seq);
       assert.equal(Boolean(b.doc.querySelectorAll('[data-frozen]').length), frozen);
     });
-    for (const mode of ['worker', 'fallback']) for (const failure of ['503', 'header failure', 'malformed', 'replay', 'receivedAt regression']) test(`JOED-173 fix7 ${kind} latest ${failure} revokes an earlier recovery success, ${mode}`, async t => {
+    for (const mode of ['worker', 'fallback']) for (const failure of ['503', 'header failure', 'malformed', 'replay', 'receivedAt regression']) test(`JOED-173 fix7 ${kind} latest ${failure} retains its reason after an earlier authenticated success, ${mode}`, async t => {
       const b = await board(t, kind), original = valid[kind];
       if (mode === 'fallback') await b.fallback();
       b.expire(); await b.refresh();
@@ -167,12 +167,15 @@ if (!process.env.JOED_FIX7_WORKER) {
           receivedAt: failure === 'receivedAt regression' ? new Date(Date.parse(original.receivedAt) - 1000).toISOString() : original.receivedAt },
         headers: failure === 'header failure' ? { 'X-Joe-Feed-Reason': 'refresh_failed' } : {} });
       await b.refresh();
-      assert.equal(b.finish(), false);
-      assert.equal(b.session.signedOut(), true);
-      assert.ok(b.doc.querySelectorAll('[data-frozen]').length);
+      assert.equal(b.finish(), true, 'a non-auth failure cannot revoke earlier authentication');
+      assert.equal(b.session.signedOut(), false);
+      assert.equal(b.doc.querySelectorAll('[data-frozen]').length, 0);
+      assert.equal(b.feed.select().states[kind].reason, ['replay', 'receivedAt regression'].includes(failure) ? 'sequence_replayed' : failure === 'malformed' ? 'contract_invalid' : 'refresh_failed');
+      assert.equal(b.feed.feeds[kind].value.seq, original.seq);
+      assert.equal(b.feed.feeds[kind].value.receivedAt, original.receivedAt);
       if (mode === 'worker') assert.equal(b.messages.at(-1).status[b.path].state, 'error');
       b.set({ status: 200, payload: original }); await b.refresh();
-      assert.equal(b.finish(), true, 'a later valid equal document can recover');
+      assert.equal(b.finish(), false, 'already recovered; a valid equal document clears the feed failure');
       assert.equal(b.feed.select().states[kind].state, 'fresh');
     });
     test(`JOED-173 fix7 ${kind} unchanged errors preserve their reason on every reply`, async t => {

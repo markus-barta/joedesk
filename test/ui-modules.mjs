@@ -1456,12 +1456,12 @@ test(`JOED-173 fix13 re-sign-in reproducer: ${scenario} / ${mode}`, async t => {
   const doc = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
   globalThis.document = doc;
   const freeze = createBoardFreeze(doc, session); t.after(freeze.stop);
-  let expired = false, recovering = false, rendered = null, recovery = Promise.resolve();
+  let expired = false, recovering = false, resultsRefused = true, rendered = null, recovery = Promise.resolve();
   const data = structuredClone(valid.data), original = valid.results;
   t.mock.method(globalThis, 'fetch', async url => {
     if (expired && String(url).endsWith('state.json')) return new Response('{}', { status: 401 });
-    if (recovering && scenario === 'mixed auth' && String(url).endsWith('results.json')) return new Response('{}', { status: 401 });
-    if (recovering && scenario === 'Results 503' && String(url).endsWith('results.json')) return new Response('{"reason":"feed_not_received"}', { status: 503 });
+    if (recovering && scenario === 'mixed auth' && resultsRefused && String(url).endsWith('results.json')) return new Response('{}', { status: 401 });
+    if (recovering && ['Results 503', 'mixed auth'].includes(scenario) && String(url).endsWith('results.json')) return new Response('{"reason":"feed_not_received"}', { status: 503 });
     const body = String(url).endsWith('state.json') ? { serverNow: data.receivedAt, feeds: { data: { value: data } } }
       : String(url).endsWith('history-continuity.json') ? null
       : String(url).endsWith('actions.json') ? { schema: 'inspr.joe.fleet-config.actions.v1', entries: [] }
@@ -1493,19 +1493,19 @@ test(`JOED-173 fix13 re-sign-in reproducer: ${scenario} / ${mode}`, async t => {
     assert.equal(rendered, null);
     assert.equal(feed.select().feeds.data.value.brokerAccount.equity.amount, '28000');
     assert.equal(doc.getElementById('app').hasAttribute('inert'), true);
-    recovering = false; await feed.refresh(); await recovery;
+    resultsRefused = false; await feed.refresh(); await recovery;
   }
   assert.equal(session.signedOut(), false, 'a non-auth feed failure cannot keep claiming signed out');
   assert.equal(rendered.feeds.data.value.brokerAccount.equity.amount, '29001');
   assert.equal(doc.getElementById('signedOutBanner').hidden, true);
   assert.equal(doc.getElementById('app').hasAttribute('inert'), false);
   assert.equal(doc.querySelectorAll('[data-frozen]').length, 0);
-  if (scenario !== 'mixed auth') {
-    assert.equal(rendered.states.results.reason, scenario === 'Results 503' ? 'feed_not_received' : 'sequence_replayed');
+  {
+    assert.equal(rendered.states.results.reason, scenario === 'regressed document' ? 'sequence_replayed' : 'feed_not_received');
     assert.equal(rendered.feeds.results.value.seq, original.seq);
     assert.equal(rendered.feeds.results.value.receivedAt, original.receivedAt);
     renderStatus({ ix: true, cell: rendered.states.results });
-    assert.match(doc.getElementById('resStatus').textContent, scenario === 'Results 503'
+    assert.match(doc.getElementById('resStatus').textContent, scenario !== 'regressed document'
       ? /Results refresh failed: no data received yet\. Showing the last good results from/
       : /Results update not used: last update repeated an old one\. Showing the last good results from/);
     assert.doesNotMatch(doc.getElementById('resStatus').textContent, /sign.in/i);

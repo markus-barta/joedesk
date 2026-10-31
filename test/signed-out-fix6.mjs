@@ -17,23 +17,25 @@ function recovering(t, session = createBoardSession()) {
   session.observe('expiry', { auth: true });
   return session;
 }
-for (const key of keys) for (const status of [undefined, 401, 503, 404, 0]) test(`JOED-173 fix6 recovery requires post-freeze authenticated ${key}, failure=${status}`, async t => {
+for (const key of keys) for (const status of [undefined, 401, 503, 404, 0]) test(`JOED-173 fix13 latest auth refusal gates recovery for ${key}, failure=${status}`, async t => {
   const s = recovering(t);
   for (const other of keys) if (other !== key) s.accept(other, good);
   s.observe('expiry', good);
   if (status !== undefined) s.accept(key, { status, ...(status === 401 ? { auth: true } : {}) });
   let painted = false;
-  assert.equal(s.finishRecovery(() => { painted = true; }), false);
-  assert.equal(painted, false); assert.equal(s.signedOut(), true);
+  const refused = status === 401;
+  assert.equal(s.finishRecovery(() => { painted = true; }), !refused);
+  assert.equal(painted, !refused); assert.equal(s.signedOut(), refused);
 });
-test('JOED-173 fix6 account-history failure before its first authenticated success blocks recovery', async t => {
-  const A = await builders('account.js', ['useReply'], 'fix6-first-failure');
+test('JOED-173 fix13 account-history failure before its first authenticated success keeps its own reason', async t => {
+  const A = await builders('account.js', ['useReply', 'store'], 'fix6-first-failure');
   const s = recovering(t, boardSession);
   for (const key of keys) if (!key.endsWith('/account-history.json')) s.accept(key, good);
   s.observe('expiry', good);
   A.useReply({ kind: 'account', status: 503, reason: 'refresh_failed', value: null });
-  assert.equal(s.finishRecovery(() => true), false);
-  assert.equal(s.signedOut(), true);
+  assert.equal(A.store.reason, 'refresh_failed');
+  assert.equal(s.finishRecovery(() => true), true);
+  assert.equal(s.signedOut(), false);
 });
 test('JOED-173 fix6 account-history 503 after an authenticated success exposes the honest reason after recovery', async t => {
   const A = await builders('account.js', ['useReply', 'store'], 'fix6-reason');
@@ -138,8 +140,9 @@ for (const status of [503, 404, 0]) test(`JOED-173 fix6 every authenticated feed
 test('JOED-173 fix6 pre-freeze successes and a later auth failure cannot satisfy recovery', t => {
   const s = createBoardSession();
   for (const key of keys) s.observe(key, good);
-  recovering(t, s); s.observe('expiry', good);
+  recovering(t, s);
   assert.equal(s.finishRecovery(() => true), false);
+  s.observe('expiry', good);
   for (const key of keys) s.accept(key, good);
   s.accept('/joe/account-history.json', { status: 401, auth: true });
   assert.equal(s.finishRecovery(() => true), false);

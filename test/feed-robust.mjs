@@ -232,9 +232,11 @@ for (const [name, response] of Object.entries(authResponses)) test(`JOED-173 pro
   await feed.refresh(); await settings.refresh(); const before = settings.snapshot(), selected = feed.select();
   refused = true; await settings.refresh();
   assert.equal(feed.signedOut(), true); assert.deepEqual(settings.snapshot(), before); assert.equal(feed.select(), selected);
-  fail503 = true; await settings.refresh(); await feed.refresh();
-  assert.equal(feed.signedOut(), true); assert.deepEqual(settings.snapshot(), before);
   assert.equal((await settings.save({ accountStart: null })).ok, false, 'frozen display never grants write permission');
+  fail503 = true; await settings.refresh(); await feed.refresh();
+  assert.equal(feed.signedOut(), false, '503 supersedes the auth refusal and the other reads prove sign-in');
+  await settings.refresh();
+  assert.equal(settings.snapshot().reason, 'refresh_failed', 'the recovered setting shows its own failure');
   refused = fail503 = false; await settings.refresh();
   assert.equal(feed.signedOut(), false); assert.deepEqual(settings.snapshot(), before);
 });
@@ -288,7 +290,9 @@ for (const route of ['state.json', 'history.json', 'history-continuity.json', 'r
     let refused = false, fail503 = false;
     t.mock.method(globalThis, 'fetch', async url => fail503 ? new Response('{}', { status: 503 })
       : refused && String(url).endsWith(route) ? authResponses['401']() : reply(url));
-    const feed = createFeed(() => {}); t.after(feed.stop);
+    const session = createBoardSession();
+    const stop = session.coordinateRecovery(() => new Promise(() => {})); t.after(stop);
+    const feed = createFeed(() => {}, () => {}, '', { session }); t.after(feed.stop);
     await feed.refresh(); await feed.refreshActions();
     const selected = feed.select();
     const stores = structuredClone(feed.feeds);
@@ -297,10 +301,16 @@ for (const route of ['state.json', 'history.json', 'history-continuity.json', 'r
     assert.ok(Object.values(feed.feeds).every(f => f.reason !== 'auth_required'), 'no auth failure enters a feed');
     fail503 = true; const frozenStores = structuredClone(feed.feeds);
     clock.advance(125000); await feed.refresh(); await feed.refreshActions();
-    assert.equal(feed.select(), selected); assert.deepEqual(feed.feeds, frozenStores);
+    assert.equal(feed.select(), selected, 'the selection stays frozen until recovery renders');
+    for (const [name, record] of Object.entries(feed.feeds)) {
+      assert.deepEqual(record.value, frozenStores[name].value, 'failed attempts keep the last-good document');
+      assert.equal(record.reason, session.recovering() ? 'refresh_failed' : frozenStores[name].reason,
+        'recovery stores honest failures; without positive auth evidence the store remains frozen');
+    }
     assert.equal(feed.now(), selected.now, 'the anchored presentation clock is frozen');
     assert.deepEqual(selected.feeds, stores, 'no value, reason or receipt in last rendered selection changes');
     refused = fail503 = false; await feed.refresh(); await feed.refreshActions();
+    assert.equal(session.finishRecovery(() => true), true);
     assert.equal(feed.signedOut(), false); assert.notEqual(feed.select(), selected);
     clock.advance(2000); const resumed = feed.select(); clock.advance(1000);
     assert.notEqual(feed.select().now, resumed.now, 'clock resumes');
