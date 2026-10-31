@@ -2461,7 +2461,9 @@ Fix 14 classifies each endpoint response once in `transport.js`: native auth
 refusals and successful sign-in HTML are `AUTH_FAILURE`; a 2xx body passing that
 endpoint's own validator is `AUTHENTICATED`; other responses are `NO_EVIDENCE`.
 That includes invalid Continuity intervals, invalid JSON, server/network failures,
-missing routes and followed cross-origin redirects. History, Results, data,
+missing routes, bodyless 304s and followed cross-origin redirects. A Fleet 304
+can revalidate saved data, but recovery after a 401 still needs a validated 2xx
+body. History, Results, data,
 state, Continuity, account history, fleet settings, action logs and board display
 settings all use their own existing body validators. Account history reuses the
 validated columns rather than parsing or validating again on the page.

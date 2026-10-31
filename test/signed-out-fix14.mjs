@@ -32,7 +32,7 @@ const responses = {
 };
 const response = r => {
   if (r.network) throw new TypeError('offline');
-  const res = new Response(r.body ?? JSON.stringify(r.payload), { status: r.status,
+  const res = new Response(r.status === 304 ? null : r.body ?? JSON.stringify(r.payload), { status: r.status,
     headers: { 'X-Joe-Server-Now': valid.history.receivedAt, ...r.headers } });
   if (r.crossedOrigin) Object.defineProperties(res, { redirected: { value: true }, url: { value: 'https://sso.example.invalid/sign_in' } });
   return res;
@@ -135,7 +135,7 @@ if (!process.env.JOED_FIX14_WORKER) {
     session.observe(key, { auth: true });
     for (const r of [good({}), { status: 200, body: '<!doctype html><html><form>Sign in</form></html>' },
       { status: 200, body: '<form>Sign in</form>', headers: { 'Content-Type': 'text/html' } },
-      { status: 200, body: '{bad' }, { status: 200, payload: responses[endpoint], crossedOrigin: true }, bad]) {
+      { status: 200, body: '{bad' }, { status: 200, payload: responses[endpoint], crossedOrigin: true }, { status: 304 }, bad]) {
       const result = await readJSON(key, {}, { fetcher: async () => response(r) });
       session.accept(key, result);
       assert.equal(session.finishRecovery(() => true), false, 'invalid, HTML and redirected bodies cannot prove sign-in');
