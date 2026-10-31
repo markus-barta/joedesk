@@ -1636,3 +1636,27 @@ anchor and historical artifacts remain unchanged. The saved presentation config
 and templates match the local approved source; the offline bundle remains
 active in footer/About. This local candidate grants no publication or deployment
 approval. The coordinator owns the cross-family gate, publication and live verification.
+
+## Release 42 candidate (JOED-174)
+
+Reserve `261031052151.0.0` at `2026-10-31T05:21:51Z` as `inspr-calver-3`, stable sequence 42,
+for the signed-out board (JOED-173): retain the last good figures, clearly mark
+them frozen, and say to reload and sign in when the browser session expires.
+
+Previous and last deployed release are sequence 41 (`261030154842.0.0`), main
+`daa49125c26af7fd4e19855327fd01f5eabf23d5` (JOED-172), live on csb0 since
+`2026-10-31T05:04:23Z`, adopted at `2026-10-31T05:06:11Z` as recorded in
+`adoption/261030154842.0.0.json`. Reuse disposition `deployed` and
+`deployed: true`; adoption is evidenced by that existing record. About orders
+42, 41, 40, 39, 38, 37 through 26, then legacy; release 41 retains its original entry.
+Earlier release-preparation sections describe their reservation-time state.
+
+- When your sign-in expires, keep clearly frozen figures and reload to sign in again.
+
+Reseal the integrated runtime closure. Contracts revision 10 and contract set
+`3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350`, the approved
+shared presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`, legacy
+anchor and historical artifacts remain unchanged. The saved presentation config
+and templates match the local approved source; the offline bundle remains
+active in footer/About. This local candidate grants no publication or deployment
+approval. The coordinator owns the cross-family gate, publication and live verification.

@@ -2,14 +2,16 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261030154842.0.0` (`inspr-calver-3`, stable sequence 41), reserved once at `2026-10-30T15:48:42Z` for faster Results switching (JOED-170; release [JOED-172](https://aeon.barta.cm/p/JOED/JOED-172)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
+**Candidate version:** `261031052151.0.0` (`inspr-calver-3`, stable sequence 42), reserved once at `2026-10-31T05:21:51Z` for clearly frozen signed-out figures and a reload/sign-in notice (JOED-173; release [JOED-174](https://aeon.barta.cm/p/JOED/JOED-174)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
 
-**Last deployed release:** `inspr-calver-3` / `261030085000.0.0` / sequence 40,
-published on `main` at `2ad813216785f7b6fd4b506a26b9a7bc29d72ebc` under JOED-171,
-live on csb0 since `2026-10-30T11:34:29Z` and adopted at `2026-10-30T11:35:36Z`
-(`adoption/261030085000.0.0.json`). Both `previous_release` and
-`last_deployed_release` record sequence 40; its disposition is `deployed` with
-`deployed: true`. Sequence 39 (`261029192345.0.0`) was previously deployed at
+**Last deployed release:** `inspr-calver-3` / `261030154842.0.0` / sequence 41,
+published on `main` at `daa49125c26af7fd4e19855327fd01f5eabf23d5` under JOED-172,
+live on csb0 since `2026-10-31T05:04:23Z` and adopted at `2026-10-31T05:06:11Z`
+(`adoption/261030154842.0.0.json`). Both `previous_release` and
+`last_deployed_release` record sequence 41; its disposition is `deployed` with
+`deployed: true`. Sequence 40 (`261030085000.0.0`) was previously deployed at
+`2026-10-30T11:34:29Z` and adopted at `2026-10-30T11:35:36Z` (JOED-171).
+Sequence 39 (`261029192345.0.0`) was previously deployed at
 `2026-10-30T08:44:03Z` and adopted at `2026-10-30T08:46:01Z` (JOED-159).
 Sequence 38 (`261029075623.0.0`) was published but never
 deployed, retaining its historical `superseded-before-deployment` disposition.
@@ -96,7 +98,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261030154842.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261031052151.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -2892,6 +2894,30 @@ Previous and last deployed release are sequence 40 (`261030085000.0.0`), main
 Earlier release-preparation sections describe their reservation-time state.
 
 - Switch Results views faster while keeping rows readable.
+
+Reseal the integrated runtime closure. Contracts revision 10 and contract set
+`3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350`, the approved
+shared presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`, legacy
+anchor and historical artifacts remain unchanged. The saved presentation config
+and templates match the local approved source; the offline bundle remains
+active in footer/About. This local candidate grants no publication or deployment
+approval. The coordinator owns the cross-family gate, publication and live verification.
+
+## Release 42 candidate (JOED-174)
+
+Reserve `261031052151.0.0` at `2026-10-31T05:21:51Z` as `inspr-calver-3`, stable sequence 42,
+for the signed-out board (JOED-173): retain the last good figures, clearly mark
+them frozen, and say to reload and sign in when the browser session expires.
+
+Previous and last deployed release are sequence 41 (`261030154842.0.0`), main
+`daa49125c26af7fd4e19855327fd01f5eabf23d5` (JOED-172), live on csb0 since
+`2026-10-31T05:04:23Z`, adopted at `2026-10-31T05:06:11Z` as recorded in
+`adoption/261030154842.0.0.json`. Reuse disposition `deployed` and
+`deployed: true`; adoption is evidenced by that existing record. About orders
+42, 41, 40, 39, 38, 37 through 26, then legacy; release 41 retains its original entry.
+Earlier release-preparation sections describe their reservation-time state.
+
+- When your sign-in expires, keep clearly frozen figures and reload to sign in again.
 
 Reseal the integrated runtime closure. Contracts revision 10 and contract set
 `3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350`, the approved

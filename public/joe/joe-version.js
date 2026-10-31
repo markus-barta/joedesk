@@ -2,10 +2,19 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "261030154842.0.0",
+    APP_VERSION: "261031052151.0.0",
     VERSION_SCHEME: "inspr-calver-3",
-    RELEASE_SEQUENCE: 41,
+    RELEASE_SEQUENCE: 42,
     VERSION_HISTORY: [
+      {
+        version: "261031052151.0.0",
+        versionScheme: "inspr-calver-3",
+        date: "2026-10-31",
+        title: "Clear signed-out notice",
+        changes: [
+          "When your sign-in expires, keep clearly frozen figures and reload to sign in again.",
+        ],
+      },
       {
         version: "261030154842.0.0",
         versionScheme: "inspr-calver-3",
