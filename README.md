@@ -2425,6 +2425,15 @@ section headers, copy callbacks and exact non-auth submission error wording.
 It also exercises page/worker recovery using in-process messages and actual
 Node worker threads, plus late-success and failed-notification recovery races.
 The `d83f7ff` replay uses in-memory source hooks; no baseline checkout is edited.
+History and Results worker replies report each feed's explicit authenticated
+success, authentication refusal, or failure reason. Recovery requires a validated
+document whose sequence and receipt do not regress, with no current feed failure.
+While frozen, the worker sends full documents on every attempt; unchanged replies
+outside recovery still carry their reason and document receipt. A message's arrival
+alone never proves recovery. `test/signed-out-fix7.mjs` exercises both discarded-cache
+reproducers in real worker threads (replay with `JOED_FIX7_BASELINE=9eb2482`), the
+history/results × newer/replay/401/503/malformed × frozen/live matrix, equal-document
+recovery, receipt regressions, and failures that revoke an earlier recovery success.
 
 `TZ=UTC node scripts/browser/signed-out-pages.mjs` runs the same whole-document
 oracle on the actual app in one headless browser, using synthetic loopback reads.

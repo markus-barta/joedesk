@@ -105,19 +105,44 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
       const pending = workerReads.get(kind);
       workerReads.delete(kind);
       try {
-        const evidence = Object.entries(data.auth ?? {});
+        const paths = kind === 'history' ? ['/joe/history.json', '/joe/history-continuity.json'] : ['/joe/results.json'];
+        const evidence = paths.map(key => [key, data.status?.[key]]);
         // A successful sibling of an auth failure was not decoded or posted.
         // It cannot stand in for a fresh document in the recovery inventory.
         if (data.kind === 'blocked') {
-          for (const [key, auth] of evidence) if (auth === true) session.observe(key, { auth });
+          for (const [key, status] of evidence) if (status?.state === 'auth') session.observe(key, { auth: true });
           return;
         }
-        const acceptance = evidence.map(([key, auth]) => session.accept(key, { auth }));
-        if (data.valid === false) session.invalidateRecovery(`/joe/${kind}.json`);
+        if (evidence.some(([, status]) => !['auth', 'ok', 'error'].includes(status?.state))) {
+          for (const [key] of evidence) session.invalidateRecovery(key);
+          return;
+        }
+        const acceptance = evidence.map(([key, status]) => {
+          const accepted = session.accept(key, { auth: status?.state === 'auth' ? true : status?.auth });
+          if (status.state !== 'ok' || status.auth !== false || status.reason) session.invalidateRecovery(key);
+          return accepted;
+        });
+        const status = data.status?.[`/joe/${kind}.json`], document = status?.document;
+        const prior = feeds[kind]?.value;
+        const ordered = document && Number.isSafeInteger(document.seq) && Number.isFinite(Date.parse(document.receivedAt)) &&
+          (!prior || (document.seq >= prior.seq && Date.parse(document.receivedAt) >= Date.parse(prior.receivedAt)));
+        if (!ordered || data.valid === false || evidence.some(([, s]) => s.state !== 'ok' || s.auth !== false || s.reason)) session.invalidateRecovery(`/joe/${kind}.json`);
         if (!session.accepting() || acceptance.includes(false)) return;
         if (data.clock) anchorTo(data.clock.at, data.clock.precise ? 'stamp' : 'date');
         measure(`${kind}-worker`, data.ms);
-        if (data.kind === 'unchanged') return;
+        // An unchanged hint still carries the attempt's reason and receipt.
+        // It can confirm only the document already held by this page.
+        if (data.kind === 'unchanged') {
+          if (!prior || document?.seq !== prior.seq || document?.receivedAt !== prior.receivedAt) {
+            session.invalidateRecovery(`/joe/${kind}.json`); return;
+          }
+          settle(kind, { ...feeds[kind], reason: status?.reason ?? data.reason ?? null,
+            ...(data.generatedAdvancedAt ? { generatedAdvancedAt: data.generatedAdvancedAt } : {}) });
+          onChange(kind); return;
+        }
+        if (status?.state === 'ok' && !ordered) {
+          settle(kind, { ...feeds[kind], reason: 'sequence_replayed' }); onChange(kind); return;
+        }
         if (kind === 'results') { settle('results', resultsFeed(data.index, data.reason, data.generatedAdvancedAt)); onChange('results'); return; }
         settle('history', { value: data.meta ? { ...data.meta, columns: data.columns, closes: data.closes } : null, reason: data.reason });
         onChange('history');

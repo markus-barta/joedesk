@@ -143,7 +143,17 @@ try {
     const timers = await page.evaluate(`Array.from(document.querySelectorAll('[data-age]')).filter(n => n.getClientRects().length).every(n => getComputedStyle(n, '::after').content.includes('last known'))`);
     assert.equal(timers, true, `${tag}: paused ages show their frozen value plus last known`);
     stage = `${tag}: recovery`;
+    const retainedReason = reason;
+    if (reason) {
+      expired = fail503 = false;
+      await refresh(); await idleRecovery();
+      assertSignedOutPage(await capture(), before, `${tag}/failed authenticated attempt cannot recover`);
+      // A failure-bearing last-good document is not a recovery success.
+      // First obtain clean worker documents, then restore the ordinary fault.
+      reason = null;
+    }
     await recover();
+    reason = retainedReason;
     const count = await page.evaluate('window.__joedesk.renders');
     await refresh(); await settle();
     assert.ok(await page.evaluate(`window.__joedesk.renders > ${count}`), `${tag}: recovery resumes renders`);

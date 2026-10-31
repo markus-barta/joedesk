@@ -1447,7 +1447,13 @@ test('refresh: await the worker before the next results push, including unchange
     messages = [];
     constructor() { worker = this; }
     postMessage(message) { this.messages.push(message); }
-    reply(data) { this.onmessage({ data: { ...data, ms: 0 } }); }
+    reply(data) {
+      const kind = data.feed ?? data.kind, reason = data.reason ?? null;
+      const status = Object.fromEntries((kind === 'history' ? ['history', 'history-continuity'] : ['results']).map(name =>
+        [`/joe/${name}.json`, { state: reason ? 'error' : 'ok', auth: false, reason,
+          document: { seq: valid[kind].seq, receivedAt: valid[kind].receivedAt } }]));
+      this.onmessage({ data: { ...data, status, ms: 0 } });
+    }
   }
   try {
     globalThis.Worker = HeldWorker;
