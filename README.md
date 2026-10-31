@@ -2414,7 +2414,8 @@ markup, all attributes, titles, accessible names and live form properties. Only
 the explicit board/section freeze attributes and saved animation-class marking
 normalize. Transient controls are audited separately; retained data equality is exact;
 there is no phrase denylist or selected-value allowlist. The matrix covers all
-37 reasons, nine auth shapes, four pages, 401→503 retention, elapsed time and
+37 reasons, eight native auth shapes plus followed cross-origin responses,
+four pages, 401→503 retention, elapsed time and
 recovery. Named tests retain the earlier review reproducers, including session
 bars, position counts, the account’s 1M change and Since start comparison,
 phone learning and aggregate kept worth. Oracle mutation tests reject arbitrary

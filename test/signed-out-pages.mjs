@@ -225,6 +225,25 @@ for (const [name, screen] of reproducers) test(`JOED-173 fix4 reproducer: ${name
 
 for (const width of widths) for (const shape of authShapes) test(`JOED-173 fix4 entire document: ${width}px / ${shape} / every reason and page`, async t => {
   const p = await preview(t, width, shape);
+  if (shape === 'followed cross-origin redirect') {
+    // A followed response is outside the requested origin. Fix14 requires
+    // NO_EVIDENCE: it neither expires a signed-in board nor proves re-sign-in.
+    for (const reason of [null, ...reasons]) for (const screen of screens) {
+      p.render(p.context(reason), screen);
+      const before = p.capture(), tag = `${width}/${shape}/${reason}/${screen}`;
+      await p.signOut();
+      assert.equal(boardSession.signedOut(), false, `${tag}: an untrusted origin supplies no auth refusal`);
+      assert.equal(p.capture().marked, false);
+      boardSession.observe('/joe/state.json', { auth: true });
+      await p.signOut();
+      assertSignedOutPage(p.capture(), before, `${tag}: redirects alone cannot prove sign-in`);
+      await p.fail503();
+      assertSignedOutPage(p.capture(), before, `${tag}: 503 alone cannot prove sign-in`);
+      await p.recover();
+      assert.equal(p.capture().marked, false, `${tag}: validated same-origin responses recover`);
+    }
+    return;
+  }
   for (const reason of [null, ...reasons]) for (const screen of screens) {
     p.render(p.context(reason), screen);
     const before = p.capture(), count = p.renders(), tag = `${width}/${shape}/${reason}/${screen}`;
