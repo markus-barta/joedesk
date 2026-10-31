@@ -1671,3 +1671,31 @@ anchor and historical artifacts remain unchanged. The saved presentation config
 and templates match the local approved source; the offline bundle remains
 active in footer/About. This local candidate grants no publication or deployment
 approval. The coordinator owns the cross-family gate, publication and live verification.
+
+### JOED-149: additive revision-11 proof for both Today conversions
+
+Amy's A1 (a) decision permits exact euro Today across different proven IB
+start-of-day and current rates. Revision 11 adds only optional desk DAY
+`fx = { start: { source, observedAt }, end: { source, observedAt } }`.
+The closed source enum is `ib-account-ExchangeRate`; timestamps use the
+existing canonical UTC millisecond instant. The containing source is an
+available SOD result with a period start. Start is no later than that
+boundary, and end is no earlier than start. Rate values remain in their
+existing computation/provenance path, outside this field.
+
+The payload ID stays `inspr.joe.household.v2`; valid revision-10 payloads and
+revision-11 payloads without proof retain their behaviour. The board applies
+its existing exactness and freshness rules and shows each exact desk's two
+conversion times in Vienna time in Details, without rate values. Schema and
+cross-field validation reject malformed proof using the existing last-good
+and explicit rejection path. Tests cover old and new payloads, closed shapes,
+ordering, independent desk exactness and Vienna/NY date and DST boundaries.
+
+The complete contract-set digest and participant requirements advance in
+`release/contracts.json`. DEVOPS must re-vendor that exact bundle and emit
+both proven SOD/current observations before the coordinated flip, using the
+JOED-86/87 producer sign-off pattern. The interim text detail is not proof.
+No release coordinate, deployment pin, historical artifact or runtime seal
+is changed by this implementation. The coordinator owns review and the
+later candidate reservation/seal; current sealed-build checks deliberately
+reject these changed runtime bytes until that release preparation.
