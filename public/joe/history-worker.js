@@ -9,7 +9,7 @@ import { indexResults, transferables as resultsTransferables } from './results-m
 
 const previous = { history: null, results: null }, posted = { history: null, results: null };
 let frozen = false;
-import { readJSON, acceptRecovery } from './transport.js';
+import { readJSON, acceptRecovery, documentRegressed } from './transport.js';
 const evidence = responses => Object.fromEntries(responses.map(([url, res]) => [url, res.auth]));
 // Auth, document acceptance and freshness are separate evidence. In particular,
 // a validated last-good body with a failure header is still a failed attempt.
@@ -23,8 +23,7 @@ function outcome(res, accepted, retained = null) {
 function accept(kind, res) {
   const prior = previous[kind];
   let accepted = acceptRead(kind, res, prior);
-  const recovery = outcome(res, accepted, prior?.value);
-  if (recovery.reason === 'sequence_replayed')
+  if (documentRegressed(prior?.value, accepted.value))
     accepted = { ...prior, reason: 'sequence_replayed' };
   previous[kind] = accepted;
   return accepted;

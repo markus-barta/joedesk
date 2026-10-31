@@ -18,7 +18,7 @@ const { createBoardFreeze } = await import('../public/joe/presentation.js');
 const { boardStates } = await import('../public/joe/board-state.js');
 const valid = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url)));
 
-async function board(t, kind) {
+async function board(t, kind, { cold = false, mode = 'worker' } = {}) {
   const path = `/joe/${kind}.json`, sidecar = '/joe/history-continuity.json';
   const session = createBoardSession(), messages = [], workers = [];
   let transform = data => data, activeWorker;
@@ -33,6 +33,7 @@ async function board(t, kind) {
   const old = Object.getOwnPropertyDescriptor(globalThis, 'Worker');
   globalThis.Worker = class {
     constructor() {
+      if (mode === 'disabled') throw new Error('Module workers unavailable');
       activeWorker = this;
       const boot = `import { parentPort } from 'node:worker_threads';
         import ${JSON.stringify(import.meta.url)};
@@ -61,7 +62,8 @@ async function board(t, kind) {
   const doc = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
   const freeze = createBoardFreeze(doc, session); t.after(freeze.stop);
   const refresh = () => kind === 'history' ? feed.refreshHistory() : feed.refreshResults();
-  await refresh(); feed.select(); freeze.rendered(valid[kind].receivedAt);
+  if (!cold) await refresh();
+  feed.select(); freeze.rendered(valid[kind].receivedAt);
   let release;
   const stop = session.coordinateRecovery(() => new Promise(done => { release = done; }), kind === 'history' ? [path, sidecar] : [path]);
   t.after(() => { release?.(); stop(); });
@@ -75,6 +77,36 @@ async function board(t, kind) {
 }
 // Importing this module in the worker installs hooks only, never starts nested tests.
 if (!process.env.JOED_FIX7_WORKER) {
+  for (const kind of ['history', 'results']) for (const mode of ['worker', 'fallback', 'disabled'])
+    test(`JOED-173 fix9 ${kind} cold ${mode} retains a validated sequence_replayed body without proving recovery`, async t => {
+      const b = await board(t, kind, { cold: true, mode });
+      assert.equal(b.feed.feeds[kind], null);
+      b.set({ status: 200, payload: valid[kind], headers: { 'X-Joe-Feed-Reason': 'sequence_replayed' } });
+      if (mode === 'fallback') await b.fallback(); else await b.refresh();
+      const retained = b.feed.feeds[kind].value;
+      assert.ok(retained, 'a cold client retains the validated last-good body');
+      assert.equal(retained.seq, valid[kind].seq);
+      assert.equal(retained.receivedAt, valid[kind].receivedAt);
+      assert.equal(b.feed.feeds[kind].reason, 'sequence_replayed');
+      assert.equal(b.feed.select().states[kind].state, 'stale');
+      const newer = { ...valid[kind], seq: retained.seq + 1 };
+      b.set({ status: 200, payload: newer, headers: { 'X-Joe-Feed-Reason': 'sequence_replayed' } });
+      await b.refresh();
+      assert.equal(b.feed.feeds[kind].value.seq, newer.seq, 'a failure label alone does not reject a newer last-good body');
+      b.set({ status: 200, payload: valid[kind], headers: { 'X-Joe-Feed-Reason': 'sequence_replayed' } });
+      await b.refresh();
+      assert.equal(b.feed.feeds[kind].value.seq, newer.seq, 'an actual regression preserves the retained document');
+      assert.equal(b.feed.feeds[kind].value.receivedAt, retained.receivedAt);
+      b.expire(); await b.refresh();
+      assert.equal(b.finish(), false, 'a server failure label cannot prove recovery');
+      assert.equal(b.session.signedOut(), true);
+      assert.equal(b.feed.feeds[kind].value.seq, newer.seq);
+      b.set({ status: 200, payload: newer, headers: { 'X-Joe-Feed-Reason': 'sequence_replayed' } }); await b.refresh();
+      assert.equal(b.finish(), false, 'an equal retained body with a server failure still cannot recover');
+      b.set({ status: 200, payload: newer }); await b.refresh();
+      assert.equal(b.finish(), true, 'a later clean equal document can recover');
+      assert.equal(b.feed.select().states[kind].state, 'fresh');
+    });
   test('JOED-173 fix7 history recovery resends the document discarded across a continuity 503 and null-200 replay', async t => {
     const b = await board(t, 'history'); b.expire();
     const newer = { ...valid.history, seq: valid.history.seq + 1 };

@@ -18,7 +18,7 @@ export const TICK_MS = 1000;
 const NO_CLOCK = '1970-01-01T00:00:00.000Z';
 
 export { serverClock } from './transport.js';
-import { readJSON, createBoardSession, acceptRecovery } from './transport.js';
+import { readJSON, createBoardSession, acceptRecovery, documentRegressed } from './transport.js';
 
 export function createFeed(onChange, measure = () => {}, version = '', { actionsWanted = () => false, session = createBoardSession() } = {}) {
   let anchor = null, serverPanels = {}, fleetTag = null;
@@ -144,7 +144,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
             ...(data.generatedAdvancedAt ? { generatedAdvancedAt: data.generatedAdvancedAt } : {}) });
           onChange(kind); return;
         }
-        if (recovery.reason === 'sequence_replayed') {
+        if (documentRegressed(prior, document)) {
           settle(kind, { ...feeds[kind], reason: 'sequence_replayed' }); onChange(kind); return;
         }
         if (kind === 'results') { settle('results', resultsFeed(data.index, recovery.reason, data.generatedAdvancedAt)); onChange('results'); return; }
@@ -176,7 +176,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     const recovery = recoveryRead('history', accepted.value, { state: res.status === 200 ? 'ok' : 'error', auth: res.auth,
       valid: res.status !== 200 || accepted.value === res.payload, reason: accepted.reason });
     if (sidecar.status !== 200 || sidecar.auth !== false || sidecar.headers?.get('X-Joe-Feed-Reason')) session.invalidateRecovery('/joe/history-continuity.json');
-    if (recovery.reason === 'sequence_replayed' || (!accepted.value && feeds.history?.value)) {
+    if (documentRegressed(feeds.history?.value, accepted.value) || (!accepted.value && feeds.history?.value)) {
       settle('history', { ...feeds.history, reason: recovery.reason }); onChange('history'); return;
     }
     fallback = accepted;
@@ -206,7 +206,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
       : { status: res.status, redirected: res.redirected, payload: res.payload, reason: res.payload?.reason ?? undefined }, previous);
     const recovery = recoveryRead('results', accepted.value, { state: res.status === 200 ? 'ok' : 'error', auth: res.auth,
       valid: res.status !== 200 || accepted.value === res.payload, reason: accepted.reason });
-    if (recovery.reason === 'sequence_replayed' || (!accepted.value && feeds.results?.value)) {
+    if (documentRegressed(feeds.results?.value, accepted.value) || (!accepted.value && feeds.results?.value)) {
       settle('results', { ...feeds.results, reason: recovery.reason }); onChange('results'); return;
     }
     resultsFallback = accepted;

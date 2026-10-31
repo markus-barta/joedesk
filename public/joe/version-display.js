@@ -18,7 +18,7 @@ function cancelVersionInteractions(frozen = false) {
 // abandoned by expiry never reach its fallback UI or confirmation timer.
 function interaction(element, value, label) {
   let active = true;
-  const view = { matchMedia: (...args) => globalThis.matchMedia(...args),
+  const view = { matchMedia: globalThis.matchMedia?.bind(globalThis),
     setTimeout: (...args) => globalThis.setTimeout(...args), clearTimeout: timer => globalThis.clearTimeout(timer),
     navigator: { clipboard: { writeText: canonical => new Promise((resolve, reject) => {
       Promise.resolve().then(() => active ? navigator.clipboard.writeText(canonical) : undefined).then(

@@ -2441,6 +2441,14 @@ than the retained document. A worker crash cannot reset that ordering floor or
 discard the page's last good values when the first fallback read fails. Named
 History and Results regressions replay the crash followed by a higher sequence
 with an older receipt (`JOED_FIX7_BASELINE=58770a9`).
+Document retention separately compares the actual sequence and receipt: an
+authenticated 200 carrying a validated last-good body with a server-reported
+`sequence_replayed` reason keeps that body and reason, even with empty stores.
+It remains stale and cannot end signed-out recovery. The six cold-read regressions
+cover History and Results in workers, after worker failure, and with workers
+disabled (`JOED_FIX7_BASELINE=5b788a8`). The version adapter binds `matchMedia`
+to the browser global, preserving expiry disposal and the sweep planner's
+literal-query boundary inventory without changing the pinned vendor bundle.
 
 `TZ=UTC node scripts/browser/signed-out-pages.mjs` runs the same whole-document
 oracle on the actual app in one headless browser, using synthetic loopback reads.
