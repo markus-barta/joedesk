@@ -41,7 +41,7 @@ published on `main` at `dafe7909af04ba5ded3c4b55504ea10970e07e4d`; JOED-41
 records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
-`previous_release` from `last_deployed_release`. About lists the current build, deployed and adopted sequences 40 and 39, published sequence 38,
+`previous_release` from `last_deployed_release`. About lists the current build, deployed and adopted sequences 41, 40 and 39, published sequence 38,
 deployed sequences 37, 36, 35, 34, 33, 32, 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
