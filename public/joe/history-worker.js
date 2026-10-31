@@ -8,8 +8,7 @@ import { toColumns, transferables, sessionCloses, DESK_IDS } from './history-mod
 import { indexResults, transferables as resultsTransferables } from './results-model.js';
 
 const previous = { history: null, results: null }, posted = { history: null, results: null };
-import { readJSON, createBoardSession } from './transport.js';
-const session = createBoardSession();
+import { readJSON } from './transport.js';
 let frozen = false;
 const evidence = responses => Object.fromEntries(responses.map(([url, res]) => [url, res.auth]));
 async function read(url) {
@@ -24,8 +23,7 @@ const clockNow = res => (res.clock ? { at: new Date(Date.parse(res.clock.at) + p
 async function pollHistory(started) {
   const [res, sidecar] = await Promise.all([read('/joe/history.json'), read('/joe/history-continuity.json')]);
   const auth = evidence([['/joe/history.json', res], ['/joe/history-continuity.json', sidecar]]);
-  for (const [key, authValue] of Object.entries(auth)) session.observe(key, { auth: authValue });
-  if (frozen || session.signedOut()) { self.postMessage({ kind: 'blocked', feed: 'history', auth }); return; }
+  if (res.auth === true || sidecar.auth === true || (frozen && (res.auth !== false || res.status !== 200 || sidecar.auth !== false || sidecar.status !== 200))) { self.postMessage({ kind: 'blocked', feed: 'history', auth }); return; }
   const accepted = acceptRead('history', res, previous.history);
   previous.history = accepted;
   const value = accepted.value;
@@ -33,12 +31,12 @@ async function pollHistory(started) {
     sizeBytes: value.sizeBytes, compactedThrough: value.compactedThrough ?? null, reason: value.reason ?? null, points: value.points.length } : null;
   const provenance = sidecar.status === 200 ? sidecar.payload : null;
   const key = JSON.stringify([meta, accepted.reason, provenance]);
-  if (key === posted.history) { self.postMessage({ auth: { ...auth }, kind: 'unchanged', feed: 'history', clock: clockNow(res), ms: performance.now() - started }); return; }
+  if (key === posted.history) { self.postMessage({ valid: res.status !== 200 || accepted.value === res.payload, auth: { ...auth }, kind: 'unchanged', feed: 'history', clock: clockNow(res), ms: performance.now() - started }); return; }
   posted.history = key;
-  if (!value) { self.postMessage({ auth: { ...auth }, kind: 'history', reason: accepted.reason ?? null, meta: null, clock: clockNow(res), ms: performance.now() - started }); return; }
+  if (!value) { self.postMessage({ valid: res.status !== 200 || accepted.value === res.payload, auth: { ...auth }, kind: 'history', reason: accepted.reason ?? null, meta: null, clock: clockNow(res), ms: performance.now() - started }); return; }
   const columns = toColumns(value.points, provenance, value.seq);
   const closes = Object.fromEntries(DESK_IDS.map(id => [id, sessionCloses(columns, id, 'totalPnl', 9)]));
-  self.postMessage({ auth: { ...auth }, kind: 'history', reason: accepted.reason ?? null, meta, columns, closes, clock: clockNow(res), ms: performance.now() - started }, transferables(columns));
+  self.postMessage({ valid: res.status !== 200 || accepted.value === res.payload, auth: { ...auth }, kind: 'history', reason: accepted.reason ?? null, meta, columns, closes, clock: clockNow(res), ms: performance.now() - started }, transferables(columns));
 }
 
 // The closed-trade record: indexed once per accepted value (spec r3 §4.2 is
@@ -46,17 +44,16 @@ async function pollHistory(started) {
 async function pollResults(started) {
   const res = await read('/joe/results.json');
   const auth = evidence([['/joe/results.json', res]]);
-  session.observe('/joe/results.json', res);
-  if (frozen || session.signedOut()) { self.postMessage({ kind: 'blocked', feed: 'results', auth }); return; }
+  if (res.auth === true || (frozen && (res.auth !== false || res.status !== 200))) { self.postMessage({ kind: 'blocked', feed: 'results', auth }); return; }
   const accepted = acceptRead('results', res, previous.results);
   previous.results = accepted;
   const value = accepted.value;
   const key = JSON.stringify([value ? [value.seq, value.generatedAt, value.receivedAt] : null, accepted.reason ?? null]);
-  if (key === posted.results) { self.postMessage({ auth: { ...auth }, kind: 'unchanged', feed: 'results', clock: clockNow(res), ms: performance.now() - started }); return; }
+  if (key === posted.results) { self.postMessage({ valid: res.status !== 200 || accepted.value === res.payload, auth: { ...auth }, kind: 'unchanged', feed: 'results', clock: clockNow(res), ms: performance.now() - started }); return; }
   posted.results = key;
-  if (!value) { self.postMessage({ auth: { ...auth }, kind: 'results', reason: accepted.reason ?? null, index: null, clock: clockNow(res), ms: performance.now() - started }); return; }
+  if (!value) { self.postMessage({ valid: res.status !== 200 || accepted.value === res.payload, auth: { ...auth }, kind: 'results', reason: accepted.reason ?? null, index: null, clock: clockNow(res), ms: performance.now() - started }); return; }
   const index = indexResults(value);
-  self.postMessage({ auth: { ...auth }, kind: 'results', reason: accepted.reason ?? null, generatedAdvancedAt: accepted.generatedAdvancedAt,
+  self.postMessage({ valid: res.status !== 200 || accepted.value === res.payload, auth: { ...auth }, kind: 'results', reason: accepted.reason ?? null, generatedAdvancedAt: accepted.generatedAdvancedAt,
     index, clock: clockNow(res), ms: performance.now() - started }, resultsTransferables(index));
 }
 

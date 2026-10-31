@@ -177,6 +177,7 @@ function useReply(reply) {
     Object.assign(store, { value: reply.value, reason: null, loadedAt: performance.now(), key: reply.key ?? null, version: store.version + 1 });
     return true;
   }
+  boardSession.invalidateRecovery();
   store.reason = reply?.reason ?? 'refresh_failed';
   return false;
 }
@@ -248,11 +249,16 @@ async function readHistory() {
   const ok = useReply(reply ?? await readOnPage());
   store.busy = false;
   store.next = performance.now() + (ok ? READ_MS : RETRY_MS);
-  if (last.ctx) renderAccount(last.ctx);
+  if (last.ctx && !boardSession.signedOut()) renderAccount(last.ctx);
+  return ok;
 }
 export const forgetAccountHistory = () => Object.assign(store, { value: null, reason: 'loading', loadedAt: null, key: null, version: store.version + 1, busy: false, next: 0 });
 // Read now (a retry, the budget run, a test), whatever the schedule says.
 export const refreshAccountHistory = () => refresh();
+export const accountHistoryIdle = () => reader.reading ?? Promise.resolve();
+export function pollAccountHistory() {
+  if (!store.busy && performance.now() >= store.next && typeof fetch === 'function') return refresh();
+}
 // Forget the worker and its failures (tests): the next read starts a new one.
 export const forgetAccountWorker = () => {
   try { reader.worker?.terminate?.(); } catch { /* already gone */ }
@@ -321,7 +327,7 @@ function frameWindow(target) {
   return lerpWindow(motion.from, target, easeOut(k));
 }
 function requestDraw() {
-  if (last.frame || typeof requestAnimationFrame !== 'function') return;
+  if (boardSession.signedOut() || last.frame || typeof requestAnimationFrame !== 'function') return;
   last.frame = requestAnimationFrame(() => { last.frame = 0; draw(); });
 }
 const whenText = ms => { const at = new Date(Math.round(ms)).toISOString(); return `${dayDDM(at)}, ${timeHM(at)}`; };
@@ -704,6 +710,14 @@ export function chooseRange(range) {
 function fitAll() { if (!AS.full) return; glide(); AS.view = AS.full.slice(); AS.follow = true; seen(); requestDraw(); }
 const unpin = () => { if (input.pinned) { input.pinned = false; last.scale?.release(); } };
 
+export function cancelInteractions() {
+  clearTimeout(input.touch?.timer);
+  if (last.frame) cancelAnimationFrame(last.frame);
+  last.frame = 0; motion.from = null;
+  input.touch = input.drag = input.lastTap = null; input.pinned = false;
+  input.cancelPointers?.();
+}
+
 function bindChart(chart, track) {
   const plotWidth = () => last.scale?.pw ?? Math.max(1, chart.clientWidth - padFor().l - padFor().r);
   const perPx = () => (AS.shown ? (AS.shown[1] - AS.shown[0]) / plotWidth() : 0);
@@ -729,6 +743,7 @@ function bindChart(chart, track) {
   // Safari reports a trackpad pinch as gesture events, not as a Ctrl wheel.
   const touches = new Map();
   let gesture = null;
+  input.cancelPointers = () => { touches.clear(); gesture = null; };
   chart.addEventListener('gesturestart', e => { if (!AS.shown || touches.size) return; const start = current(); e.preventDefault(); stop(); gesture = { start, at: chartTime(e.clientX, start) }; });
   chart.addEventListener('gesturechange', e => { if (!gesture) return; e.preventDefault(); setView(zoomBy(gesture.start, 1 / Math.max(0.05, e.scale), gesture.at)); });
   chart.addEventListener('gestureend', () => { gesture = null; });
@@ -750,7 +765,7 @@ function bindChart(chart, track) {
     clearTimeout(input.touch?.timer);
     if (touches.size === 1) {
       const t = { phase: 'pending', id: e.pointerId, x: e.clientX, y: e.clientY, lastX: e.clientX, down: e.timeStamp, start, perPx: perPx() };
-      t.timer = setTimeout(() => { if (input.touch === t && t.phase === 'pending') { t.phase = 'scrub'; input.pinned = true; last.scale?.inspectAt(t.lastX); } }, 350);
+      t.timer = setTimeout(() => { if (!boardSession.signedOut() && input.touch === t && t.phase === 'pending') { t.phase = 'scrub'; input.pinned = true; last.scale?.inspectAt(t.lastX); } }, 350);
       input.touch = t;
     } else if (touches.size === 2) {
       const [p, q] = [...touches.values()], mid = (p.x + q.x) / 2;
@@ -974,6 +989,7 @@ export function applyCustomAxis() {
   return true;
 }
 function openControls(open) {
+  if (boardSession.signedOut()) return;
   const pop = $('#acctPop'), button = $('#acctCtl');
   if (!pop || !button) return;
   if (open && !pop.innerHTML) {

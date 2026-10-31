@@ -267,7 +267,8 @@ export function initTips({ now = () => null, since = () => null } = {}) {
     if (el.closest('dialog[open]')) e.preventDefault();
     e.stopImmediatePropagation();
   }, true);
-  return { hide: root => { if (!root || root.contains(anchor)) hide(true); } };
+  return { hide: root => { if (!root || root.contains(anchor)) hide(true); },
+    cancel: () => { cancelDismissal(); focusPlacement = null; anchor = null; pinned = false; restoreFocus = null; } };
 }
 
 // Dialogs open modal. Opened by a pointer, focus goes to the dialog's heading

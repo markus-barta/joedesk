@@ -34,6 +34,7 @@ export function createBoardSettings({ fetcher = (...args) => fetch(...args), cha
       }
       return { ok: true };
     } catch (error) {
+      boardSession.invalidateRecovery();
       if (current === generation && !boardSession.signedOut()) publish({ accountStart: null, reason: failureReason });
       return { ok: false, error: error.message || 'Account start could not be saved.' };
     } finally { if (current === generation) saving = false; }

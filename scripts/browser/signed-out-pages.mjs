@@ -15,7 +15,7 @@ const endpoints = ['state.json', 'history.json', 'history-continuity.json', 'res
 try {
   browser = await launch({ commandTimeout: 30000 });
   const page = await openPage(browser, { headers: { 'x-auth-request-user': ACTOR } });
-  let expired = false, fail503 = false, shape = '401', reason = null, only = null;
+  let expired = false, fail503 = false, shape = '401', reason = null, only = null, fleetPaused = null;
   const panels = () => Object.fromEntries(f.data.desks.flatMap(desk => ['equity', 'dayPnl', 'openPnl', 'totalPnl'].map(key =>
     [`desks.${desk.id}.${key}`, { value: desk.money[key], state: 'broken', reason, retained: false, ageSeconds: 125 }])));
   browser.on(async m => {
@@ -26,6 +26,9 @@ try {
         ...(reason ? [{ name: 'X-Joe-Feed-Reason', value: reason }] : []), ...headers],
       body: Buffer.from(typeof payload === 'string' ? payload : JSON.stringify(payload)).toString('base64') }, m.sessionId);
     try {
+      if (url.origin === new URL(board.url).origin && request.method === 'POST' && url.pathname === '/joe/fleet-config/propagate' && fleetPaused) {
+        fleetPaused(send); fleetPaused = null; return;
+      }
       if (url.origin !== new URL(board.url).origin || request.method !== 'GET') {
         failures.push('unexpected external request or write');
         await browser.send('Fetch.failRequest', { requestId, errorReason: 'BlockedByClient' }, m.sessionId); return;
@@ -65,6 +68,31 @@ try {
     localStorage.setItem('joe-board-observed-events-v1', JSON.stringify({ schema: 'inspr.joe.observed-events.v1', events: [{ deskId: 'j', kind: 'issues', summary: ${JSON.stringify(blame)}, snapshotAt: ${JSON.stringify(f.data.generatedAt)}, sourceLabel: ${JSON.stringify(blame)} }] })); }` });
   const settle = () => page.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
   const refresh = () => page.evaluate(`Promise.all([window.__joedesk.refresh(), import('/joe/board-settings.js').then(m => m.refreshBoardSettings()), import('/joe/account.js').then(m => m.refreshAccountHistory())])`);
+  const frozenVisuals = async tag => {
+    const view = await page.evaluate(`(() => {
+      const app = document.getElementById('app');
+      const sections = [...app.querySelectorAll('[data-frozen]')].filter(n => n.getClientRects().length);
+      const values = [...app.querySelectorAll('.bn, .acct-value, .v, .chart, .num, .cash-amount')].filter(n => n.getClientRects().length);
+      const button = document.querySelector('[data-sign-in-reload]');
+      button.focus(); const r = button.getBoundingClientRect();
+      return { sections: sections.length, labels: sections.every(n => getComputedStyle(n, '::before').content.includes('Stale')),
+        muted: values.every(n => Number(getComputedStyle(n).opacity) < 1 || Boolean(n.closest('.chart, .acct-value, .acct-change, .bars'))),
+        desaturated: getComputedStyle(app).filter.includes('grayscale(1)'),
+        animations: [...app.querySelectorAll('*')].some(n => getComputedStyle(n).animationName !== 'none'),
+        reload: document.activeElement === button && button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)) };
+    })()`);
+    assert.ok(view.sections && view.labels && view.muted && view.desaturated && !view.animations && view.reload, `${tag}: frozen visual guard ${JSON.stringify(view)}`);
+  };
+  const interact = () => page.evaluate(`(() => {
+    for (const node of document.querySelectorAll('#acctChart, #histChart, #heroChart, #curve')) {
+      node.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 150 })); node.focus();
+      node.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'ArrowRight' }));
+      node.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: true, deltaY: 80 }));
+      for (const type of ['gesturestart', 'gesturechange', 'gestureend']) node.dispatchEvent(new Event(type, { bubbles: true, cancelable: true }));
+    }
+    document.getElementById('healthPop').dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' }));
+    document.getElementById('acctCtl').dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: document.querySelector('[data-sign-in-reload]') }));
+  })()`);
   const capture = () => page.evaluate(`(${retainedDocument.toString()})(document)`);
   const recover = async () => {
     expired = fail503 = false;
@@ -96,6 +124,9 @@ try {
     else await page.evaluate(`import('/joe/board-settings.js').then(m => m.refreshBoardSettings())`);
     await refresh();
     assertSignedOutPage(await capture(), before, tag);
+    await frozenVisuals(tag);
+    await interact();
+    assertSignedOutPage(await capture(), before, `${tag}/interactions`);
     fail503 = true; stage = `${tag}: 503 and timers`;
     await advance();
     assertSignedOutPage(await capture(), before, `${tag}/503 and paused timers`);
@@ -121,6 +152,74 @@ try {
     await waitFor(page, "document.documentElement.dataset.ready === '1'");
     await refresh(); await settle();
     await page.evaluate('document.fonts.ready.then(() => true)');
+    // Confirm the native modal/top-layer and long-press reproducers before
+    // the matrix; snapshots after expiry retain every data/form property.
+    if (width === 390) {
+      stage = 'phone: pre-expiry account long press'; await go('desk');
+      const touch = await page.evaluate(`(() => { const chart = document.getElementById('acctChart'); chart.scrollIntoView({ block: 'center' }); const r = chart.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+      await page.s('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...touch, id: 7 }] });
+      expired = true; await page.evaluate(`import('/joe/board-settings.js').then(m => m.refreshBoardSettings())`);
+      const pending = await capture();
+      await page.evaluate('new Promise(done => setTimeout(done, 450))');
+      await page.s('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      assert.deepEqual(await capture(), pending, 'pre-expiry touch timer and release cannot mutate the frozen chart');
+      await recover();
+    }
+    stage = `${width}: native modal and controls`;
+    await go('desk');
+    await page.evaluate(`document.getElementById('acctCtl').click(); document.getElementById('diffDlg').showModal();`);
+    expired = true; await page.evaluate(`import('/joe/board-settings.js').then(m => m.refreshBoardSettings())`);
+    await frozenVisuals(stage);
+    const closed = await capture(); await interact(); await settle();
+    assert.deepEqual(await capture(), closed, 'closing a native modal/Controls once leaves an inert document');
+    await recover();
+    // Account-only expiry must recover through normal polling; no explicit
+    // account-history retry from the audit is allowed in this reproducer.
+    stage = `${width}: account-only automatic recovery`;
+    only = 'account-history.json'; expired = true;
+    await page.evaluate('window.__joedesk.refreshAccount()');
+    assert.equal((await capture()).inert, true);
+    expired = false;
+    await page.evaluate('window.__boardTime += 15001; for (const tick of window.__boardIntervals.values()) tick();');
+    await waitFor(page, "!document.getElementById('app').hasAttribute('data-last-known')");
+    only = null; await settle();
+    // Observe the exact unmark operation, not only the eventual page. At
+    // that operation the newly served account figure must already be in DOM.
+    stage = `${width}: recovery render precedes unmark`;
+    await go('desk'); expired = true;
+    await page.evaluate(`import('/joe/board-settings.js').then(m => m.refreshBoardSettings())`);
+    const amount = f.data.brokerAccount.equity.amount;
+    f.data.brokerAccount.equity.amount = '29001'; f.data.seq++;
+    await page.evaluate(`window.__unmarkValues = []; window.__originalRemove = Element.prototype.removeAttribute;
+      Element.prototype.removeAttribute = function(key) {
+        if (this.id === 'app' && key === 'data-last-known') window.__unmarkValues.push(document.getElementById('acctValue').textContent);
+        return window.__originalRemove.call(this, key);
+      };`);
+    await recover();
+    assert.deepEqual(await page.evaluate('window.__unmarkValues.map(s => s.replace(/\\s/g, ""))'), ['€29.001,00']);
+    await page.evaluate('Element.prototype.removeAttribute = window.__originalRemove; delete window.__originalRemove;');
+    f.data.brokerAccount.equity.amount = amount; f.data.seq++;
+    await refresh(); await settle();
+    stage = `${width}: latest frozen address`;
+    expired = true; await page.evaluate(`import('/joe/board-settings.js').then(m => m.refreshBoardSettings())`);
+    await page.evaluate(`location.hash = '#history';`); await settle();
+    await page.evaluate(`location.hash = '#results';`); await settle();
+    await recover();
+    assert.equal(await page.evaluate('document.body.dataset.screen'), 'results');
+    if (width > 700) for (const auth of ['401', 'opaque redirect', 'HTML']) {
+      stage = `fleet submission/${auth}`; await go('settings');
+      await page.evaluate(`document.getElementById('reviewBtn').click(); document.getElementById('diffReviewed').click(); document.getElementById('diffConfirm').click();`);
+      assert.equal(await page.evaluate('document.getElementById("sendBtn").disabled'), false);
+      const paused = new Promise(done => { fleetPaused = done; });
+      await page.evaluate('document.getElementById("sendBtn").click()');
+      const send = await paused, sending = await capture();
+      if (auth === '401') await send(401, '{}');
+      else if (auth === 'HTML') await send(200, '<form>Sign in</form>');
+      else await send(302, '', [{ name: 'Location', value: 'https://sso.example.invalid/sign_in' }]);
+      await waitFor(page, "document.getElementById('app').hasAttribute('data-last-known')");
+      assertSignedOutPage(await capture(), sending, stage);
+      await recover();
+    }
     for (const auth of nativeShapes) {
       shape = auth; only = null;
       for (const failureReason of [null, ...reasons]) {

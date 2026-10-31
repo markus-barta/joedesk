@@ -67,10 +67,11 @@ for (const [name, text] of modules) {
 }
 {
   const writer = files[WRITER] ?? '';
-  required((writer.match(/fetch\(/g) ?? []).length === 1 && (writer.match(/method:\s*['"`]POST['"`]/g) ?? []).length === 1, `${WRITER}: exactly one request, a POST`);
-  required(/const ROUTE = '\.\/fleet-config\/propagate';/.test(writer) && /fetch\(ROUTE,/.test(writer), `${WRITER}: the request goes only to the propagate route`);
+  required((writer.match(/readJSON\(/g) ?? []).length === 1 && !/\bfetch\(/.test(writer) && (writer.match(/method:\s*['"`]POST['"`]/g) ?? []).length === 1, `${WRITER}: exactly one request, a POST`);
+  required(/const ROUTE = '\.\/fleet-config\/propagate';/.test(writer) && /readJSON\(ROUTE,/.test(writer), `${WRITER}: the request goes only to the propagate route`);
   required(/config\.mode !== 'paper'/.test(writer) && /config\.rev !== baseRev/.test(writer) && /throw new Error/.test(writer), `${WRITER}: a non-paper draft, or one not based on the version it names, is refused before any request`);
   required(!/\/inbox/.test(writer), `${WRITER}: never the inbox`);
+  required(/boardSession\.accept\('\/joe\/fleet-config\/propagate', response\)/.test(writer), `${WRITER}: auth classification precedes submission UI`);
 }
 for (const [name, text] of modules) {
   required(!/\bmode\s*[:=]\s*['"`](live|LIVE)['"`]/.test(text) && !/\.mode\s*=\s*(?!['"`]paper['"`])['"`]/.test(text), `${name}: no code path sets a live mode`);

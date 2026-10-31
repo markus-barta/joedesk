@@ -1705,3 +1705,11 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
    timer annotation below its pill instead of over its frozen sentence. */
 #app[data-last-known] .top { position: relative; }
 #app[data-last-known] #hdrHealth::after { position: absolute; inset: auto 0 -11px auto; font-size: 10px; line-height: 12px; padding-inline: 3px; background: var(--surface); border-radius: 3px; }
+/* Frozen data is visibly stale at each value section, including charts and
+   saved Settings values. Desaturation also removes every green live cue. */
+#app[data-last-known] { filter: grayscale(1); }
+#app[data-last-known] [data-frozen] { color: var(--ink-3); }
+#app[data-last-known] [data-frozen]::before { content: "Stale · not updating"; display: block; color: var(--ink-2); font-size: 12px; font-weight: 600; line-height: 20px; }
+#app[data-last-known] :is(.bn, .num, .acct-value, .acct-change, .cash-amount, .v, .pct, .tval, .chart, .bars, .position-summary, .position-mobile, .f-saved, input, select, textarea) { opacity: .6; }
+#app[data-last-known] *, #app[data-last-known] *::before, #app[data-last-known] *::after { animation: none !important; transition: none !important; }
+#app[data-last-known] :is(.dot-live, .live-dot, [data-frozen-motion~="dot-live"], [data-frozen-motion~="live-dot"]) { visibility: hidden !important; }

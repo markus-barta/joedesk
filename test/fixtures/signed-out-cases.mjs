@@ -58,7 +58,7 @@ export function renderedSnapshot(document, visible) {
     ages: elements.filter(n => n.hasAttribute('data-age')).map(n => norm(n.innerText)) };
 }
 // Serialize the entire retained body, including hidden markup and every live
-// form value. Only the two documented board-level marking attributes normalize.
+// form value. Only explicit freeze attributes and suppressed motion classes normalize.
 // This has no wording or value allow-list and runs unchanged in the browser.
 export function retainedDocument(document) {
   const serialize = node => {
@@ -66,8 +66,10 @@ export function retainedDocument(document) {
     if (node.nodeType === 3 || node.nodeType === 8) return [node.nodeType, node.nodeValue];
     if (node.id === 'signedOutBanner') return null;
     const attrs = node.attributes?.[Symbol.iterator] ? Array.from(node.attributes, a => [a.name, a.value]) : Object.entries(node.attributes ?? {});
-    const attributes = attrs.filter(([key]) => !(node.id === 'app' && key === 'data-last-known')).map(([key, value]) =>
-      [key, node.id === 'main' && key === 'aria-describedby' ? value.split(/\s+/).filter(v => v !== 'lastKnownLabel').join(' ') : value])
+    const originalClass = node.getAttribute?.('data-frozen-motion');
+    const pausedClass = originalClass?.split(/\s+/).filter(c => !['dot-live', 'live-dot', 'draw-in', 'fade-in'].includes(c)).join(' ');
+    const attributes = attrs.filter(([key]) => !(['data-last-known', 'inert'].includes(key) && node.id === 'app') && !['data-frozen', 'data-frozen-motion'].includes(key)).map(([key, value]) =>
+      [key, key === 'class' && originalClass !== null && value === pausedClass ? originalClass : node.id === 'main' && key === 'aria-describedby' ? value.split(/\s+/).filter(v => v !== 'lastKnownLabel').join(' ') : value])
       .filter(([key, value]) => !(node.id === 'main' && key === 'aria-describedby' && !value));
     const children = Array.from(node.childNodes ?? node.children ?? []).map(serialize).filter(v => v !== null);
     return [node.tagName, attributes, node.value, node.checked, node.selected, children];
@@ -77,10 +79,18 @@ export function retainedDocument(document) {
     headline: banner.querySelector('strong').textContent,
     reload: !banner.hidden && Boolean(banner.querySelector('[data-sign-in-reload]')),
     marked: app.hasAttribute('data-last-known') && document.getElementById('main').getAttribute('aria-describedby')?.split(/\s+/).includes('lastKnownLabel'),
-    label: document.getElementById('lastKnownLabel').textContent };
+    label: document.getElementById('lastKnownLabel').textContent,
+    inert: app.hasAttribute('inert'), bannerInert: Boolean(banner.closest('[inert]')), openDialogs: document.querySelectorAll('dialog[open]').length,
+    motionClasses: document.querySelectorAll('#app .dot-live, #app .live-dot, #app .draw-in, #app .fade-in').length,
+    frozenSections: [...document.querySelectorAll('[data-frozen]')].map(n => n.id) };
 }
 export function assertSignedOutPage(after, before, tag) {
-  assert.equal(after.headline, 'Signed out — reload to sign in', tag);
+  assert.match(after.headline, /^Signed out — data as of (?:\d{2}:\d{2}:\d{2}|unknown) \(Vienna\), not updating — reload to sign in$/, tag);
+  assert.equal(after.motionClasses, 0, `${tag}: freshness and entrance animation classes removed`);
+  assert.equal(after.inert, true, `${tag}: retained region is inert`);
+  assert.equal(after.bannerInert, false, `${tag}: banner is outside inert region`);
+  assert.equal(after.openDialogs, 0, `${tag}: no modal blocks Reload`);
+  assert.deepEqual(after.frozenSections.toSorted(), ['acctHero', 'deskHero', 'desk-j', 'desk-joe', 'desk-joel', 'positions', 'kept', 'rhero', 'tiles', 'breakdown', 'cal', 'daypanel', 'histChart', 'histCompare', 'jAcct', 'setMain'].toSorted(), `${tag}: every value section is marked stale`);
   assert.equal(after.reload, true, `${tag}: Reload visible`);
   assert.equal(after.marked, true, `${tag}: main describes the entire board as last known`);
   assert.equal(after.label, 'Last known — signed out', tag);

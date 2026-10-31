@@ -1,4 +1,5 @@
 // Product adapter only: the pinned shared bundle owns geometry and interaction.
+import { boardSession } from './transport.js';
 import { renderVersion, disposeVersion, parts, utcLabel } from './vendor/calver/version.js';
 import { attachVersionInteraction } from './vendor/calver/version-interaction.js';
 import config from './vendor/calver/display.json' with { type: 'json' };
@@ -7,6 +8,7 @@ const text = { copy: 'Copy version', copied: 'Copied', failed: 'Copy is unavaila
 let mode = 'pretty';
 const reduced = new WeakMap();
 export function paintVersions() {
+  if (boardSession.signedOut()) return;
   for (const element of document.querySelectorAll('[data-product-version]')) {
     const value = element.dataset.productVersion, scheme = element.dataset.versionScheme;
     reduced.get(element)?.dispose(); reduced.delete(element);

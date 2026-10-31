@@ -59,8 +59,9 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
 
   function pollState() { return poll('state', async () => {
     const res = await read('./state.json');
-    if (!res || session.signedOut()) return;
+    if (!res || !session.accepting()) return;
     if (res.status !== 200 || !res.payload?.feeds) {
+      session.invalidateRecovery();
       // Keep the last good snapshot and its original receipts; only the reason changes.
       anchorFrom(res);
       settle('data', acceptRead('data', { status: res.status === 200 ? 0 : res.status, redirected: res.redirected }, feeds.data));
@@ -72,6 +73,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     settle('data', acceptRead('data', d.value
       ? { status: 200, payload: d.value, receivedAt: d.value.receivedAt, generatedAdvancedAt: d.generatedAdvancedAt, gatewayProgress: d.gatewayProgress, reason: d.reason ?? undefined }
       : { status: 503, payload: { reason: d.reason }, reason: d.reason ?? undefined }, feeds.data));
+    if (d.value ? feeds.data.value !== d.value : Boolean(feeds.data.value)) session.invalidateRecovery();
     // History and results have their own worker-fed reads; only the data panels carry over.
     const { history: _history, results: _results, ...panels } = res.payload.panels ?? {};
     serverPanels = panels;
@@ -104,7 +106,9 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
       workerReads.delete(kind);
       try {
         for (const [key, auth] of Object.entries(data.auth ?? {})) session.observe(key, { auth });
-        if (session.signedOut() || data.kind === 'blocked') return;
+        if (data.valid === false) session.invalidateRecovery();
+        if (data.kind === 'blocked' && !Object.values(data.auth ?? {}).includes(true)) session.observe(kind, { status: 503 });
+        if (!session.accepting() || data.kind === 'blocked') return;
         if (data.clock) anchorTo(data.clock.at, data.clock.precise ? 'stamp' : 'date');
         measure(`${kind}-worker`, data.ms);
         if (data.kind === 'unchanged') return;
@@ -125,12 +129,13 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
   function pollHistory() { return poll('history', async () => {
     if (worker) return readInWorker('history', 'poll');
     const [res, sidecar] = await Promise.all([read('./history.json'), read('./history-continuity.json')]);
-    if (!res || !sidecar || session.signedOut()) return;
+    if (!res || !sidecar || !session.accepting()) return;
     anchorFrom(res);
     const reason = res.headers?.get('X-Joe-Feed-Reason') ?? undefined;
     const started = performance.now();
     const accepted = acceptRead('history', res.status === 200 ? { status: 200, payload: res.payload, reason }
       : { status: res.status, redirected: res.redirected, payload: res.payload, reason: res.payload?.reason ?? undefined }, fallback);
+    if (res.status !== 200 || accepted.value !== res.payload) session.invalidateRecovery();
     fallback = accepted;
     const v = accepted.value;
     const columns = v ? toColumns(v.points, sidecar.status === 200 ? sidecar.payload : null, v.seq) : null;
@@ -148,7 +153,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
   function pollResults() { return poll('results', async () => {
     if (worker) return readInWorker('results', 'results');
     const res = await read('./results.json');
-    if (!res || session.signedOut()) return;
+    if (!res || !session.accepting()) return;
     anchorFrom(res);
     const reason = res.headers?.get('X-Joe-Feed-Reason') ?? undefined;
     const started = performance.now();
@@ -156,6 +161,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     const accepted = acceptRead('results', res.status === 200 ? { status: 200, payload: res.payload, reason,
       generatedAdvancedAt: res.headers?.get('X-Joe-Generated-Advanced-At') ?? undefined }
       : { status: res.status, redirected: res.redirected, payload: res.payload, reason: res.payload?.reason ?? undefined }, previous);
+    if (res.status !== 200 || accepted.value !== res.payload) session.invalidateRecovery();
     resultsFallback = accepted;
     const v = accepted.value;
     const same = v && previous?.value === v && feeds.results?.value;
@@ -167,7 +173,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
 
   function pollFleet() { return poll('fleet', async () => {
     const res = await read('./fleet-config.json', fleetTag ? { headers: { 'If-None-Match': fleetTag } } : {});
-    if (!res || session.signedOut()) return;
+    if (!res || !session.accepting()) return;
     anchorFrom(res);
     // Only a conditional response for the validated saved document can clear
     // a rejection. Its receipt still belongs to the original read.
@@ -186,6 +192,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
       const path = res.headers.get('X-Joe-Fleet-Source-Path'), kind = res.headers.get('X-Joe-Fleet-Source-Kind');
       fleetSource = { path: path && /^\/[\x20-\x7e]{1,200}$/.test(path) ? path : null, kind: ['stored', 'example'].includes(kind) ? kind : null };
     }
+    if (accepted.reason === 'contract_invalid') session.invalidateRecovery();
     settle('fleet-config', accepted);
     onChange('fleet');
   }); }
@@ -194,9 +201,10 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
   // A failed read keeps the last good log and says why.
   function pollActions() { return poll('actions', async () => {
     const res = await read('./fleet-config/actions.json');
-    if (!res || session.signedOut()) return;
+    if (!res || !session.accepting()) return;
     anchorFrom(res);
     const entries = res.status === 200 ? acceptActions(res.payload) : null;
+    if (!entries) session.invalidateRecovery();
     actions = entries ? { entries, reason: null } : { entries: actions?.entries ?? null, reason: res.auth ? 'auth_required' : res.status === 200 ? 'contract_invalid' : 'refresh_failed' };
     onChange('actions');
   }); }
@@ -224,11 +232,11 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     pollResults();
     timers = [
       setInterval(pollState, POLL_DATA_MS),
-      setInterval(() => { pollHistory(); pollResults(); pollFleet(); if (actionsWanted()) pollActions(); }, POLL_HISTORY_MS),
+      setInterval(() => { pollHistory(); pollResults(); pollFleet(); if (actionsWanted() || session.signedOut()) pollActions(); }, POLL_HISTORY_MS),
       setInterval(() => { if (!session.signedOut()) onChange('tick'); }, TICK_MS),
     ];
   }
   const stop = () => { timers.forEach(clearInterval); timers = []; worker?.terminate?.(); unsubscribe(); };
   const refresh = () => Promise.all([pollFleet(), pollState(), pollHistory(), pollResults()]);
-  return { start, stop, select, now, settled, signedOut: session.signedOut, refresh, refreshState: pollState, refreshHistory: pollHistory, refreshResults: pollResults, refreshFleet: pollFleet, refreshActions: pollActions, usesWorker: () => Boolean(worker), feeds };
+  return { start, stop, whenIdle: () => Promise.all([...reads.values()]), select, now, settled, signedOut: session.signedOut, refresh, refreshState: pollState, refreshHistory: pollHistory, refreshResults: pollResults, refreshFleet: pollFleet, refreshActions: pollActions, usesWorker: () => Boolean(worker), feeds };
 }

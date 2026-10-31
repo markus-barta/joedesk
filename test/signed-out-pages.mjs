@@ -103,8 +103,10 @@ async function preview(t, width, shape = '401', populated = true) {
   // Open the phone disclosures so the oracle includes their full bodies.
   for (const id of ['j', 'joe', 'joel', 'positions', 'kept', 'chart']) D.toggleDeskDisclosure(id);
   let renders = 0;
-  const render = (ctx, screen) => {
-    if (freeze.sync()) return;
+  let currentScreen = 'desk';
+  const render = (ctx, screen, recovery = false) => {
+    if (freeze.sync() && !recovery) return;
+    currentScreen = screen;
     renders++;
     for (const n of doc.querySelectorAll('.screen')) n.classList.toggle('on', n.id === `scr-${screen}`);
     doc.body.dataset.screen = screen;
@@ -122,6 +124,7 @@ async function preview(t, width, shape = '401', populated = true) {
     } else if (screen === 'history') H.renderHistory(ctx);
     else if (screen === 'results') { R.forgetResults(); R.renderResults(ctx); }
     else S.renderSettings(ctx);
+    freeze.rendered(ctx.now);
     return populated ? undefined : snapshot(doc, width);
   };
   const context = reason => {
@@ -133,11 +136,20 @@ async function preview(t, width, shape = '401', populated = true) {
     ctx.actions = { entries: [], reason };
     return ctx;
   };
+  let recoveryTask = Promise.resolve();
+  const stopRecovery = boardSession.coordinateRecovery(() => {
+    recoveryTask = (async () => {
+      await Promise.all([feed.whenIdle(), A.accountHistoryIdle()]);
+      await Promise.all([feed.refresh(), refreshBoardSettings(), A.refreshAccountHistory()]);
+      boardSession.finishRecovery(() => { render(context(null), currentScreen, true); return true; });
+    })();
+    return recoveryTask;
+  });
   let closed = false;
   const close = () => {
     if (closed) return;
     closed = true;
-    feed.stop(); freeze.stop();
+    stopRecovery(); feed.stop(); freeze.stop();
     for (const route of ['state.json', 'history.json', 'history-continuity.json', 'results.json', 'fleet-config.json', 'fleet-config/actions.json', 'board-settings.json', 'account-history.json']) boardSession.observe('/joe/' + route, { auth: false });
     A.forgetAccountHistory(); A.store.next = Infinity;
     Object.assign(R.RS, controls); R.forgetResults();
@@ -149,7 +161,7 @@ async function preview(t, width, shape = '401', populated = true) {
   return { doc, render, context, close, settings: S, deferPost() { let resolve; pendingPost = new Promise(done => { resolve = done; }); return resolve; }, capture: () => retainedDocument(doc), renders: () => renders,
     async signOut() { refused = true; await feed.refresh(); await refreshBoardSettings(); },
     async fail503() { failed503 = true; await feed.refresh(); await refreshBoardSettings(); },
-    async recover() { refused = failed503 = false; await feed.refresh(); await refreshBoardSettings(); }, f };
+    async recover() { refused = failed503 = false; await feed.refresh(); await refreshBoardSettings(); await recoveryTask; }, f };
 }
 
 // Every earlier reproducer now exercises the same structural invariant; these
@@ -217,7 +229,6 @@ for (const width of widths) for (const shape of authShapes) test(`JOED-173 fix4 
     await p.recover();
     assert.equal(p.capture().reload, false, `${tag}: recovery hides banner`);
     assert.equal(p.capture().marked, false, `${tag}: recovery removes last-known marking`);
-    p.render(p.context(null), screen);
     assert.equal(p.renders(), count + 1, `${tag}: authenticated recovery resumes rendering`);
   }
 });

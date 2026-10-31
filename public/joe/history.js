@@ -12,6 +12,7 @@ import { drawChart, eurAxis, changeAxis, axis, overviewTargets, createWheelLatch
 import { DESK_IDS, ASSUMED_BASELINE, OBSERVATION_INTERVAL_MS, continuitySeries, coverageUnknownAt, sharedWindowCompare, basisNotice, toColumns, rowAt, rangeSpanMs,
   keptRange, placeWindow, panWindow, zoomWindow, resizeWindow, atLiveEdge, endsAtNewest, followWindow, presetSpan, windowPreset, resolveView,
   missingBands, easeOut, lerpWindow, toStrip, fromStrip, parseHistoryRoute, historyRouteQuery, changeExtremes } from './history-model.js';
+import { boardSession } from './transport.js';
 import { viennaDay, zonedInstant, VIENNA, NY } from './time.mjs';
 
 const LABEL = { j: 'J', joe: 'Joe', joel: 'Joel' };
@@ -533,12 +534,12 @@ const input = { schedule: null, drag: null, touch: null, pinned: false, announce
 const canPan = () => Boolean(HS.full && HS.shown && HS.shown[1] - HS.shown[0] < (HS.full[1] - HS.full[0]) * 0.999);
 // The first gesture or key on the chart or its strip retires the first-visit
 // hint for good (its room stays, so nothing moves).
-function gestured() { if (dismissChartHint()) $('#histHint')?.setAttribute('data-seen', ''); }
+function gestured() { if (boardSession.signedOut()) return; if (dismissChartHint()) $('#histHint')?.setAttribute('data-seen', ''); }
 // A person's change of the window. Its width may match a preset again; it
 // follows the newest time only while it ends exactly there, so a pan of a
 // single pixel into the past turns Follow off.
 function setView(next) {
-  if (!HS.full) return;
+  if (boardSession.signedOut() || !HS.full) return;
   HS.view = next; HS.follow = endsAtNewest(HS.full, next);
   gestured();
   input.schedule?.('history-pan');
@@ -567,6 +568,12 @@ export function toggleFollow() {
   HS.view = followWindow(HS.full, HS.shown); HS.follow = true;
 }
 const fitAll = () => { gestured(); historyPreset('all'); input.schedule?.('history-range'); };
+
+export function cancelInteractions() {
+  clearTimeout(input.touch?.timer);
+  input.touch = input.drag = null; input.pinned = false; motion.from = null;
+  input.cancelPointers?.();
+}
 
 export function initHistoryInput({ schedule }) {
   input.schedule = schedule;
@@ -601,6 +608,7 @@ export function initHistoryInput({ schedule }) {
   // (on a phone the pointer pinch below handles it).
   const touches = new Map();
   let gesture = null;
+  input.cancelPointers = () => { touches.clear(); gesture = null; };
   chart.addEventListener('gesturestart', e => { if (!HS.shown || touches.size) return; const start = current(); e.preventDefault(); stop(); gesture = { start, at: chartTime(e.clientX, start) }; });
   chart.addEventListener('gesturechange', e => { if (!gesture) return; e.preventDefault(); setView(zoomWindow(HS.full, gesture.start, 1 / Math.max(0.05, e.scale), gesture.at)); });
   chart.addEventListener('gestureend', () => { gesture = null; });
@@ -627,7 +635,7 @@ export function initHistoryInput({ schedule }) {
     clearTimeout(input.touch?.timer);
     if (touches.size === 1) {
       const t = { phase: 'pending', id: e.pointerId, x: e.clientX, y: e.clientY, lastX: e.clientX, down: e.timeStamp, start, perPx: perPx() };
-      t.timer = setTimeout(() => { if (input.touch === t && t.phase === 'pending') { t.phase = 'scrub'; input.pinned = true; lastScale?.inspectAt(t.lastX); } }, 350);
+      t.timer = setTimeout(() => { if (!boardSession.signedOut() && input.touch === t && t.phase === 'pending') { t.phase = 'scrub'; input.pinned = true; lastScale?.inspectAt(t.lastX); } }, 350);
       input.touch = t;
     } else if (touches.size === 2) {
       const [p, q] = [...touches.values()], mid = (p.x + q.x) / 2;

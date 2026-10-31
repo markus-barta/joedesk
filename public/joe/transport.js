@@ -45,24 +45,52 @@ export async function readJSON(url, init = {}, { text = false, fetcher = (...arg
 
 export const readFailure = ({ auth, status }) => auth ? 'auth_required' : status === 404 ? 'route_not_found' : 'refresh_failed';
 
-// A success clears only its own endpoint. Unrelated successful reads and
-// network errors cannot erase positive evidence that the sign-in expired.
+// The shell coordinates recovery: any authenticated read can start a full
+// refresh, while the displayed document stays frozen until that refresh renders.
 export function createBoardSession() {
   const blocked = new Set(), listeners = new Set();
+  let recover = null, recovering = false, recoveryOK = false;
   const session = {
     signedOut: () => blocked.size > 0,
-    observe(key, { auth } = {}) {
+    recovering: () => recovering,
+    invalidateRecovery: () => { recoveryOK = false; },
+    accepting: () => !session.signedOut() || recovering,
+    coordinateRecovery(callback) { recover = callback; return () => { recover = null; recovering = false; }; },
+    finishRecovery(render) {
+      if (!recovering || !recoveryOK) return false;
+      recovering = false; blocked.clear();
+      for (const listener of listeners) listener();
+      try {
+        if (render() !== false) return true;
+      } catch { /* Keep the last marked document and retry after another read. */ }
+      blocked.add('recovery-render');
+      for (const listener of listeners) listener();
+      return false;
+    },
+    observe(key, { auth, status } = {}) {
       const before = blocked.size > 0;
-      if (auth === true) blocked.add(key);
-      if (auth === false) blocked.delete(key);
+      if (auth === true) { blocked.add(key); if (recovering) recoveryOK = false; }
+      if (auth === false) {
+        if (!recover) blocked.delete(key);
+        else if (before && !recovering) {
+          recovering = recoveryOK = true;
+          // Let the successful read finish acceptance before refreshing it.
+          queueMicrotask(async () => {
+            try { await recover(); } catch { recoveryOK = false; }
+            finally { recovering = false; }
+          });
+        }
+      }
+      if (recovering && auth !== false && auth !== true && status !== undefined) recoveryOK = false;
       if (before !== (blocked.size > 0)) for (const listener of listeners) listener();
     },
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
-    // An auth response never enters a store. While any protected endpoint is
-    // blocked, later failures and unrelated successes leave every store alone.
+    // Auth responses never enter stores. During a coordinated refresh only
+    // authenticated replies can update the next selection; the displayed
+    // selection stays frozen until finishRecovery renders it.
     accept(key, response) {
       session.observe(key, response);
-      return response?.auth !== true && !session.signedOut();
+      return response?.auth !== true && session.accepting() && (!session.signedOut() || response?.auth === false);
     },
   };
   return session;

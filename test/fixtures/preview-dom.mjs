@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import * as nodeModule from 'node:module';
 
 const baseline = process.env.JOED_PRESENTATION_BASELINE;
-if (baseline && baseline !== 'a941776') throw new Error('Unsupported presentation baseline');
+if (baseline && !['a941776', '204b83d'].includes(baseline)) throw new Error('Unsupported presentation baseline');
 const sourceAt = url => baseline ? execFileSync('git', ['show', `${baseline}:public/joe/${new URL(url).pathname.split('/public/joe/')[1]}`], { encoding: 'utf8' }) : fs.readFileSync(url, 'utf8');
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
@@ -15,7 +15,7 @@ if (nodeModule.registerHooks) {
   nodeModule.registerHooks({
     resolve: (specifier, context, next) => next(mapped(specifier, context.parentURL), context),
     load(url, context, next) {
-      if (baseline && url.startsWith('file:') && /\/public\/joe\/[^/]+\.js$/.test(url)) return { format: 'module', source: sourceAt(url), shortCircuit: true };
+      if (baseline && url.startsWith('file:') && /\/public\/joe\/[^/]+\.js(?:\?.*)?$/.test(url)) return { format: 'module', source: sourceAt(url), shortCircuit: true };
       return next(url, context);
     },
   });

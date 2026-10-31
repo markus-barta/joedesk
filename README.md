@@ -2357,38 +2357,46 @@ interaction, one announcement per transition, silent ticks, and recovery.
 Full and browser validation runs on agm2 CI; local work runs only syntax,
 the small unit file, and `git diff --check`.
 
-Expired browser sign-in freezes the board at its last successful render. One
-banner above the board says **Signed out — reload to sign in** and offers Reload.
+Expired browser sign-in freezes the board at its last successful render. The
+banner says **Signed out — data as of HH:MM:SS (Vienna), not updating — reload to
+sign in**, using the last rendered data document’s timestamp, and offers Reload.
 A visible **Last known — signed out** label describes the main region through
-`aria-describedby`. Figures, comparisons, captions, diagnostic details, form
-values and hidden content remain intact. Ages, wall times, market countdowns
-and freshness lights stop advancing; frozen timer displays add “last known”.
-Reading and scrolling remain available; controls resume after sign-in recovers.
+`aria-describedby`. Each price/value section also says **Stale · not updating**;
+values are muted and the board is desaturated. Freshness dots/halos disappear,
+animation classes are removed, and no clocks, ages or countdowns advance.
+Figures, comparisons, diagnostic text and draft form values stay intact.
 
-The shared page/worker reader recognizes SSO 302/303 redirects, opaque and
+The entire board is `inert`, with the banner outside it. Expiry closes native
+modals, chart inspectors and popovers so Reload remains reachable. Pending
+chart touch/long-press timers, animation frames and tip dismissals are cancelled.
+Capture guards also reject synthetic board input, including hover, focus,
+keyboard, wheel and Safari gestures. System appearance changes defer repainting
+until recovery. Address changes retain the latest route and follow it after
+recovery.
+
+The shared page/worker transport recognizes SSO 302/303 redirects, opaque and
 followed cross-origin redirects, 401/403, and successful HTML instead of JSON.
-Auth responses are rejected before store acceptance. While signed out, later
-failures (including 503) and successful responses from unrelated endpoints cannot
-alter the retained board. Each blocked endpoint must answer successfully before
-the session recovers. Feed selections and their presentation clock remain the
-same object/time throughout the freeze. History workers pause acceptance too;
-recovery invalidates their unchanged-response hints so ignored columns are sent
-again. Account history and board settings share this boundary. Saving account
-start remains guarded even though its last displayed value stays available.
-A proxy’s 5xx HTML, invalid JSON, contract failures, missing routes and network
-failures retain their existing behavior when the session is authenticated.
+Auth responses are rejected before store acceptance. Fleet submission uses this
+same boundary and freezes before any submission-error rendering; account-start
+writes stay guarded. Every read continues polling while signed out, including
+account history independently of the active page and the fleet action log.
 
-`presentation.js` now controls this single board freeze. It no longer rewrites
-per-surface reasons or converts retained cells into broken cells. The shell
-rejects renders during the freeze, including scheduled ticks; asynchronous
-account chart and settings updates, pending saves, tips and toast timeouts use
-the same session guard. Recovery removes the marking and resumes the normal selectors, renderers and timers.
+Any authenticated success can initiate recovery. The shell waits for pending
+reads, refreshes every feed plus account history and board settings, then
+renders fresh data synchronously before removing the stale markings or inert
+state. Auth, transport or document-validation failures keep the board frozen
+for a later attempt. History/results workers keep the first recovering document
+and invalidate unchanged-response hints for complete refreshes. The displayed
+selection and server-anchored clock stay fixed until recovery commits. A proxy’s
+5xx HTML, invalid JSON, contract failures, missing routes and network failures
+retain their existing behavior outside sign-out.
 
 `test/signed-out-pages.mjs` uses the actual page renderers and `index.html` at
 390 and 1440 px, with populated account history, dirty Settings, Results and
 History events. Its oracle serializes the entire retained body, including hidden
 markup, all attributes, titles, accessible names and live form properties. Only
-the two documented last-known marking attributes normalize. Equality is exact;
+the explicit board/section freeze attributes and saved animation-class marking
+normalize. Transient controls are audited separately; retained data equality is exact;
 there is no phrase denylist or selected-value allowlist. The matrix covers all
 37 reasons, nine auth shapes, four pages, 401→503 retention, elapsed time and
 recovery. Named tests retain the earlier review reproducers, including session
@@ -2396,6 +2404,9 @@ bars, position counts, the account’s 1M change and Since start comparison,
 phone learning and aggregate kept worth. Oracle mutation tests reject arbitrary
 new wording, changed inputs and vanished values. The historical non-auth page
 hashes from `a941776` and builder hashes from `fa6db1d` remain unchanged.
+`node --test test/signed-out-fix5.mjs` adds named inert/modal, hover/focus/key,
+pre-expiry timer, fleet-write, worker-document, route, appearance and recovery
+regressions, including validated snapshots with a recorded server rejection.
 
 `TZ=UTC node scripts/browser/signed-out-pages.mjs` runs the same whole-document
 oracle on the actual app in one headless browser, using synthetic loopback reads.
@@ -2403,7 +2414,9 @@ It exercises every native auth response shape on every protected transport,
 including workers, plus opaque redirects independently on each endpoint. A
 controlled monotonic clock invokes the actual registered page timer callbacks
 125 seconds later to cross minute boundaries without suspending worker event
-loops. Recovery resumes rendering. Followed cross-origin redirects, which native
+loops. The browser audit also exercises chart hover/focus/keys/wheel, an open
+native modal, Reload reachability, per-section stale marks and muted values,
+removed animation classes, queued routes and refresh-before-unmark ordering. Followed cross-origin redirects, which native
 `redirect: manual` prevents, are covered at the shared transport boundary in
 unit tests. CI runs this under its existing browser lock; `finally` closes the
 owned browser and fixture server. P3’s `signed-out` group also checks the full

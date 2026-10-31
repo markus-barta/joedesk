@@ -6,11 +6,12 @@ import { SCREENS, parseRoute, routeHash, sameRoute, historyStep, linkRoute, onRo
 import { $, $$, icon, initTips, isPhone, trapDialogs, fromPointer, patch, fitStatusLine } from './ui.js';
 import { createFeed } from './feed.js';
 import { boardSession } from './transport.js';
+import { refreshBoardSettings } from './board-settings.js';
 import { createBoardFreeze } from './presentation.js';
 import { createObservedEvents } from './events.js';
-import { renderDesk, headerHealth, healthPop, forgetCharts, toggleDeskDisclosure, initBarTaps } from './desk.js';
-import { initAccount, renderAccount } from './account.js';
-import { renderHistory, historyChart, HS, historyPreset, toggleFollow, initHistoryInput, initHistoryControls, historyQuery, readHistoryRoute } from './history.js';
+import { renderDesk, headerHealth, healthPop, forgetCharts, toggleDeskDisclosure, initBarTaps, cancelBarInteractions } from './desk.js';
+import { initAccount, renderAccount, refreshAccountHistory, pollAccountHistory, accountHistoryIdle, cancelInteractions as cancelAccountInteractions } from './account.js';
+import { renderHistory, historyChart, HS, historyPreset, toggleFollow, initHistoryInput, initHistoryControls, historyQuery, readHistoryRoute, cancelInteractions as cancelHistoryInteractions } from './history.js';
 import { renderResults, RS, stepPeriod, choosePeriod, chooseDesk, selectDay, showMonth, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText, requestResultsRoute, resultsUrl } from './results.js';
 import { boardHealthPresentation } from './health.js';
 import { sinceStarts } from './performance.js';
@@ -33,16 +34,17 @@ if (!isCanonicalJoeHost(location.hostname)) {
 }
 
 function start() {
-  const freeze = createBoardFreeze(document, boardSession);
+  const freeze = createBoardFreeze(document, boardSession, { cancelInteractions: () => {
+    cancelAccountInteractions(); cancelHistoryInteractions(); cancelBarInteractions(); tips.cancel();
+  } });
+  let recoveringRender = false, queuedRoute = null;
   // Keep reading/scrolling available, but a frozen board cannot edit a draft,
   // open a live explanation or navigate into a renderer until sign-in recovers.
   const blockFrozenInput = event => {
     if (!freeze.frozen() || !event.target.closest?.('#app')) return;
-    if (event.type === 'keydown' && event.key === 'Tab') return;
-    if (event.type === 'keydown' && !event.target.closest('button, input, select, textarea, a, [role="slider"]')) return;
     event.preventDefault(); event.stopImmediatePropagation();
   };
-  for (const type of ['click', 'beforeinput', 'paste', 'cut', 'drop', 'input', 'change', 'submit', 'pointerdown', 'pointerover', 'focusin', 'keydown'])
+  for (const type of ['click', 'beforeinput', 'paste', 'cut', 'drop', 'input', 'change', 'submit', 'pointerdown', 'pointerup', 'pointercancel', 'pointermove', 'pointerover', 'pointerout', 'pointerleave', 'focus', 'blur', 'focusin', 'focusout', 'wheel', 'gesturestart', 'gesturechange', 'gestureend', 'keydown', 'keyup'])
     document.addEventListener(type, blockFrozenInput, true);
   // The header keeps one row. While its last control, the theme button, does
   // not fit, add the next step (app.css: the wordmark goes, the nav drops its
@@ -71,6 +73,7 @@ function start() {
   fitHeader();
   trapDialogs();
   initAccount();
+  setInterval(pollAccountHistory, 15000);
   const events = createObservedEvents();
   let lastData = null, frame = 0, pending = null, dirtyHistory = true;
   const feed = createFeed(kind => {
@@ -93,12 +96,13 @@ function start() {
 
   function guard(name, fn) {
     try { return fn(); } catch (error) {
+      renderFailed = true;
       console.error(`render ${name} failed`, error);
       return null;
     }
   }
 
-  let announcedStatus = null;
+  let announcedStatus = null, renderFailed = false;
   function renderHeader(ctx) {
     const health = boardHealthPresentation(ctx.states, ctx.feeds, ctx.now);
     const head = headerHealth(ctx, health);
@@ -130,7 +134,8 @@ function start() {
 
   function render(reason) {
     frame = 0;
-    if (freeze.sync()) { root.dataset.ready = '1'; return; }
+    if (freeze.sync() && !recoveringRender) { root.dataset.ready = '1'; return; }
+    renderFailed = false;
     const started = performance.now();
     const ctx = context();
     const data = ctx.feeds.data?.value ?? null;
@@ -154,6 +159,8 @@ function start() {
       if (timings.length > 200) timings.shift();
     }
     if (feed.settled()) root.dataset.ready = '1';
+    if (!renderFailed) freeze.rendered(ctx.feeds.data?.value?.generatedAt ?? ctx.now);
+    return !renderFailed;
   }
 
   function schedule(reason = 'tick') {
@@ -195,7 +202,7 @@ function start() {
     return true;
   });
   function go(next, { anchor = null, query = '', push = false, scroll = 0 } = {}) {
-    if (freeze.frozen()) return;
+    if (freeze.frozen() && !recoveringRender) return;
     if (!SCREENS.includes(next)) { next = 'desk'; anchor = null; query = ''; }
     // The reader's own way onto the screen already shown (its nav button, the
     // gear, a bare link or anchor) asks for that screen as it is: it keeps the
@@ -220,9 +227,10 @@ function start() {
     dirtyHistory = true; forgetCharts(); forgetResults();
     if (next === 'settings') feed.refreshActions();
     if (!asIs) guard('route', () => applyRoute(target));
-    render('screen');
+    const rendered = render('screen');
     if (next === 'settings' && SETTINGS_SECTIONS.some(s => s.id === anchor)) { places.abandon(); showSection(anchor); }
     else if (anchor) { places.abandon(); document.getElementById(anchor)?.scrollIntoView({ block: 'start' }); } else places.arrive(scroll);
+    return rendered;
   }
 
   // The board details are a dialog: opening moves focus into it, Tab stays
@@ -368,6 +376,7 @@ function start() {
   // Back and Forward fire both events; the second finds the entry taken up.
   const follow = () => {
     const moved = places.step(), next = parseRoute(location.hash);
+    if (freeze.frozen()) { queuedRoute = { ...next, scroll: places.saved() }; return; }
     if (!moved && next.known && !next.anchor && sameRoute(next, shown)) return;
     go(next.screen, { anchor: next.anchor, query: next.query, scroll: places.saved() });
   };
@@ -376,7 +385,7 @@ function start() {
   let resize = 0;
   addEventListener('resize', () => { cancelAnimationFrame(resize); resize = requestAnimationFrame(() => { forgetCharts(); forgetResults(); dirtyHistory = true; render('resize'); }); });
   // With System chosen the page follows the OS live (CSS); the header button's words follow too.
-  matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { syncThemeButton(); schedule('theme'); });
+  matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { if (!boardSession.signedOut()) { syncThemeButton(); schedule('theme'); } });
 
   // Numbers never part from their units, in static and rendered text alike.
   const fixUnits = (node, phone) => {
@@ -406,5 +415,18 @@ function start() {
   places.step();
   const first = parseRoute(location.hash || '#desk');
   go(first.screen, { anchor: first.anchor, query: first.query, scroll: places.saved() });
+  boardSession.coordinateRecovery(async () => {
+    await Promise.all([feed.whenIdle(), accountHistoryIdle()]);
+    await Promise.all([feed.refresh(), feed.refreshActions(), refreshAccountHistory(), refreshBoardSettings()]);
+    boardSession.finishRecovery(() => {
+      recoveringRender = true;
+      try {
+        syncThemeButton();
+        forgetCharts(); forgetResults(); dirtyHistory = true;
+        const route = queuedRoute; queuedRoute = null;
+        return route ? go(route.screen, route) : render('recovery');
+      } finally { recoveringRender = false; }
+    });
+  });
   feed.start();
 }
