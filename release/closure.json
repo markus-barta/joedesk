@@ -109,13 +109,13 @@
     },
     {
       "path": "public/joe/account-worker.js",
-      "size": 3256,
-      "sha256": "93b51275f9bfc147b3ef8d3fa632723867252f5a218ec6f6aa21d166eedaaa76"
+      "size": 3343,
+      "sha256": "9743b7f81ca24eede99d3d02d73c8c73e5efe3092eea023f3841107a0a85217c"
     },
     {
       "path": "public/joe/account.js",
-      "size": 67667,
-      "sha256": "fccd58872fdb4fd09b1df8bf8ae0de040ad37af60983476e190eb690709fb5e6"
+      "size": 67543,
+      "sha256": "0e071f2f68f9e8c5ca9967a67b8c662c00fb913456481caa1c852dfc94009501"
     },
     {
       "path": "public/joe/app.css",
@@ -124,8 +124,8 @@
     },
     {
       "path": "public/joe/app.js",
-      "size": 24455,
-      "sha256": "f6978d702c71a70018cedb230402b973fc5cf75a4374d2dd0d0699af3e5f3999"
+      "size": 23806,
+      "sha256": "722fbf182ced65777969636a560fce104a0dab3469263fb70ed7f7f99930714c"
     },
     {
       "path": "public/joe/board-settings-validation.js",
@@ -134,8 +134,8 @@
     },
     {
       "path": "public/joe/board-settings-write.js",
-      "size": 4143,
-      "sha256": "a9858e2ae3e9ad3cbfadb9e2faf842f69f726ab4a6e360bb32380d2a688d2ac6"
+      "size": 3955,
+      "sha256": "74d61482b805b779b94d3ec9b2dd4c50e2381524b9dbb234fe6de67d7096ca01"
     },
     {
       "path": "public/joe/board-settings.js",
@@ -169,8 +169,8 @@
     },
     {
       "path": "public/joe/feed.js",
-      "size": 17329,
-      "sha256": "07b7475ec8481603a333d0c33c62cdc6a4921d75ef53337d4969bf9089d38b4e"
+      "size": 15456,
+      "sha256": "24910cc9d631a49d3d35766d54ccd20f158d7b6201f12e82b4c34628f2f762cc"
     },
     {
       "path": "public/joe/fleet-config-actions.schema.json",
@@ -214,8 +214,8 @@
     },
     {
       "path": "public/joe/history-worker.js",
-      "size": 6924,
-      "sha256": "ca4624937628701850e405d250b910c877883841ca3761f156cee88606e09898"
+      "size": 6615,
+      "sha256": "7325052de07bd921dba4052ee06ae121a9cba39630da6e551553774efe4f0202"
     },
     {
       "path": "public/joe/history.js",
@@ -244,8 +244,8 @@
     },
     {
       "path": "public/joe/presentation.js",
-      "size": 4101,
-      "sha256": "a210bc2682f42f5131d615209de9b39365d7965a415106a3966b3c29dcc931e3"
+      "size": 3299,
+      "sha256": "12ea29ea6d7cee965a4020fcc8ed93e948d4628d9d5a48896a20322e9596610e"
     },
     {
       "path": "public/joe/results-model.js",
@@ -254,8 +254,8 @@
     },
     {
       "path": "public/joe/results.js",
-      "size": 59051,
-      "sha256": "fcc1d0fca045a58fd2178a2596fcab2df4d2e1f71eaae605af1ac7e6f4660026"
+      "size": 59461,
+      "sha256": "3b1c0c9b64fb7850d6eddb4a12e4c786848e673dc96ebe41f5718684aa9656ff"
     },
     {
       "path": "public/joe/route.js",
@@ -264,8 +264,8 @@
     },
     {
       "path": "public/joe/settings-model.js",
-      "size": 36753,
-      "sha256": "3ea52682fa2e7e5e780e7695537254cfda9650ee5542b23709e38f6eb5007cca"
+      "size": 36764,
+      "sha256": "4b51a1683142cd17bf2942c2dd66d4d041ae19fb0776e580925715ed3aba7d0c"
     },
     {
       "path": "public/joe/settings.js",
@@ -284,8 +284,8 @@
     },
     {
       "path": "public/joe/transport.js",
-      "size": 7220,
-      "sha256": "9164c6847b979bf4e240446c1dfa3bdc07d56476d476aa83ff477a85b4329b2c"
+      "size": 7724,
+      "sha256": "7e74bd43209d1e369de7ba7aff96fcf4fc83bcfe7793dd169f993a12d28cbec4"
     },
     {
       "path": "public/joe/ui.js",
