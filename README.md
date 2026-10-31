@@ -2405,6 +2405,11 @@ Ordinary feed and account-history polling pauses at expiry; only the probe
 continues automatically. The probe never accepts data into any feed or changes
 a frozen mark.
 
+A document entering the browser's back/forward cache pauses its probe timer.
+Restoring it re-arms a signed-out probe at its retained backoff, keeping the
+frozen board and reload guard intact. Leaving without caching permanently stops
+the probe; a late response while paused or stopped cannot trigger a reload.
+
 The probe records reload timestamps in `sessionStorage` under
 `joe-auth-probe-reloads-v1`: at most three automatic reloads per rolling ten
 minutes. The key is host/tab scoped, holds only timestamps, and is necessary to
@@ -2446,6 +2451,9 @@ Continuity auth/errors, all-503 and all-200). Every step remains frozen.
 its validator and origin boundary, 30/60/120-second backoff, a single pending
 attempt, lifecycle disposal, rolling reload guard, storage denial and manual
 Reload despite an exhausted automatic guard. No feed body proves in-place recovery.
+`test/signed-out-fix16.mjs` executes the app's probe lifecycle wiring for cached
+restores before and after expiry, repeated restores, late reads, permanent
+disposal, retained backoff and both reload-guard storage paths (JOED-175).
 Account history still validates through its own typed account validator, in its
 reader rather than in the probe classifier.
 
