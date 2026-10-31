@@ -22,6 +22,7 @@ function context(seconds = 9) {
   return { feeds, states: panelStates(feeds, now), now };
 }
 const cases = [
+  ['yellow', 'signed-out', 'Signed out — reload to sign in'],
   ['green', 'board_ok', 'Live · updated 9 s ago'],
   ['yellow', 'values_not_exact', 'Desk values are not exact'],
   ['yellow', 'snapshot_stale', 'Updates are late'],

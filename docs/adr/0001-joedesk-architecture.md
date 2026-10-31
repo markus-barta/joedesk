@@ -382,6 +382,17 @@ or successful live verification. Browser failures retain last-good and show
 why; refresh never invents a new producer receipt. Cookie/session policy stays
 with OPS; the board cannot repair an expired SSO session.
 
+JOED-173 fix 15: a native auth refusal freezes the current document until a
+fresh page load; feed responses never resume it in place. Manual Reload calls
+`location.reload()`. A single protected `/joe/state.json` probe uses the normal
+transport and body validator after 30 seconds, backing off to 60 then 120 seconds.
+Only validated same-origin 2xx may request a reload; every other outcome leaves
+the display frozen. A host/tab-scoped sessionStorage timestamp list caps automatic
+reloads at three per rolling ten minutes; unavailable storage permits one per
+page lifetime. At the limit probing stops until a manual reload, which is always
+available. This replaces per-endpoint recovery evidence and coordinated in-place
+refresh/unmark; normal sequence/receipt rejection and last-good reasons remain.
+
 Optional OPS proposal: provision a separate read-only machine identity for
 agent data reads through a narrowly scoped route. OPS owns issuance, storage,
 rotation, redaction, proxy header stripping and negative authorization tests.
@@ -1628,6 +1639,30 @@ Previous and last deployed release are sequence 40 (`261030085000.0.0`), main
 Earlier release-preparation sections describe their reservation-time state.
 
 - Switch Results views faster while keeping rows readable.
+
+Reseal the integrated runtime closure. Contracts revision 10 and contract set
+`3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350`, the approved
+shared presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`, legacy
+anchor and historical artifacts remain unchanged. The saved presentation config
+and templates match the local approved source; the offline bundle remains
+active in footer/About. This local candidate grants no publication or deployment
+approval. The coordinator owns the cross-family gate, publication and live verification.
+
+## Release 42 candidate (JOED-174)
+
+Reserve `261031052151.0.0` at `2026-10-31T05:21:51Z` as `inspr-calver-3`, stable sequence 42,
+for the signed-out board (JOED-173): retain the last good figures, clearly mark
+them frozen, and say to reload and sign in when the browser session expires.
+
+Previous and last deployed release are sequence 41 (`261030154842.0.0`), main
+`daa49125c26af7fd4e19855327fd01f5eabf23d5` (JOED-172), live on csb0 since
+`2026-10-31T05:04:23Z`, adopted at `2026-10-31T05:06:11Z` as recorded in
+`adoption/261030154842.0.0.json`. Reuse disposition `deployed` and
+`deployed: true`; adoption is evidenced by that existing record. About orders
+42, 41, 40, 39, 38, 37 through 26, then legacy; release 41 retains its original entry.
+Earlier release-preparation sections describe their reservation-time state.
+
+- When your sign-in expires, keep clearly frozen figures and reload to sign in again.
 
 Reseal the integrated runtime closure. Contracts revision 10 and contract set
 `3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350`, the approved

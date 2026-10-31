@@ -2,14 +2,16 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261030154842.0.0` (`inspr-calver-3`, stable sequence 41), reserved once at `2026-10-30T15:48:42Z` for faster Results switching (JOED-170; release [JOED-172](https://aeon.barta.cm/p/JOED/JOED-172)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
+**Candidate version:** `261031052151.0.0` (`inspr-calver-3`, stable sequence 42), reserved once at `2026-10-31T05:21:51Z` for clearly frozen signed-out figures and a reload/sign-in notice (JOED-173; release [JOED-174](https://aeon.barta.cm/p/JOED/JOED-174)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
 
-**Last deployed release:** `inspr-calver-3` / `261030085000.0.0` / sequence 40,
-published on `main` at `2ad813216785f7b6fd4b506a26b9a7bc29d72ebc` under JOED-171,
-live on csb0 since `2026-10-30T11:34:29Z` and adopted at `2026-10-30T11:35:36Z`
-(`adoption/261030085000.0.0.json`). Both `previous_release` and
-`last_deployed_release` record sequence 40; its disposition is `deployed` with
-`deployed: true`. Sequence 39 (`261029192345.0.0`) was previously deployed at
+**Last deployed release:** `inspr-calver-3` / `261030154842.0.0` / sequence 41,
+published on `main` at `daa49125c26af7fd4e19855327fd01f5eabf23d5` under JOED-172,
+live on csb0 since `2026-10-31T05:04:23Z` and adopted at `2026-10-31T05:06:11Z`
+(`adoption/261030154842.0.0.json`). Both `previous_release` and
+`last_deployed_release` record sequence 41; its disposition is `deployed` with
+`deployed: true`. Sequence 40 (`261030085000.0.0`) was previously deployed at
+`2026-10-30T11:34:29Z` and adopted at `2026-10-30T11:35:36Z` (JOED-171).
+Sequence 39 (`261029192345.0.0`) was previously deployed at
 `2026-10-30T08:44:03Z` and adopted at `2026-10-30T08:46:01Z` (JOED-159).
 Sequence 38 (`261029075623.0.0`) was published but never
 deployed, retaining its historical `superseded-before-deployment` disposition.
@@ -39,7 +41,7 @@ published on `main` at `dafe7909af04ba5ded3c4b55504ea10970e07e4d`; JOED-41
 records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
-`previous_release` from `last_deployed_release`. About lists the current build, deployed and adopted sequences 40 and 39, published sequence 38,
+`previous_release` from `last_deployed_release`. About lists the current build, deployed and adopted sequences 41, 40 and 39, published sequence 38,
 deployed sequences 37, 36, 35, 34, 33, 32, 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
@@ -96,7 +98,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261030154842.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261031052151.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -741,7 +743,7 @@ a screenshot alone.
 | `period-partial-day-hints` | results.js: renderHero, renderCalendar; results-model.js: countPartialDays | `period-hint/partial/1440/light` |
 | `trade-open-close-and-held` | results.js: held, tradeRows; format.js: timeHM | `trade-amount/rows/1440/light` |
 | `open-position-today-time` | results.js: dayContent; results-model.js: viennaDate | `partial-days/desk-filtered-reasoned/1440/light` |
-| `receipt-ingress-clock` | feed.js: serverClock, createFeed; history-worker.js: serverClock, clockNow | `ingress/live-stale-recovery/1440/light` |
+| `receipt-ingress-clock` | transport.js: serverClock, readJSON; feed.js: createFeed; history-worker.js: clockNow | `ingress/live-stale-recovery/1440/light` |
 | `stale-retained-ago` | results.js: renderStatus; format.js: age; ui.js: ageSpan | `states/stale-retained/1440/light` |
 | `worker-date-indexing` | history-worker.js: pollResults; results-model.js: indexResults, viennaDate | `ingress/live-stale-recovery/1440/light` |
 | `today-rollover-retained-receipt` | results.js: resultsToday, renderResults; results-model.js: addDays | `partial-days/retained-midnight/1440/light` |
@@ -2357,6 +2359,139 @@ interaction, one announcement per transition, silent ticks, and recovery.
 Full and browser validation runs on agm2 CI; local work runs only syntax,
 the small unit file, and `git diff --check`.
 
+Expired browser sign-in freezes the board at its last successful render. The
+banner says **Signed out — data as of HH:MM:SS (Vienna), not updating — reload to
+sign in**, using the last rendered data document’s timestamp, and offers Reload.
+A visible **Last known — signed out** label describes the main region through
+`aria-describedby`. Each price/value section and every section header, including
+collapsed Positions and Kept holdings, says **Stale · not updating**. The
+calendar month total is marked and muted too. Values are muted and the board
+is desaturated. Freshness dots/halos disappear,
+animation classes are removed, and no clocks, ages or countdowns advance.
+Figures, comparisons, diagnostic text and draft form values stay intact.
+If Results has no accepted record at expiry, its empty-state sentence instead
+explains **Results are unavailable: sign-in expired — reload.** once, as the
+board freezes. Dashes remain dashes; an existing Results record and its sentence
+are retained exactly.
+
+The entire board is `inert`, with the banner outside it. Expiry closes native
+modals, chart inspectors and popovers so Reload remains reachable. Pending
+chart touch/long-press timers, animation frames, tip dismissals and version-copy
+feedback are cancelled. Late clipboard results cannot create fallback UI.
+Capture guards also reject synthetic board input, including hover, focus,
+keyboard, wheel and Safari gestures. System appearance changes defer repainting
+until a fresh page load. Address changes keep their URL, which the fresh
+page reads after reload.
+
+The shared page/worker transport recognizes SSO 302/303 redirects, opaque and
+401/403, and successful HTML instead of JSON. Followed cross-origin responses
+are discarded without supplying authentication evidence.
+Auth responses are rejected before store acceptance. Fleet submission uses this
+same boundary and freezes before any submission-error rendering; account-start
+writes stay guarded. Writes in flight at expiry are abandoned for the UI;
+late replies cannot replace the frozen baseline or show a success/error message.
+Board-settings reads across expiry are ignored, including valid responses.
+
+Signed-out never ends in place. Every feed response arriving after expiry,
+including an all-200 refresh, is ignored for display and recovery. Only a fresh
+page load can become live: the banner's Reload control calls `location.reload()`,
+or one auth probe may request the same reload. While signed out, the probe reads
+only protected `/joe/state.json` through the normal JSON transport and its
+validator, first after 30 seconds, then after 60 seconds and at most every 120
+seconds on failure. Only a same-origin 2xx with a valid endpoint body triggers
+`location.reload()`. Auth failures, redirects to sign-in, HTML sign-in pages,
+5xx, 404, network failures and invalid bodies keep the old document frozen.
+Ordinary feed and account-history polling pauses at expiry; only the probe
+continues automatically. The probe never accepts data into any feed or changes
+a frozen mark.
+
+The probe records reload timestamps in `sessionStorage` under
+`joe-auth-probe-reloads-v1`: at most three automatic reloads per rolling ten
+minutes. The key is host/tab scoped, holds only timestamps, and is necessary to
+prevent an authentication reload loop; entries outside ten minutes are dropped
+on the next probe check. No identifier or analytics is stored or sent. All
+storage access is guarded. If storage access fails, at most one automatic reload
+is allowed in that page lifetime. At the limit the probe stops for that document;
+manual Reload always remains available. A reload that finds expired authentication
+creates a new frozen page rather than reviving the prior display.
+
+`test/signed-out-pages.mjs` uses the actual page renderers and `index.html` at
+390 and 1440 px, with populated account history, dirty Settings, Results and
+History events. Its oracle serializes the entire retained body, including hidden
+markup, all attributes, titles, accessible names and live form properties. Only
+the explicit board/section freeze attributes and saved animation-class marking
+normalize. Transient controls are audited separately; retained data equality is exact;
+there is no phrase denylist or selected-value allowlist. The matrix covers all
+37 reasons, eight native auth shapes plus followed cross-origin responses,
+four pages, 401→503 retention, elapsed time and successful-feed freeze retention.
+Named tests retain the earlier review reproducers, including session
+bars, position counts, the account’s 1M change and Since start comparison,
+phone learning and aggregate kept worth. Oracle mutation tests reject arbitrary
+new wording, changed inputs and vanished values. The historical non-auth page
+hashes from `a941776` and builder hashes from `fa6db1d` remain unchanged.
+`test/signed-out-fix5.mjs` and `test/signed-out-fix6.mjs` retain inert/modal,
+hover/focus/key, pre-expiry timer, version clipboard, collapsed-section,
+abandoned-write, board-settings GET and frozen account-history regressions.
+`test/signed-out-fix7.mjs` keeps normal worker/fallback regression rejection,
+cold validated last-good bodies and reasons, equal-document re-serves, and
+the page's ordering floor after worker failure. While signed out every response
+preserves the prior selection, store and anchored time. The per-endpoint recovery
+evidence map, coordinated refresh, `acceptRecovery`, and in-place unmark paths
+have been removed from the transport, feed, worker and shell.
+
+`test/signed-out-fix14.mjs` now runs one real-worker/fallback parity table of the
+earlier review sequences (including both response orders, History beside
+Continuity auth/errors, all-503 and all-200). Every step remains frozen.
+`test/signed-out-fix15.mjs` tests the probe with real transport responses,
+its validator and origin boundary, 30/60/120-second backoff, a single pending
+attempt, lifecycle disposal, rolling reload guard, storage denial and manual
+Reload despite an exhausted automatic guard. No feed body proves in-place recovery.
+Account history still validates through its own typed account validator, in its
+reader rather than in the probe classifier.
+
+The fix 12 regression checks normal identical Results polling in the actual
+worker and main-thread fallback: receipt age reaches five minutes, a failed
+refresh retains that age and its existing wording, and neither sequence nor
+receipt may go backwards. The P4 stale fixture advances server time while
+re-serving one fixed record and refreshing its independent money input; it
+does not manufacture an older receipt on the second read. P3's signed-out fixture
+now checks that successful feed responses leave the old page frozen and a fresh
+page load resumes rendering. `scripts/browser/signed-out-pages.mjs` keeps all
+2,496 matrix cases and changes each resume assertion to observe a probe-triggered
+page reload and a live new document, including the Results-503 case with its cold
+unavailable state. It also exercises the real manual Reload control. All
+seven CI browser phases run in the same locked shell; signed-out checks retain
+failure while Results and Settings still run, and preview phases stay gated.
+
+The complete non-auth page snapshot fixes the footer's release coordinate to
+`261030154842.0.0`, the value rendered by `a941776`, as a harness input.
+Its hashes remain unchanged; the version element and surrounding text, labels
+and titles are still compared. The fix 11 regression renders a later release
+coordinate and verifies that changing a footer label still changes the oracle.
+The reported New York failure came from the integration shell's newer release
+coordinate, rather than a machine-zone-dependent date or time.
+
+The historical fixture also fixes its Mac platform input: its chart hint says
+`⌘-scroll`, while a real Linux reader gets `Ctrl-scroll`. The fix 12 regression
+runs that fixture from both host platforms and verifies that changing the
+modifier's rendered text still fails the exact comparison. Product platform
+detection and the stored hashes stay unchanged.
+
+`TZ=UTC node scripts/browser/signed-out-pages.mjs` runs the same whole-document
+oracle on the actual app in one headless browser, using synthetic loopback reads.
+It exercises every native auth response shape on every protected transport,
+including workers, plus opaque redirects independently on each endpoint. A
+controlled monotonic clock invokes the actual registered page timer callbacks
+125 seconds later to cross minute boundaries without suspending worker event
+loops. The browser audit also exercises chart hover/focus/keys/wheel, an open
+native modal, Reload reachability, per-section stale marks and muted values,
+removed animation classes, queued routes and refresh-before-unmark ordering. Followed cross-origin redirects, which native
+`redirect: manual` prevents, are covered at the shared transport boundary in
+unit tests. CI runs this under its existing browser lock; `finally` closes the
+owned browser and fixture server. P3’s `signed-out` group also checks the full
+retained document, a real Reload and recovery at its standard widths/themes:
+`JOED_P3_ONLY=signed-out node scripts/browser-p3.mjs`.
+
 The following paragraph records the earlier header presentation and its
 historical evidence; JOED-70 supersedes its header wording and layout.
 
@@ -2784,6 +2919,30 @@ Previous and last deployed release are sequence 40 (`261030085000.0.0`), main
 Earlier release-preparation sections describe their reservation-time state.
 
 - Switch Results views faster while keeping rows readable.
+
+Reseal the integrated runtime closure. Contracts revision 10 and contract set
+`3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350`, the approved
+shared presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`, legacy
+anchor and historical artifacts remain unchanged. The saved presentation config
+and templates match the local approved source; the offline bundle remains
+active in footer/About. This local candidate grants no publication or deployment
+approval. The coordinator owns the cross-family gate, publication and live verification.
+
+## Release 42 candidate (JOED-174)
+
+Reserve `261031052151.0.0` at `2026-10-31T05:21:51Z` as `inspr-calver-3`, stable sequence 42,
+for the signed-out board (JOED-173): retain the last good figures, clearly mark
+them frozen, and say to reload and sign in when the browser session expires.
+
+Previous and last deployed release are sequence 41 (`261030154842.0.0`), main
+`daa49125c26af7fd4e19855327fd01f5eabf23d5` (JOED-172), live on csb0 since
+`2026-10-31T05:04:23Z`, adopted at `2026-10-31T05:06:11Z` as recorded in
+`adoption/261030154842.0.0.json`. Reuse disposition `deployed` and
+`deployed: true`; adoption is evidenced by that existing record. About orders
+42, 41, 40, 39, 38, 37 through 26, then legacy; release 41 retains its original entry.
+Earlier release-preparation sections describe their reservation-time state.
+
+- When your sign-in expires, keep clearly frozen figures and reload to sign in again.
 
 Reseal the integrated runtime closure. Contracts revision 10 and contract set
 `3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350`, the approved

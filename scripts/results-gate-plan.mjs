@@ -71,7 +71,7 @@ export const P4_DATE_PATHS = [
   { name: 'period-partial-day-hints', source: 'results.js: renderHero, renderCalendar; results-model.js: countPartialDays', representative: 'period-hint/partial/1440/light' },
   { name: 'trade-open-close-and-held', source: 'results.js: held, tradeRows; format.js: timeHM', representative: 'trade-amount/rows/1440/light' },
   { name: 'open-position-today-time', source: 'results.js: dayContent; results-model.js: viennaDate', representative: 'partial-days/desk-filtered-reasoned/1440/light' },
-  { name: 'receipt-ingress-clock', source: 'feed.js: serverClock, createFeed; history-worker.js: serverClock, clockNow', representative: 'ingress/live-stale-recovery/1440/light' },
+  { name: 'receipt-ingress-clock', source: 'transport.js: serverClock, readJSON; feed.js: createFeed; history-worker.js: clockNow', representative: 'ingress/live-stale-recovery/1440/light' },
   { name: 'stale-retained-ago', source: 'results.js: renderStatus; format.js: age; ui.js: ageSpan', representative: 'states/stale-retained/1440/light' },
   { name: 'worker-date-indexing', source: 'history-worker.js: pollResults; results-model.js: indexResults, viennaDate', representative: 'ingress/live-stale-recovery/1440/light' },
   { name: 'today-rollover-retained-receipt', source: 'results.js: resultsToday, renderResults; results-model.js: addDays', representative: 'partial-days/retained-midnight/1440/light' },

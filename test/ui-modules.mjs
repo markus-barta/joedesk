@@ -19,6 +19,8 @@ import './theme-geometry.mjs';
 import './theme-copy.mjs';
 import './board-sweep-plan.mjs';
 import './feed-robust.mjs';
+import './signed-out-presentation.mjs';
+import './signed-out-pages.mjs';
 import './position-claims.mjs';
 import './history-view.mjs';
 import './header-nav.mjs';
@@ -735,7 +737,7 @@ test('health: every P1 fixture lands on today’s light, label and plain reason'
     'a-gateway-up-but-dead': ['red', 'gateway_down', 'Needs fix'],
     'c-old-producer-image': ['red', 'feed_disconnected', 'Needs fix'],
     'unknown-schema': ['red', 'feed_disconnected', 'Needs fix'],
-    'g-expired-sso': ['red', 'feed_disconnected', 'Needs fix'],
+    'g-expired-sso': ['yellow', 'signed-out', 'Signed out'],
     'd-routing-stub': ['red', 'feed_disconnected', 'Needs fix'],
   };
   for (const [id, [tone, reason, label]] of Object.entries(expect)) {
@@ -1364,12 +1366,17 @@ test('cold start: without the server clock every panel still shows its own state
   const json = (status, body, headers = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
   try {
     for (const [answer, reason] of [[() => json(401, { ok: false, reason: 'auth_required' }), 'auth_required'], [() => json(404, { ok: false, error: 'not found' }), 'route_not_found'],
-      [() => json(503, { ok: false }), 'refresh_failed'], [() => { throw new TypeError('offline'); }, 'refresh_failed'], [() => new Response('<html>', { status: 200 }), 'refresh_failed']]) {
+      [() => json(503, { ok: false }), 'refresh_failed'], [() => { throw new TypeError('offline'); }, 'refresh_failed'], [() => new Response('<html>', { status: 200 }), 'auth_required']]) {
       globalThis.fetch = async () => answer();
       const feed = createFeed(() => {});
       await feed.refresh();
       const s = feed.select();
       assert.equal(s.now, null, reason);
+      if (reason === 'auth_required') {
+        assert.equal(feed.signedOut(), true);
+        assert.deepEqual(s.feeds, {}, 'auth failure leaves the initial board untouched');
+        feed.stop(); continue;
+      }
       assert.ok(feed.settled());
       for (const name of DATA_PANELS) assert.deepEqual([s.states[name].state, s.states[name].reason, s.states[name].ageSeconds], ['broken', reason, null], `${reason} ${name}`);
       assert.deepEqual([s.states.history.state, s.states.history.reason], ['broken', reason]);
@@ -1391,7 +1398,9 @@ test('cold start: without the server clock every panel still shows its own state
     globalThis.fetch = async () => json(401, { ok: false, reason: 'auth_required' }, { Date: 'Wed, 14 Oct 2026 17:42:22 GMT' });
     const dated = createFeed(() => {});
     await dated.refresh();
-    assert.ok(Math.abs(Date.parse(dated.select().now) - Date.parse('2026-10-14T17:42:22.000Z')) < 1000);
+    assert.equal(dated.signedOut(), true);
+    assert.equal(dated.select().now, null, 'auth response cannot move the board clock');
+    dated.stop();
   } finally { globalThis.fetch = realFetch; }
 });
 
@@ -1429,6 +1438,48 @@ test('JOED-30 reads: the actual results worker and fallback both preserve partia
   }
 });
 
+for (const mode of ['worker', 'fallback']) test(`JOED-173 fix12 Results identical polling ages the original receipt, retains failures and rejects regressions: ${mode}`, async t => {
+  const { createBoardSession } = await import('../public/joe/transport.js');
+  const { renderStatus } = await builders('results.js', ['renderStatus']);
+  const original = structuredClone(valid.results);
+  let payload = original, stamp = original.receivedAt, status = 200, worker;
+  t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify(status === 200 ? payload : {}), {
+    status, headers: { 'X-Joe-Server-Now': stamp },
+  }));
+  const old = new Map(['Worker', 'self', 'document'].map(k => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+  t.after(() => { for (const [key, descriptor] of old) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; } });
+  if (mode === 'worker') {
+    globalThis.self = { postMessage: (data, transfer) => worker.onmessage({ data: structuredClone(data, { transfer }) }) };
+    await import('../public/joe/history-worker.js?fix12-identical');
+    const handle = self.onmessage;
+    globalThis.Worker = class { constructor() { worker = this; } postMessage(data) { handle({ data }); } };
+  } else globalThis.Worker = undefined;
+  const feed = createFeed(() => {}, () => {}, '', { session: createBoardSession() }); t.after(feed.stop);
+  await feed.refreshResults();
+  assert.equal(feed.select().states.results.state, 'fresh');
+  stamp = at(original.receivedAt, 300);
+  await feed.refreshResults(); await feed.refreshResults();
+  const stale = feed.select().states.results;
+  assert.equal(stale.reason, 'snapshot_stale');
+  assert.equal(Math.floor(stale.ageSeconds), 300);
+  assert.equal(feed.feeds.results.value.receivedAt, original.receivedAt);
+  globalThis.document = htmlDocument('<div id="resStatus"></div>');
+  renderStatus({ ix: true, cell: stale });
+  assert.equal(document.getElementById('resStatus').textContent, 'Stale · Results as of 5 min ago · updates are late.');
+  status = 503; await feed.refreshResults();
+  renderStatus({ ix: true, cell: feed.select().states.results });
+  assert.equal(document.getElementById('resStatus').textContent, 'Stale · Results refresh failed: update failed. Showing the last good results from 5 min ago.');
+  status = 200;
+  for (const backwards of [{ ...original, seq: original.seq - 1 }, { ...original, seq: original.seq + 1, receivedAt: at(original.receivedAt, -1) }]) {
+    payload = backwards; await feed.refreshResults();
+    assert.equal(feed.feeds.results.reason, 'sequence_replayed');
+    assert.equal(feed.feeds.results.value.seq, original.seq);
+    assert.equal(feed.feeds.results.value.receivedAt, original.receivedAt);
+  }
+  payload = original; await feed.refreshResults();
+  assert.equal(feed.feeds.results.reason, null, 'an equal clean re-serve clears the rejection without refreshing its receipt');
+});
+
 test('refresh: await the worker before the next results push, including unchanged replies', async () => {
   const realWorker = globalThis.Worker, realFetch = globalThis.fetch;
   const { indexResults } = await import('../public/joe/results-model.js');
@@ -1438,7 +1489,13 @@ test('refresh: await the worker before the next results push, including unchange
     messages = [];
     constructor() { worker = this; }
     postMessage(message) { this.messages.push(message); }
-    reply(data) { this.onmessage({ data: { ...data, ms: 0 } }); }
+    reply(data) {
+      const kind = data.feed ?? data.kind, reason = data.reason ?? null;
+      const status = Object.fromEntries((kind === 'history' ? ['history', 'history-continuity'] : ['results']).map(name =>
+        [`/joe/${name}.json`, { state: reason ? 'error' : 'ok', auth: false, reason,
+          document: { seq: valid[kind].seq, receivedAt: valid[kind].receivedAt } }]));
+      this.onmessage({ data: { ...data, status, ms: 0 } });
+    }
   }
   try {
     globalThis.Worker = HeldWorker;

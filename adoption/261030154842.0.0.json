@@ -1,0 +1,50 @@
+{
+  "schema": "joedesk.adoption.v1",
+  "version": "261030154842.0.0",
+  "version_scheme": "inspr-calver-3",
+  "release_channel": "stable",
+  "release_sequence": 41,
+  "source": {
+    "commit": "daa49125c26af7fd4e19855327fd01f5eabf23d5",
+    "tree": "82c700f01a001ec946b892cf8e62b38c2336734e"
+  },
+  "release_set_sha256": "cc784dfcac2fb31aa8d47718e0c706817439336d4938c175a168f879e78bedb1",
+  "image_digest": "sha256:f378c84bd73dddb58b3f5478ad3f5a51c5ccfbab1f4055f08fc7a538677d6352",
+  "contract_set_sha256": "3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350",
+  "validation_run_id": "41131164446",
+  "decisions": [
+    "d460fa43-0d9d-4831-8897-9248321cf9a0",
+    "dcd81341-18c4-42d8-a543-b0d70ef6fa00",
+    "6b7ec808-4fca-4971-9fd1-d092aef8f582"
+  ],
+  "deployment": {
+    "deployed_at": "2026-10-31T05:04:23Z",
+    "operator_ticket": "JOED-172",
+    "rollback_reference": "JOED-172: revert the csb0 board re-pin (nixcfg #1194, merge e01f24944ab469e951859af8ba1f83fd6d24e908) and switch csb0 to the previous generation 4046xiavas4v0dn8hq0cpn7abdcfysqz-nixos-system-csb0 with the retained sequence-40 image csb0-joe-board:source-2ad813216785f7b6fd4b506a26b9a7bc29d72ebc (sha256:f79f59112f7965c290fbc3288cb7a4ef1c64bdfb89fbaeae3acadfaa6095fc5b, pull_policy never); board-only switch, hsb0 untouched; pre-switch board backup board-pre-41-20261031T050217Z.tar"
+  },
+  "live_checks": {
+    "joed_live_check": {
+      "status": "pass",
+      "checked_at": "2026-10-31T05:04:41Z"
+    },
+    "ops_t76_live": {
+      "status": "pass",
+      "checked_at": "2026-10-31T05:04:23Z"
+    },
+    "smoke_release": {
+      "status": "pass",
+      "checked_at": "2026-10-31T05:04:20Z"
+    },
+    "spoof_check": {
+      "status": "pass",
+      "checked_at": "2026-10-31T05:04:41Z"
+    }
+  },
+  "markus_ui_look": {
+    "status": "delegated",
+    "checked_at": "2026-10-31T05:04:43Z",
+    "performed_by": "JOED",
+    "delegation": "JOED-42 comment 2026-10-20: Markus delegated the post-switch look to JOED; GET-only served shell/app look: release 41 (About 41 > 40, 60 version references, none stale, JOED-170 fitter served); all feeds fresh, gateway confirmed, J/Joe/Joel Today exact; upstream KEEP positions position_stale since 04:38Z and cash source_unavailable (pusher/IB, before the switch; DEVOPS checking); same-build agm2 CI screenshots (main run 41131164446)"
+  },
+  "adopted_at": "2026-10-31T05:06:11Z"
+}
