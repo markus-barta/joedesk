@@ -1571,6 +1571,12 @@ and revision-11 payloads without the pair render as before. Invalid proofs
 are rejected as `contract_invalid` with a field/rule diagnostic; the existing
 last-good and rejected-update presentation applies.
 
+When the read model withholds an amount and demotes its P&L source to
+`unavailable` (including expired gateway checks and KEEP policy changes), it
+removes the source's `fx` pair in the served projection. Available sources
+and the accepted feed's original proof remain intact. KEEP-withheld desks
+show no conversion row in Details, including when a prior Today was retained.
+
 DEVOPS owns the later pusher flip, following JOED-86/87: re-vendor the entire
 `contracts/` bundle at the revision-11 digest in `release/contracts.json`,
 retain rev-10 output compatibility until the board is deployed, and then
