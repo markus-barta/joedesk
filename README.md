@@ -3033,9 +3033,10 @@ JOED-149 adds optional structured proof for both Today conversions in contract
 revision 11, accepted beside revision 10 under the same data schema ID. The
 pusher keeps sending revision 10 until a later, separate DEVOPS flip; this
 candidate does not claim dollar desks already show exchange-rate proof.
-The complete contract set and participant requirements are recomputed from
-the accepted contract bytes in `release/contracts.json` when resealing this
-candidate's runtime closure. Historical artifacts and the legacy anchor stay intact.
+The complete contract set is `c266b39e33e6e15be491263b0ca3575598dd264da3e1a9f6d5a147fc9f1bd49b`;
+participant requirements in `release/contracts.json` are recomputed from the
+accepted contract bytes, and this candidate's runtime closure is resealed.
+Historical artifacts and the legacy anchor stay intact.
 
 The approved presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`
 and saved global config/templates are retained; the offline bundle is active

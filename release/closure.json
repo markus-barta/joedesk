@@ -1,6 +1,6 @@
 {
   "schema": "joedesk.runtime-closure.v1",
-  "candidate_version": "261031052151.0.0",
+  "candidate_version": "261101023838.0.0",
   "files": [
     {
       "path": "contracts/accept.mjs",
@@ -14,8 +14,8 @@
     },
     {
       "path": "contracts/data.schema.json",
-      "size": 29130,
-      "sha256": "f5ca9f1ab2e2767a79a2a9237ebe7df7ef0bbd5e2e55fe6b7f5227241ea29cbd"
+      "size": 32340,
+      "sha256": "16b4f35187519dc68115f4569d4590a682afef0a28f5ce3f7dd4ce4e94a16424"
     },
     {
       "path": "contracts/decimal.mjs",
@@ -50,7 +50,7 @@
     {
       "path": "contracts/manifest.json",
       "size": 933,
-      "sha256": "f78bb59b2eedcd9bb57bc201eddf46ac18843093025d5ea3417b9036b210b9b7"
+      "sha256": "65cc95f6a0f084c0a3d5d74fb5c494caec61e5e64d7c4e1c4969fe6830a1c396"
     },
     {
       "path": "contracts/panel-state.mjs",
@@ -79,8 +79,8 @@
     },
     {
       "path": "contracts/semantics.mjs",
-      "size": 14098,
-      "sha256": "605551fe12e064dfbdea22e1cdfde2bd7f6b4ef2b5d938af4da441e4b829292c"
+      "size": 14735,
+      "sha256": "c6e79bf2d9cf904b17234e901b3dee9ab7cba87dde47c80338c34ecc9df19eaf"
     },
     {
       "path": "contracts/vienna-date.mjs",
@@ -100,7 +100,7 @@
     {
       "path": "package.json",
       "size": 1750,
-      "sha256": "2578011725eff96aab427530188779f10edb433e2bc6ab5b271e1e6f01166be7"
+      "sha256": "7f23d44e3d4e6f3de7b4d24c5fa67601c3bb5d9dcd6162287fa0c64e7f3040e6"
     },
     {
       "path": "public/joe/account-model.js",
@@ -124,8 +124,8 @@
     },
     {
       "path": "public/joe/app.js",
-      "size": 23806,
-      "sha256": "722fbf182ced65777969636a560fce104a0dab3469263fb70ed7f7f99930714c"
+      "size": 23956,
+      "sha256": "920598a8321b59c35d15f962079bcec6ea8fcf5c2d0c150ae0e5dda2bd37ef6b"
     },
     {
       "path": "public/joe/board-settings-validation.js",
@@ -159,8 +159,8 @@
     },
     {
       "path": "public/joe/desk.js",
-      "size": 109827,
-      "sha256": "c817b4dd0b9268b8cacdc56b52b6428aade65d0bdbd950a80f0ffb8497a0cd24"
+      "size": 110161,
+      "sha256": "eb5151cdae70ab784b08b732bfea9675141ea6df049b1d620fc276f769612af7"
     },
     {
       "path": "public/joe/events.js",
@@ -230,12 +230,12 @@
     {
       "path": "public/joe/index.html",
       "size": 46162,
-      "sha256": "26bb36911562b5d5beb3a0a66c36b249eb20b6fab7d1e1be730478cd98ca3104"
+      "sha256": "aef03b93e8494f6d56a3420b6ff597eee76b138064d08b071c7f16629ea8e9b9"
     },
     {
       "path": "public/joe/joe-version.js",
-      "size": 21188,
-      "sha256": "9fff2481b66d419f6c5c40d41841792ddeb1a8bb8fd3143171439b94fce97832"
+      "size": 21546,
+      "sha256": "535a665b03e0b2b0f58aa40bc333bea1abcc4a4731789f4c99cf0388a81c027d"
     },
     {
       "path": "public/joe/performance.js",
@@ -284,8 +284,8 @@
     },
     {
       "path": "public/joe/transport.js",
-      "size": 7724,
-      "sha256": "7e74bd43209d1e369de7ba7aff96fcf4fc83bcfe7793dd169f993a12d28cbec4"
+      "size": 8104,
+      "sha256": "eb5b6dadc368f305e0b2c2b1ffe19a1c78bd29a130281cf5dad485467744f5dd"
     },
     {
       "path": "public/joe/ui.js",
@@ -334,13 +334,13 @@
     },
     {
       "path": "release.json",
-      "size": 300,
-      "sha256": "7cd06bc34bb230e84ef9999830267b693b807a63af7088519c83efad324b2e91"
+      "size": 326,
+      "sha256": "6913c6cb904ab68ac416535217ce5eff727b9e3fa44d6a0b98914b9aaf29e56a"
     },
     {
       "path": "release/contracts.json",
-      "size": 2374,
-      "sha256": "702b3cff10efec16048597c89f6cc05413792ec498f18190c41b5b2076c80117"
+      "size": 2815,
+      "sha256": "de73dcc195e3054bb0ea53882c994f7255adb3f5567e5af1adb9eb6069c19747"
     },
     {
       "path": "release/data-migration.mjs",
@@ -349,8 +349,8 @@
     },
     {
       "path": "release/preparation.json",
-      "size": 6788,
-      "sha256": "b8eaa5017e73351e03ddaae66a48c5813fce3b6d1ac5024572f614761c5c809e"
+      "size": 6964,
+      "sha256": "b58a8d70365c7b5dae38fb2e9c3fe024eeacbb666c38fef192675e69df8aa296"
     },
     {
       "path": "release/versioning.mjs",
@@ -399,8 +399,8 @@
     },
     {
       "path": "server/read-model.mjs",
-      "size": 27433,
-      "sha256": "11441de3c241235f22afaef4ae0124352f58ae6f01699b9b78a3f6afb595a90e"
+      "size": 27668,
+      "sha256": "fcdbe75c379818638b7303052ee8dc3f485050c82d5f9492088a581f8c0a6d06"
     },
     {
       "path": "server/storage.mjs",
