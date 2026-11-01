@@ -415,6 +415,7 @@ function start() {
   const first = parseRoute(location.hash || '#desk');
   go(first.screen, { anchor: first.anchor, query: first.query, scroll: places.saved() });
   const stopProbe = startAuthProbe(boardSession);
-  addEventListener('pagehide', stopProbe, { once: true });
+  addEventListener('pagehide', event => { if (event.persisted === true) stopProbe.pause(); else stopProbe(); });
+  addEventListener('pageshow', event => { if (event.persisted === true) stopProbe.resume(); });
   feed.start();
 }
