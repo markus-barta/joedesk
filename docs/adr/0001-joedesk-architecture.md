@@ -1699,3 +1699,36 @@ No release coordinate, deployment pin, historical artifact or runtime seal
 is changed by this implementation. The coordinator owns review and the
 later candidate reservation/seal; current sealed-build checks deliberately
 reject these changed runtime bytes until that release preparation.
+
+## Release 43 candidate (JOED-177)
+
+Reserve `261101023838.0.0` at `2026-11-01T02:38:38Z` as `inspr-calver-3`, stable sequence 43,
+for the honest signed-out board (JOED-173) and the restored-tab authentication
+probe fix (JOED-175).
+
+Previous release is sequence 42 (`261031052151.0.0`), published to main at
+`a76621e4c36a3ddaa106bfb48f2085333d9fddcd`; its release set was verified in
+run `41215247109` (JOED-174). It was never live: the only csb0 switch
+(`2026-10-31T16:55Z`) rolled back on `feeds_not_ready` (upstream gateway).
+Reuse `superseded-before-deployment`, with no `deployed` field or adoption
+record, as release 38 did before 39. Markus's 2026-10-29 instruction is to skip
+superseded intermediates; release 43 supersedes release 42 directly.
+Last deployed remains sequence 41 (`261030154842.0.0`), live on csb0 since
+`2026-10-31T05:04:23Z` (JOED-172), with its existing adoption record preserved.
+About orders 43, 42, 41, 40, 39, 38, 37 through 26, then legacy; release 42's
+entry stays unchanged. Earlier preparation sections record reservation-time state.
+
+- When your sign-in expires, keep clearly frozen figures, including after returning with Back or Forward, and reload to sign in again.
+
+JOED-149 adds optional structured proof for both Today conversions in contract
+revision 11, accepted beside revision 10 under the same data schema ID. The
+pusher keeps sending revision 10 until a later, separate DEVOPS flip; this
+candidate does not claim dollar desks already show exchange-rate proof.
+The complete contract set and participant requirements are recomputed from
+the accepted contract bytes in `release/contracts.json` when resealing this
+candidate's runtime closure. Historical artifacts and the legacy anchor stay intact.
+
+The approved presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`
+and saved global config/templates are retained; the offline bundle is active
+in footer/About. This local candidate grants no publication or deployment
+approval. The coordinator owns the cross-family gate, publication and live verification.

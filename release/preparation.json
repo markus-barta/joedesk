@@ -1,13 +1,13 @@
 {
   "schema": "joedesk.release-preparation.v1",
-  "ticket": "JOED-174",
+  "ticket": "JOED-177",
   "status": "candidate",
   "reservation": {
     "version_scheme": "inspr-calver-3",
-    "version": "261031052151.0.0",
+    "version": "261101023838.0.0",
     "release_channel": "stable",
-    "release_sequence": 42,
-    "reserved_at": "2026-10-31T05:21:51Z"
+    "release_sequence": 43,
+    "reserved_at": "2026-11-01T02:38:38Z"
   },
   "anchor": {
     "legacy_scheme": "calendar",
@@ -134,16 +134,15 @@
   "previous_release": {
     "product": "JoeDesk",
     "version_scheme": "inspr-calver-3",
-    "version": "261030154842.0.0",
+    "version": "261031052151.0.0",
     "release_channel": "stable",
-    "release_sequence": 41,
+    "release_sequence": 42,
     "status": "published-candidate",
     "source_branch": "main",
-    "source_commit": "daa49125c26af7fd4e19855327fd01f5eabf23d5",
-    "release_set_ticket": "JOED-172",
-    "disposition": "deployed",
-    "deployed": true,
-    "note": "live on csb0 since 2026-10-31T05:04:23Z (JOED-172); adopted 2026-10-31T05:06:11Z (adoption/261030154842.0.0.json)"
+    "source_commit": "a76621e4c36a3ddaa106bfb48f2085333d9fddcd",
+    "release_set_ticket": "JOED-174",
+    "disposition": "superseded-before-deployment",
+    "note": "Published to main; release set verified in run 41215247109 (JOED-174), never live. The only csb0 switch (2026-10-31T16:55Z) rolled back on feeds_not_ready (upstream gateway). Superseded directly by release 43 (JOED-177) per Markus’s 2026-10-29 instruction to skip superseded intermediates."
   },
   "legacy_deployment_inventory": {
     "board_source_pin": "db621bf",

@@ -2,14 +2,17 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261031052151.0.0` (`inspr-calver-3`, stable sequence 42), reserved once at `2026-10-31T05:21:51Z` for clearly frozen signed-out figures and a reload/sign-in notice (JOED-173; release [JOED-174](https://aeon.barta.cm/p/JOED/JOED-174)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
+**Candidate version:** `261101023838.0.0` (`inspr-calver-3`, stable sequence 43), reserved once at `2026-11-01T02:38:38Z` for clearly frozen signed-out figures, including after returning with Back or Forward (JOED-173, JOED-175; release [JOED-177](https://aeon.barta.cm/p/JOED/JOED-177)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
 
 **Last deployed release:** `inspr-calver-3` / `261030154842.0.0` / sequence 41,
 published on `main` at `daa49125c26af7fd4e19855327fd01f5eabf23d5` under JOED-172,
 live on csb0 since `2026-10-31T05:04:23Z` and adopted at `2026-10-31T05:06:11Z`
-(`adoption/261030154842.0.0.json`). Both `previous_release` and
-`last_deployed_release` record sequence 41; its disposition is `deployed` with
-`deployed: true`. Sequence 40 (`261030085000.0.0`) was previously deployed at
+(`adoption/261030154842.0.0.json`). `last_deployed_release` records sequence 41.
+`previous_release` records published sequence 42 (`261031052151.0.0`, JOED-174),
+verified in run `41215247109` but never live: its only csb0 switch at
+`2026-10-31T16:55Z` rolled back on `feeds_not_ready` (upstream gateway).
+Its disposition is `superseded-before-deployment`, with no `deployed` field
+or adoption record; release 43 supersedes it directly. Sequence 40 (`261030085000.0.0`) was previously deployed at
 `2026-10-30T11:34:29Z` and adopted at `2026-10-30T11:35:36Z` (JOED-171).
 Sequence 39 (`261029192345.0.0`) was previously deployed at
 `2026-10-30T08:44:03Z` and adopted at `2026-10-30T08:46:01Z` (JOED-159).
@@ -41,7 +44,7 @@ published on `main` at `dafe7909af04ba5ded3c4b55504ea10970e07e4d`; JOED-41
 records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
-`previous_release` from `last_deployed_release`. About lists the current build, deployed and adopted sequences 41, 40 and 39, published sequence 38,
+`previous_release` from `last_deployed_release`. About lists the current build, superseded published sequence 42, deployed and adopted sequences 41, 40 and 39, published sequence 38,
 deployed sequences 37, 36, 35, 34, 33, 32, 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
@@ -98,7 +101,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261031052151.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261101023838.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -3004,4 +3007,37 @@ shared presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`, legacy
 anchor and historical artifacts remain unchanged. The saved presentation config
 and templates match the local approved source; the offline bundle remains
 active in footer/About. This local candidate grants no publication or deployment
+approval. The coordinator owns the cross-family gate, publication and live verification.
+
+## Release 43 candidate (JOED-177)
+
+Reserve `261101023838.0.0` at `2026-11-01T02:38:38Z` as `inspr-calver-3`, stable sequence 43,
+for the honest signed-out board (JOED-173) and the restored-tab authentication
+probe fix (JOED-175).
+
+Previous release is sequence 42 (`261031052151.0.0`), published to main at
+`a76621e4c36a3ddaa106bfb48f2085333d9fddcd`; its release set was verified in
+run `41215247109` (JOED-174). It was never live: the only csb0 switch
+(`2026-10-31T16:55Z`) rolled back on `feeds_not_ready` (upstream gateway).
+Reuse `superseded-before-deployment`, with no `deployed` field or adoption
+record, as release 38 did before 39. Markus's 2026-10-29 instruction is to skip
+superseded intermediates; release 43 supersedes release 42 directly.
+Last deployed remains sequence 41 (`261030154842.0.0`), live on csb0 since
+`2026-10-31T05:04:23Z` (JOED-172), with its existing adoption record preserved.
+About orders 43, 42, 41, 40, 39, 38, 37 through 26, then legacy; release 42's
+entry stays unchanged. Earlier preparation sections record reservation-time state.
+
+- When your sign-in expires, keep clearly frozen figures, including after returning with Back or Forward, and reload to sign in again.
+
+JOED-149 adds optional structured proof for both Today conversions in contract
+revision 11, accepted beside revision 10 under the same data schema ID. The
+pusher keeps sending revision 10 until a later, separate DEVOPS flip; this
+candidate does not claim dollar desks already show exchange-rate proof.
+The complete contract set and participant requirements are recomputed from
+the accepted contract bytes in `release/contracts.json` when resealing this
+candidate's runtime closure. Historical artifacts and the legacy anchor stay intact.
+
+The approved presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`
+and saved global config/templates are retained; the offline bundle is active
+in footer/About. This local candidate grants no publication or deployment
 approval. The coordinator owns the cross-family gate, publication and live verification.
