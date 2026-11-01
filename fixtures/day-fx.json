@@ -1,0 +1,329 @@
+{
+  "fx": {
+    "start": {
+      "source": "ib-account-ExchangeRate",
+      "observedAt": "2026-10-14T03:59:58.000Z"
+    },
+    "end": {
+      "source": "ib-account-ExchangeRate",
+      "observedAt": "2026-10-14T17:42:13.000Z"
+    }
+  },
+  "invalid": [
+    {
+      "name": "pair type None",
+      "path": "fx",
+      "value": null,
+      "rule": "type",
+      "errorPath": "$.desks[0].pnlSources.day.fx"
+    },
+    {
+      "name": "pair type []",
+      "path": "fx",
+      "value": [],
+      "rule": "type",
+      "errorPath": "$.desks[0].pnlSources.day.fx"
+    },
+    {
+      "name": "pair type True",
+      "path": "fx",
+      "value": true,
+      "rule": "type",
+      "errorPath": "$.desks[0].pnlSources.day.fx"
+    },
+    {
+      "name": "pair type proof",
+      "path": "fx",
+      "value": "proof",
+      "rule": "type",
+      "errorPath": "$.desks[0].pnlSources.day.fx"
+    },
+    {
+      "name": "missing start",
+      "path": "fx.start",
+      "remove": true,
+      "rule": "required",
+      "errorPath": "$.desks[0].pnlSources.day.fx.start"
+    },
+    {
+      "name": "missing end",
+      "path": "fx.end",
+      "remove": true,
+      "rule": "required",
+      "errorPath": "$.desks[0].pnlSources.day.fx.end"
+    },
+    {
+      "name": "extra pair property",
+      "path": "fx.rate",
+      "value": "0.9",
+      "rule": "additionalProperties",
+      "errorPath": "$.desks[0].pnlSources.day.fx"
+    },
+    {
+      "name": "start type None",
+      "path": "fx.start",
+      "value": null,
+      "rule": "type",
+      "errorPath": "$.desks[0].pnlSources.day.fx.start"
+    },
+    {
+      "name": "start type []",
+      "path": "fx.start",
+      "value": [],
+      "rule": "type",
+      "errorPath": "$.desks[0].pnlSources.day.fx.start"
+    },
+    {
+      "name": "start type proof",
+      "path": "fx.start",
+      "value": "proof",
+      "rule": "type",
+      "errorPath": "$.desks[0].pnlSources.day.fx.start"
+    },
+    {
+      "name": "start missing source",
+      "path": "fx.start.source",
+      "remove": true,
+      "rule": "required",
+      "errorPath": "$.desks[0].pnlSources.day.fx.start.source"
+    },
+    {
+      "name": "start missing observedAt",
+      "path": "fx.start.observedAt",
+      "remove": true,
+      "rule": "required",
+      "errorPath": "$.desks[0].pnlSources.day.fx.start.observedAt"
+    },
+    {
+      "name": "start invalid source ecb",
+      "path": "fx.start.source",
+      "value": "ecb",
+      "rule": "enum",
+      "errorPath": "$.desks[0].pnlSources.day.fx.start.source"
+    },
+    {
+      "name": "start invalid source ib-unknown",
+      "path": "fx.start.source",
+      "value": "ib-unknown",
+      "rule": "enum",
+      "errorPath": "$.desks[0].pnlSources.day.fx.start.source"
+    },
+    {
+      "name": "start invalid source None",
+      "path": "fx.start.source",
+      "value": null,
+      "rule": "enum",
+      "errorPath": "$.desks[0].pnlSources.day.fx.start.source"
+    },
+    {
+      "name": "start invalid source 12",
+      "path": "fx.start.source",
+      "value": 12,
+      "rule": "enum",
+      "errorPath": "$.desks[0].pnlSources.day.fx.start.source"
+    },
+    {
+      "name": "start invalid instant 2026-10-14T03:59:58Z",
+      "path": "fx.start.observedAt",
+      "value": "2026-10-14T03:59:58Z",
+      "rule": "date-time",
+      "errorPath": "$.desks[0].pnlSources.day.fx.start.observedAt"
+    },
+    {
+      "name": "start invalid instant 2026-10-14T05:59:58.000+02:00",
+      "path": "fx.start.observedAt",
+      "value": "2026-10-14T05:59:58.000+02:00",
+      "rule": "date-time",
+      "errorPath": "$.desks[0].pnlSources.day.fx.start.observedAt"
+    },
+    {
+      "name": "start invalid instant 2026-02-30T03:59:58.000Z",
+      "path": "fx.start.observedAt",
+      "value": "2026-02-30T03:59:58.000Z",
+      "rule": "date-time",
+      "errorPath": "$.desks[0].pnlSources.day.fx.start.observedAt"
+    },
+    {
+      "name": "start invalid instant nonsense",
+      "path": "fx.start.observedAt",
+      "value": "nonsense",
+      "rule": "date-time",
+      "errorPath": "$.desks[0].pnlSources.day.fx.start.observedAt"
+    },
+    {
+      "name": "start invalid instant None",
+      "path": "fx.start.observedAt",
+      "value": null,
+      "rule": "type",
+      "errorPath": "$.desks[0].pnlSources.day.fx.start.observedAt"
+    },
+    {
+      "name": "start extra rate",
+      "path": "fx.start.rate",
+      "value": "0.9",
+      "rule": "additionalProperties",
+      "errorPath": "$.desks[0].pnlSources.day.fx.start"
+    },
+    {
+      "name": "start extra property",
+      "path": "fx.start.extra",
+      "value": true,
+      "rule": "additionalProperties",
+      "errorPath": "$.desks[0].pnlSources.day.fx.start"
+    },
+    {
+      "name": "end type None",
+      "path": "fx.end",
+      "value": null,
+      "rule": "type",
+      "errorPath": "$.desks[0].pnlSources.day.fx.end"
+    },
+    {
+      "name": "end type []",
+      "path": "fx.end",
+      "value": [],
+      "rule": "type",
+      "errorPath": "$.desks[0].pnlSources.day.fx.end"
+    },
+    {
+      "name": "end type proof",
+      "path": "fx.end",
+      "value": "proof",
+      "rule": "type",
+      "errorPath": "$.desks[0].pnlSources.day.fx.end"
+    },
+    {
+      "name": "end missing source",
+      "path": "fx.end.source",
+      "remove": true,
+      "rule": "required",
+      "errorPath": "$.desks[0].pnlSources.day.fx.end.source"
+    },
+    {
+      "name": "end missing observedAt",
+      "path": "fx.end.observedAt",
+      "remove": true,
+      "rule": "required",
+      "errorPath": "$.desks[0].pnlSources.day.fx.end.observedAt"
+    },
+    {
+      "name": "end invalid source ecb",
+      "path": "fx.end.source",
+      "value": "ecb",
+      "rule": "enum",
+      "errorPath": "$.desks[0].pnlSources.day.fx.end.source"
+    },
+    {
+      "name": "end invalid source ib-unknown",
+      "path": "fx.end.source",
+      "value": "ib-unknown",
+      "rule": "enum",
+      "errorPath": "$.desks[0].pnlSources.day.fx.end.source"
+    },
+    {
+      "name": "end invalid source None",
+      "path": "fx.end.source",
+      "value": null,
+      "rule": "enum",
+      "errorPath": "$.desks[0].pnlSources.day.fx.end.source"
+    },
+    {
+      "name": "end invalid source 12",
+      "path": "fx.end.source",
+      "value": 12,
+      "rule": "enum",
+      "errorPath": "$.desks[0].pnlSources.day.fx.end.source"
+    },
+    {
+      "name": "end invalid instant 2026-10-14T03:59:58Z",
+      "path": "fx.end.observedAt",
+      "value": "2026-10-14T03:59:58Z",
+      "rule": "date-time",
+      "errorPath": "$.desks[0].pnlSources.day.fx.end.observedAt"
+    },
+    {
+      "name": "end invalid instant 2026-10-14T05:59:58.000+02:00",
+      "path": "fx.end.observedAt",
+      "value": "2026-10-14T05:59:58.000+02:00",
+      "rule": "date-time",
+      "errorPath": "$.desks[0].pnlSources.day.fx.end.observedAt"
+    },
+    {
+      "name": "end invalid instant 2026-02-30T03:59:58.000Z",
+      "path": "fx.end.observedAt",
+      "value": "2026-02-30T03:59:58.000Z",
+      "rule": "date-time",
+      "errorPath": "$.desks[0].pnlSources.day.fx.end.observedAt"
+    },
+    {
+      "name": "end invalid instant nonsense",
+      "path": "fx.end.observedAt",
+      "value": "nonsense",
+      "rule": "date-time",
+      "errorPath": "$.desks[0].pnlSources.day.fx.end.observedAt"
+    },
+    {
+      "name": "end invalid instant None",
+      "path": "fx.end.observedAt",
+      "value": null,
+      "rule": "type",
+      "errorPath": "$.desks[0].pnlSources.day.fx.end.observedAt"
+    },
+    {
+      "name": "end extra rate",
+      "path": "fx.end.rate",
+      "value": "0.9",
+      "rule": "additionalProperties",
+      "errorPath": "$.desks[0].pnlSources.day.fx.end"
+    },
+    {
+      "name": "end extra property",
+      "path": "fx.end.extra",
+      "value": true,
+      "rule": "additionalProperties",
+      "errorPath": "$.desks[0].pnlSources.day.fx.end"
+    },
+    {
+      "name": "start after boundary",
+      "path": "fx.start.observedAt",
+      "value": "2026-10-14T04:00:00.001Z",
+      "rule": "startFxAfterPeriodStart",
+      "errorPath": "$.desks[0].pnlSources.day.fx.start.observedAt"
+    },
+    {
+      "name": "end before start",
+      "path": "fx.end.observedAt",
+      "value": "2026-10-14T03:59:57.999Z",
+      "rule": "endFxBeforeStart",
+      "errorPath": "$.desks[0].pnlSources.day.fx.end.observedAt"
+    },
+    {
+      "name": "missing period",
+      "path": "periodStart",
+      "remove": true,
+      "rule": "availableSodRequired",
+      "errorPath": "$.desks[0].pnlSources.day.fx"
+    },
+    {
+      "name": "null period",
+      "path": "periodStart",
+      "value": null,
+      "rule": "availableSodRequired",
+      "errorPath": "$.desks[0].pnlSources.day.fx"
+    },
+    {
+      "name": "wrong method",
+      "path": "method",
+      "value": "ib-daily-pnl",
+      "rule": "availableSodRequired",
+      "errorPath": "$.desks[0].pnlSources.day.fx"
+    },
+    {
+      "name": "unavailable source",
+      "path": "status",
+      "value": "unavailable",
+      "rule": "availableSodRequired",
+      "errorPath": "$.desks[0].pnlSources.day.fx"
+    }
+  ]
+}

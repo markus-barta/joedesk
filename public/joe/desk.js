@@ -354,6 +354,11 @@ export function healthPop(ctx, health) {
     const inheritedDayFault = DESKS.some(id => days[id].kind === 'fault') && ownDayReasons.length > 0 && ownDayReasons.every(reason => NOT_EXACT_REASONS.has(reason));
     rows.push(['Today’s result', esc(days.today.kind === 'notExact' || inheritedDayFault ? dayBreakdown(states, data)
       : dayMethodLabel(data.pnlSources?.day) ?? `Not available · ${cellReason(data.pnlSources?.day?.reason ?? states['today.dayPnl']?.reason ?? 'feed_not_received')}`)]);
+    for (const id of DESKS) {
+      const fx = dayChannels(data, id).source?.fx;
+      if (days[id].kind === 'exact' && fx) rows.push([`${LABEL[id]} Today conversion`,
+        esc(`converted at the start-of-day rate from ${timeHM(fx.start.observedAt, VIENNA)} and the current rate from ${timeHM(fx.end.observedAt, VIENNA)}`)]);
+    }
     // Before the open Desk's first figure is the last session's, from Results.
     const label = now ? sessionLabel(now) : null;
     if (label?.phase === 'last') {

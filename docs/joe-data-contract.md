@@ -10,6 +10,32 @@ non-secret example at `docs/examples/joe-data.sample.json`. The example is not
 copied into the public package as `data.json`; missing live data shows explicit
 unavailable states rather than plausible-looking money.
 
+## Two-rate Today proof (manifest revision 11, JOED-149)
+
+The additive optional `desks[].pnlSources.day.fx` is
+`{ start: { source, observedAt }, end: { source, observedAt } }`.
+All three objects are closed; the only source enum member is
+`ib-account-ExchangeRate`. Each timestamp uses the existing UTC millisecond
+instant type. The containing desk source must be available, use
+`sod-virtual-equity` and carry `periodStart`; start must be at or before that
+boundary and end at or after start. No rate values belong in this field.
+Existing `money.fx` is unchanged. Aggregate DAY, OPEN and other contracts
+do not acquire this field.
+
+The board accepts revision-10 payloads and revision-11 payloads under the
+same `inspr.joe.household.v2` ID. Missing `fx` changes no behaviour; a valid
+pair retains existing exactness rules. Details adds one conversion line per
+exact desk with the pair, displaying its two observation clocks in Vienna
+time and no rate values. Invalid proof fails the shared schema/semantics
+validator and uses the existing rejected-update/last-good behaviour.
+
+DEVOPS re-vendors the complete digest-pinned bundle before enabling structured
+SOD/current observation emission, following JOED-86/87. Omit the pair without
+proof or a foreign leg; keep exactness dependent on real IB evidence, and
+keep rate values in the existing computation/provenance path. Board release
+and real producer/executor sign-off precede the flip. This change leaves the
+existing release coordinate and sealed closure for the coordinator's later release.
+
 ## Exact v2 values (manifest revision 10, JOED-85)
 
 The active board consumes `inspr.joe.household.v2` through the self-contained

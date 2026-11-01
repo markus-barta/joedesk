@@ -1132,6 +1132,30 @@ test('JOED-27 results: exact 8 MiB transport and served boundaries include UTF-8
   assert.deepEqual(readFileSync(join(s.dataDir, 'results-state.json')), original);
 });
 
+for (const trigger of ['gateway check expiry', 'KEEP policy change']) test(`JOED-149 HTTP: ${trigger} serves a valid demoted Today without fx`, async t => {
+  const value = JSON.parse(readFileSync(new URL('../fixtures/phase-b.json', import.meta.url))).exact;
+  delete value.receivedAt;
+  value.desks[0].pnlSources.day.fx = JSON.parse(readFileSync(new URL('../fixtures/day-fx.json', import.meta.url))).fx;
+  let now = value.generatedAt;
+  if (trigger === 'gateway check expiry') value.safety.gateway.checkedAt = new Date(Date.parse(now) - 30000).toISOString();
+  const s = await setup(t, { clock: () => now });
+  assert.equal((await s.push(value)).status, 200);
+  if (trigger === 'gateway check expiry') now = new Date(Date.parse(now) + 30000).toISOString();
+  else {
+    const config = structuredClone(samples['fleet-config']); config.desks.keep.push('DEMO');
+    assert.equal(s.model.observeFleet(config).ok, true);
+  }
+  const response = await s.request('/joe/data.json');
+  assert.equal(response.status, 200);
+  assert.equal(response.body.desks[0].pnlSources.day.status, 'unavailable');
+  assert.equal(Object.hasOwn(response.body.desks[0].pnlSources.day, 'fx'), false);
+  const validation = validateContract('data', response.body);
+  assert.equal(validation.ok, true, JSON.stringify(validation.errors));
+  assert.equal(acceptRead('data', { status: response.status, payload: response.body }).reason, null);
+  assert.deepEqual((await s.request('/joe/state.json')).body.feeds.data.value.desks[0].pnlSources.day.fx,
+    value.desks[0].pnlSources.day.fx, 'accepted proof remains intact');
+});
+
 test('P2 KEEP: accepted Fleet Config policy withholds affected money and measured history', async t => {
   const s = await setup(t);
   const config = structuredClone(samples['fleet-config']); config.desks.keep.push('DEMO');

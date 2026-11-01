@@ -9,6 +9,7 @@ import { panelState, panelStates, MONEY_FIELDS } from '../contracts/panel-state.
 // Checkout-only fixture tooling joins npm test/CI without changing the sealed package.
 import './results-fixtures.mjs';
 import './workflows.mjs';
+import './day-fx.mjs';
 
 const samples = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url)));
 const at = '2026-10-14T17:42:22.000Z';
@@ -65,6 +66,8 @@ test('only the documented JSON Schema vocabulary is used; every field has exactl
   assert.equal(owners['data.totals.equity.amount'], 'pusher');
   assert.equal(owners['data.brokerAccount.cash.amount'], 'pusher');
   assert.equal(owners['data.brokerAccount.reasons.cash'], 'pusher');
+  assert.equal(owners['data.desks[].pnlSources.day.fx.start.source'], 'pusher');
+  assert.equal(owners['data.desks[].pnlSources.day.fx.end.observedAt'], 'pusher');
   assert.equal(owners['data.positions.rows[].reasons.desk'], 'pusher');
   assert.equal(owners['data.safety.executor.gatewayReachable'], 'paper executor 8470');
   assert.equal(owners['data.safety.executor.ledgerBytes'], 'paper executor 8470');
@@ -89,7 +92,7 @@ test('one closed reason enum is used everywhere, including field errors', () => 
 });
 
 test('rev 7 executor: rev 6 payloads remain valid; the reason enum is append-only', () => {
-  assert.equal(CONTRACTS.revision, 10);
+  assert.equal(CONTRACTS.revision, 11);
   assert.equal(CONTRACTS.contracts.data, 'inspr.joe.household.v2');
   assert.equal(REASONS[29], 'executor_broker_disagreement');
   assert.equal(REASONS[30], 'results_capture_failed');

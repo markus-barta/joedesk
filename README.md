@@ -2,14 +2,17 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261031052151.0.0` (`inspr-calver-3`, stable sequence 42), reserved once at `2026-10-31T05:21:51Z` for clearly frozen signed-out figures and a reload/sign-in notice (JOED-173; release [JOED-174](https://aeon.barta.cm/p/JOED/JOED-174)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
+**Candidate version:** `261101023838.0.0` (`inspr-calver-3`, stable sequence 43), reserved once at `2026-11-01T02:38:38Z` for clearly frozen signed-out figures, including after returning with Back or Forward (JOED-173, JOED-175; release [JOED-177](https://aeon.barta.cm/p/JOED/JOED-177)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
 
 **Last deployed release:** `inspr-calver-3` / `261030154842.0.0` / sequence 41,
 published on `main` at `daa49125c26af7fd4e19855327fd01f5eabf23d5` under JOED-172,
 live on csb0 since `2026-10-31T05:04:23Z` and adopted at `2026-10-31T05:06:11Z`
-(`adoption/261030154842.0.0.json`). Both `previous_release` and
-`last_deployed_release` record sequence 41; its disposition is `deployed` with
-`deployed: true`. Sequence 40 (`261030085000.0.0`) was previously deployed at
+(`adoption/261030154842.0.0.json`). `last_deployed_release` records sequence 41.
+`previous_release` records published sequence 42 (`261031052151.0.0`, JOED-174),
+verified in run `41215247109` but never live: its only csb0 switch at
+`2026-10-31T16:55Z` rolled back on `feeds_not_ready` (upstream gateway).
+Its disposition is `superseded-before-deployment`, with no `deployed` field
+or adoption record; release 43 supersedes it directly. Sequence 40 (`261030085000.0.0`) was previously deployed at
 `2026-10-30T11:34:29Z` and adopted at `2026-10-30T11:35:36Z` (JOED-171).
 Sequence 39 (`261029192345.0.0`) was previously deployed at
 `2026-10-30T08:44:03Z` and adopted at `2026-10-30T08:46:01Z` (JOED-159).
@@ -41,7 +44,7 @@ published on `main` at `dafe7909af04ba5ded3c4b55504ea10970e07e4d`; JOED-41
 records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
-`previous_release` from `last_deployed_release`. About lists the current build, deployed and adopted sequences 41, 40 and 39, published sequence 38,
+`previous_release` from `last_deployed_release`. About lists the current build, superseded published sequence 42, deployed and adopted sequences 41, 40 and 39, published sequence 38,
 deployed sequences 37, 36, 35, 34, 33, 32, 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
@@ -98,7 +101,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261031052151.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261101023838.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -1544,6 +1547,52 @@ element. Results goes through the one router (route.js): it reads a link with
 `writeRoute`, a push for the reader's change and a correction otherwise.
 Desk's links use this format; History has its own `#history?…`.
 
+### Two proven Today conversions (JOED-149, contract-set revision 11)
+
+The data ID remains `inspr.joe.household.v2`; revision 10 and revision 11
+payloads are accepted together. A payload has no separate revision tag.
+Revision 11 adds the optional, pusher-owned field
+`desks[].pnlSources.day.fx = { start: { source, observedAt }, end: { source, observedAt } }`.
+Every object is closed. Both sources must be `ib-account-ExchangeRate`, the
+source currently proved by the pusher's IB account conversion path. Instants
+use the existing canonical UTC format `YYYY-MM-DDTHH:mm:ss.sssZ`.
+The pair belongs to an available `sod-virtual-equity` desk day source with a
+non-null `periodStart`: `start.observedAt <= periodStart` and
+`end.observedAt >= start.observedAt`. The field carries no rate values;
+existing revision-10 `money.fx` provenance is unchanged. Aggregate DAY and
+OPEN sources do not accept the pair. Omit it for a desk with no foreign leg
+or without proof; it is never fabricated from a timestamp or free-text detail.
+
+Both proven conversions can support exact euro Today even when the rates
+differ. The board retains its existing exactness, freshness, gateway, NY-day
+and null-reason rules; adding the pair cannot promote an inexact amount.
+For each exact desk carrying the pair, Details says
+“converted at the start-of-day rate from HH:MM and the current rate from HH:MM”.
+Those clocks always use Europe/Vienna, including DST, independently of the
+browser's timezone. Details displays no rate values. Revision-10 payloads
+and revision-11 payloads without the pair render as before. Invalid proofs
+are rejected as `contract_invalid` with a field/rule diagnostic; the existing
+last-good and rejected-update presentation applies.
+
+When the read model withholds an amount and demotes its P&L source to
+`unavailable` (including expired gateway checks and KEEP policy changes), it
+removes the source's `fx` pair in the served projection. Available sources
+and the accepted feed's original proof remain intact. KEEP-withheld desks
+show no conversion row in Details, including when a prior Today was retained.
+
+DEVOPS owns the later pusher flip, following JOED-86/87: re-vendor the entire
+`contracts/` bundle at the revision-11 digest in `release/contracts.json`,
+retain rev-10 output compatibility until the board is deployed, and then
+emit both proved observations from `provenDayFx`'s SOD/current evidence for
+each eligible desk. Preserve the two independent rate values in their existing
+calculation/provenance path, withhold exactness on missing proof, and omit
+`fx` for euro-only desks. The interim `day.detail` text is not structured
+proof. Real producer/executor compatibility, immutable deployment pins and
+Amy's sign-off remain required; synthetic fixtures do not supply them.
+JOED-149 changes no release coordinate or deployment pin and does not reseal
+the runtime closure. A later coordinated release must reserve and seal its
+own candidate after review; sealed-build integrity checks remain closed until then.
+
 ### Phase B exact money (JOED-85, contract-set revision 10)
 
 The data ID stays `inspr.joe.household.v2`. Every valid revision-9 payload
@@ -2405,6 +2454,11 @@ Ordinary feed and account-history polling pauses at expiry; only the probe
 continues automatically. The probe never accepts data into any feed or changes
 a frozen mark.
 
+A document entering the browser's back/forward cache pauses its probe timer.
+Restoring it re-arms a signed-out probe at its retained backoff, keeping the
+frozen board and reload guard intact. Leaving without caching permanently stops
+the probe; a late response while paused or stopped cannot trigger a reload.
+
 The probe records reload timestamps in `sessionStorage` under
 `joe-auth-probe-reloads-v1`: at most three automatic reloads per rolling ten
 minutes. The key is host/tab scoped, holds only timestamps, and is necessary to
@@ -2446,6 +2500,9 @@ Continuity auth/errors, all-503 and all-200). Every step remains frozen.
 its validator and origin boundary, 30/60/120-second backoff, a single pending
 attempt, lifecycle disposal, rolling reload guard, storage denial and manual
 Reload despite an exhausted automatic guard. No feed body proves in-place recovery.
+`test/signed-out-fix16.mjs` executes the app's probe lifecycle wiring for cached
+restores before and after expiry, repeated restores, late reads, permanent
+disposal, retained backoff and both reload-guard storage paths (JOED-175).
 Account history still validates through its own typed account validator, in its
 reader rather than in the probe classifier.
 
@@ -2950,4 +3007,38 @@ shared presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`, legacy
 anchor and historical artifacts remain unchanged. The saved presentation config
 and templates match the local approved source; the offline bundle remains
 active in footer/About. This local candidate grants no publication or deployment
+approval. The coordinator owns the cross-family gate, publication and live verification.
+
+## Release 43 candidate (JOED-177)
+
+Reserve `261101023838.0.0` at `2026-11-01T02:38:38Z` as `inspr-calver-3`, stable sequence 43,
+for the honest signed-out board (JOED-173) and the restored-tab authentication
+probe fix (JOED-175).
+
+Previous release is sequence 42 (`261031052151.0.0`), published to main at
+`a76621e4c36a3ddaa106bfb48f2085333d9fddcd`; its release set was verified in
+run `41215247109` (JOED-174). It was never live: the only csb0 switch
+(`2026-10-31T16:55Z`) rolled back on `feeds_not_ready` (upstream gateway).
+Reuse `superseded-before-deployment`, with no `deployed` field or adoption
+record, as release 38 did before 39. Markus's 2026-10-29 instruction is to skip
+superseded intermediates; release 43 supersedes release 42 directly.
+Last deployed remains sequence 41 (`261030154842.0.0`), live on csb0 since
+`2026-10-31T05:04:23Z` (JOED-172), with its existing adoption record preserved.
+About orders 43, 42, 41, 40, 39, 38, 37 through 26, then legacy; release 42's
+entry stays unchanged. Earlier preparation sections record reservation-time state.
+
+- When your sign-in expires, keep clearly frozen figures, including after returning with Back or Forward, and reload to sign in again.
+
+JOED-149 adds optional structured proof for both Today conversions in contract
+revision 11, accepted beside revision 10 under the same data schema ID. The
+pusher keeps sending revision 10 until a later, separate DEVOPS flip; this
+candidate does not claim dollar desks already show exchange-rate proof.
+The complete contract set is `c266b39e33e6e15be491263b0ca3575598dd264da3e1a9f6d5a147fc9f1bd49b`;
+participant requirements in `release/contracts.json` are recomputed from the
+accepted contract bytes, and this candidate's runtime closure is resealed.
+Historical artifacts and the legacy anchor stay intact.
+
+The approved presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`
+and saved global config/templates are retained; the offline bundle is active
+in footer/About. This local candidate grants no publication or deployment
 approval. The coordinator owns the cross-family gate, publication and live verification.

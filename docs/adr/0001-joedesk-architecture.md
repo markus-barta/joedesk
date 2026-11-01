@@ -1671,3 +1671,65 @@ anchor and historical artifacts remain unchanged. The saved presentation config
 and templates match the local approved source; the offline bundle remains
 active in footer/About. This local candidate grants no publication or deployment
 approval. The coordinator owns the cross-family gate, publication and live verification.
+
+### JOED-149: additive revision-11 proof for both Today conversions
+
+Amy's A1 (a) decision permits exact euro Today across different proven IB
+start-of-day and current rates. Revision 11 adds only optional desk DAY
+`fx = { start: { source, observedAt }, end: { source, observedAt } }`.
+The closed source enum is `ib-account-ExchangeRate`; timestamps use the
+existing canonical UTC millisecond instant. The containing source is an
+available SOD result with a period start. Start is no later than that
+boundary, and end is no earlier than start. Rate values remain in their
+existing computation/provenance path, outside this field.
+
+The payload ID stays `inspr.joe.household.v2`; valid revision-10 payloads and
+revision-11 payloads without proof retain their behaviour. The board applies
+its existing exactness and freshness rules and shows each exact desk's two
+conversion times in Vienna time in Details, without rate values. Schema and
+cross-field validation reject malformed proof using the existing last-good
+and explicit rejection path. Tests cover old and new payloads, closed shapes,
+ordering, independent desk exactness and Vienna/NY date and DST boundaries.
+
+The complete contract-set digest and participant requirements advance in
+`release/contracts.json`. DEVOPS must re-vendor that exact bundle and emit
+both proven SOD/current observations before the coordinated flip, using the
+JOED-86/87 producer sign-off pattern. The interim text detail is not proof.
+No release coordinate, deployment pin, historical artifact or runtime seal
+is changed by this implementation. The coordinator owns review and the
+later candidate reservation/seal; current sealed-build checks deliberately
+reject these changed runtime bytes until that release preparation.
+
+## Release 43 candidate (JOED-177)
+
+Reserve `261101023838.0.0` at `2026-11-01T02:38:38Z` as `inspr-calver-3`, stable sequence 43,
+for the honest signed-out board (JOED-173) and the restored-tab authentication
+probe fix (JOED-175).
+
+Previous release is sequence 42 (`261031052151.0.0`), published to main at
+`a76621e4c36a3ddaa106bfb48f2085333d9fddcd`; its release set was verified in
+run `41215247109` (JOED-174). It was never live: the only csb0 switch
+(`2026-10-31T16:55Z`) rolled back on `feeds_not_ready` (upstream gateway).
+Reuse `superseded-before-deployment`, with no `deployed` field or adoption
+record, as release 38 did before 39. Markus's 2026-10-29 instruction is to skip
+superseded intermediates; release 43 supersedes release 42 directly.
+Last deployed remains sequence 41 (`261030154842.0.0`), live on csb0 since
+`2026-10-31T05:04:23Z` (JOED-172), with its existing adoption record preserved.
+About orders 43, 42, 41, 40, 39, 38, 37 through 26, then legacy; release 42's
+entry stays unchanged. Earlier preparation sections record reservation-time state.
+
+- When your sign-in expires, keep clearly frozen figures, including after returning with Back or Forward, and reload to sign in again.
+
+JOED-149 adds optional structured proof for both Today conversions in contract
+revision 11, accepted beside revision 10 under the same data schema ID. The
+pusher keeps sending revision 10 until a later, separate DEVOPS flip; this
+candidate does not claim dollar desks already show exchange-rate proof.
+The complete contract set is `c266b39e33e6e15be491263b0ca3575598dd264da3e1a9f6d5a147fc9f1bd49b`;
+participant requirements in `release/contracts.json` are recomputed from the
+accepted contract bytes, and this candidate's runtime closure is resealed.
+Historical artifacts and the legacy anchor stay intact.
+
+The approved presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`
+and saved global config/templates are retained; the offline bundle is active
+in footer/About. This local candidate grants no publication or deployment
+approval. The coordinator owns the cross-family gate, publication and live verification.

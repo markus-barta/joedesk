@@ -2,10 +2,19 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "261031052151.0.0",
+    APP_VERSION: "261101023838.0.0",
     VERSION_SCHEME: "inspr-calver-3",
-    RELEASE_SEQUENCE: 42,
+    RELEASE_SEQUENCE: 43,
     VERSION_HISTORY: [
+      {
+        version: "261101023838.0.0",
+        versionScheme: "inspr-calver-3",
+        date: "2026-11-01",
+        title: "Clear signed-out figures after returning",
+        changes: [
+          "When your sign-in expires, keep clearly frozen figures, including after returning with Back or Forward, and reload to sign in again.",
+        ],
+      },
       {
         version: "261031052151.0.0",
         versionScheme: "inspr-calver-3",
