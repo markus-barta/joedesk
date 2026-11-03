@@ -484,13 +484,16 @@ default concurrency queue replaces older pending runs even with
 `cancel-in-progress: false`; `queue: max` still cancels overflow beyond 100
 pending runs ([GitHub concurrency semantics](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)).
 Instead, one combined browser step uses `scripts/with-browser-lock.sh`.
-On agm2, `flock` acquires `/dev/shm/joedesk-browser.lock` once for all six
+On agm2, `flock` acquires `/run/joedesk-browser/browser.lock` once for all six
 browser phases: Board, Results (all zones), Settings, both preview checks and
 release carry-overs, including browser teardown. There is no mid-job release
 or reacquisition. Setup and artifact uploads stay outside the lock. Results
 and Settings still execute after an earlier gate failure; preview checks and
-carry-overs require the preceding gates to pass. The three runners must
-share that host-local filesystem and service user for serialization. Missing
+carry-overs require the preceding gates to pass. The three runner users belong
+to the `joedesk-browser` group and share the setgid `/run/joedesk-browser`
+directory (mode 2770); `umask 007` creates the lock with mode 0660.
+This avoids `fs.protected_regular` refusing another runner user's create/open
+in the sticky, world-writable `/dev/shm` directory. Missing
 `flock`, denied lock-file access, or a non-timeout acquisition error emits a
 `::warning::` and a step-summary warning, then runs the phases UNLOCKED; timing
 budgets may contend. These runs export `JOED_BROWSER_LOCK_STATE=unavailable`
