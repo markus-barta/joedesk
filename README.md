@@ -2542,10 +2542,15 @@ detection and the stored hashes stay unchanged.
 oracle on the actual app in one headless browser, using synthetic loopback reads.
 It exercises every native auth response shape on every protected transport,
 including workers, plus opaque redirects independently on each endpoint. The
-PR subset rotates one full shape per width through every reason and screen;
-the other shapes retain warm values and one sampled reason on every screen.
+PR subset sweeps every reason and screen through a redirect at 390px and a
+401 status at 1440px, selected by response path. The other shapes retain warm
+values and one sampled reason on every screen: `refresh_failed` at 390px and
+`feed_not_received` at 1440px, with distinct health wording.
 `test/signed-out-plan.mjs` enforces identical classification through the actual
-page transport and session for the complete native shape list, and subset browser
+page transport, feed reads and history/account worker hand-offs for the complete
+native shape list; only transport status and redirect metadata vary by shape.
+Its execution test rejects a missing shape/endpoint visit, while `test/workflows.mjs`
+executes the CI shell to verify event-specific mode arguments. Subset browser
 runs require identical captured signed-out DOM across all shapes for one sampled
 reason per width and screen, starting from fresh documents with identical inputs.
 A controlled monotonic clock invokes the actual registered page timer callbacks
