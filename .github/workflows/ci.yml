@@ -49,8 +49,9 @@ jobs:
   browser:
     runs-on: ${{ (vars.JOEDESK_AGM2 == 'on' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","agm2"]') || 'ubuntu-latest' }}
     # PR work ~45 min (41272183028, 41211304715); push/dispatch 55–70 min
-    # (41276169961, 41215247109, 41602540403). The 60 min lock bound covers
-    # one push-sized run ahead: 60 lock + 70 work + 5 quiet + 15 setup/upload.
+    # (41276169961, 41215247109, 41602540403). Timeout: 60 lock + 70 work +
+    # 5 quiet + 15 setup/upload. The 60 min lock bound covers one PR-sized run
+    # ahead; a push-sized run ahead (up to 75 min) can exceed it (exit 75).
     timeout-minutes: 150
     steps:
       - name: Keep temporary files under RUNNER_TEMP

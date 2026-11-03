@@ -509,9 +509,12 @@ without the lock; fork PRs retain the hosted-only runner guard.
 
 Jobs can overlap while their browser phases wait for the lock. This preserves
 queued runs without a concurrency-group cap. The job timeout is 150 minutes:
-60 minutes waiting for one push-sized run ahead, up to 70 minutes for its own
-browser work, at most 5 minutes of quiet-host waits shared across the job, and
-15 minutes for setup/uploads. PR work is about 45 minutes
+up to 60 minutes waiting for the lock, up to 70 minutes for its own browser
+work, at most 5 minutes of quiet-host waits shared across the job, and 15
+minutes for setup/uploads. The 60-minute lock bound covers one PR-sized run
+ahead (about 45 minutes plus its quiet waits). A push-sized run ahead can hold
+the lock for up to 75 minutes, which exceeds the bound: the waiting job then
+fails with exit 75 before any browser phase starts. PR work is about 45 minutes
 ([41272183028](https://github.com/markus-barta/joedesk/actions/runs/41272183028),
 [41211304715](https://github.com/markus-barta/joedesk/actions/runs/41211304715));
 push and dispatch work is 55–70 minutes
