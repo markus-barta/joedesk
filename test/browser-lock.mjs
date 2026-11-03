@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -15,13 +15,39 @@ function hostWrapper(dir) {
   // Exercise the production fd lifetime; translate only the Linux host path
   // into owned scratch space for macOS. No configurable production lock path.
   const source = readFileSync(wrapper, 'utf8');
-  assert.ok(source.includes('exec 9>> /dev/shm/joedesk-browser.lock'));
+  assert.ok(source.includes('lock_path=/run/joedesk-browser/browser.lock'));
+  assert.ok(source.includes('exec 9>> "$lock_path"'));
   const local = join(dir, 'wrapper.sh');
-  writeFileSync(local, source.replace('exec 9>> /dev/shm/joedesk-browser.lock', 'exec 9>> "$JOED_TEST_LOCK"'));
+  writeFileSync(local, source.replace('exec 9>> "$lock_path"', 'exec 9>> "$JOED_TEST_LOCK"'));
   symlinkSync(bash, join(dir, 'bash'));
   symlinkSync(date, join(dir, 'date'));
   return local;
 }
+
+test('browser lock defines only the group-shared host path once and never uses /dev/shm', () => {
+  const source = readFileSync(wrapper, 'utf8');
+  assert.equal(source.match(/\/run\/joedesk-browser\/browser\.lock/g)?.length, 1);
+  assert.match(source, /^lock_path=\/run\/joedesk-browser\/browser\.lock$/m);
+  assert.doesNotMatch(source, /\/dev\/shm/);
+});
+
+test('browser lock opens under umask 007 and creates a group-readable and group-writable file', t => {
+  const source = readFileSync(wrapper, 'utf8');
+  assert.match(source, /umask 007[\s\S]*exec 9>> "\$lock_path"/);
+  const dir = scratch('joed-browser-lock-mode-');
+  t.after(() => discard(dir, 'browser lock permissions test'));
+  const local = hostWrapper(dir), lock = join(dir, 'lock');
+  writeFileSync(join(dir, 'flock'), '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+  const result = spawnSync(bash, ['-c', 'umask 077; exec "$@"', 'permissions-test', bash, local,
+    '-c', 'test "$JOED_BROWSER_LOCK_STATE" = held'], {
+    encoding: 'utf8', env: { ...process.env, PATH: dir, RUNNER_ENVIRONMENT: 'self-hosted',
+      GITHUB_STEP_SUMMARY: join(dir, 'summary'), JOED_TEST_LOCK: lock },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const mode = statSync(lock).mode & 0o777;
+  assert.equal(mode & 0o060, 0o060, 'every runner in the shared group can read and write the lock');
+  assert.equal(mode, 0o660);
+});
 
 test('browser shell retains strict failures, arguments and exit status; unknown environments fail closed', t => {
   const dir = scratch('joed-browser-lock-shell-');
@@ -39,8 +65,8 @@ test('browser shell retains strict failures, arguments and exit status; unknown 
   }).status, 1);
 });
 
-test('browser lock infrastructure failures warn and export unavailable state and reason to unlocked phases', t => {
-  for (const failure of ['missing', 'open-denied', 'open-directory', 'acquisition-error']) {
+test('browser lock infrastructure failures warn; cannot-open reasons name the shared path and missing-directory hint', t => {
+  for (const failure of ['missing', 'open-denied', 'open-directory', 'open-missing-directory', 'acquisition-error']) {
     const dir = scratch(`joed-browser-lock-${failure}-`);
     t.after(() => discard(dir, 'browser lock unavailable test'));
     const local = hostWrapper(dir), summary = join(dir, 'summary');
@@ -48,11 +74,12 @@ test('browser lock infrastructure failures warn and export unavailable state and
     if (failure === 'open-denied') writeFileSync(lock, '', { mode: 0o400 });
     if (failure !== 'missing') writeFileSync(join(dir, 'flock'), '#!/bin/sh\necho FLOCK_CALLED >&2\nexit 69\n', { mode: 0o700 });
     const reason = failure === 'missing' ? 'flock not found' : failure.startsWith('open-')
-      ? 'cannot open /dev/shm/joedesk-browser.lock' : 'flock failed (exit 69)';
+      ? 'cannot open /run/joedesk-browser/browser.lock; shared directory may be missing' : 'flock failed (exit 69)';
     const result = spawnSync(bash, [local, '-c',
       'printf "PHASE_STARTED state=%s reason=%s acquired=%s\\n" "$JOED_BROWSER_LOCK_STATE" "$JOED_BROWSER_LOCK_REASON" "$JOED_BROWSER_LOCK_ACQUIRED_AT"; exit 7'], {
       encoding: 'utf8', env: { ...process.env, PATH: dir, RUNNER_ENVIRONMENT: 'self-hosted',
-        GITHUB_STEP_SUMMARY: summary, JOED_TEST_LOCK: failure === 'open-directory' ? dir : lock,
+        GITHUB_STEP_SUMMARY: summary, JOED_TEST_LOCK: failure === 'open-directory' ? dir
+          : failure === 'open-missing-directory' ? join(dir, 'missing', 'lock') : lock,
         JOED_BROWSER_LOCK_STATE: 'held', JOED_BROWSER_LOCK_REASON: 'stale reason', JOED_BROWSER_LOCK_ACQUIRED_AT: 'stale time' },
     });
     assert.equal(result.status, 7, result.stderr);

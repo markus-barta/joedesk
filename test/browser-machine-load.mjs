@@ -44,7 +44,7 @@ test('QA machine-load tables retain the job lock wait evidence and distinguish h
 });
 
 test('QA machine-load tables show unavailable host lock state and the infrastructure failure reason', () => {
-  for (const reason of ['flock not found', 'cannot open /dev/shm/joedesk-browser.lock', 'flock failed (exit 69)']) {
+  for (const reason of ['flock not found', 'cannot open /run/joedesk-browser/browser.lock; shared directory may be missing', 'flock failed (exit 69)']) {
     const table = machineLoadTable([], {
       JOED_BROWSER_LOCK_STATE: 'unavailable', JOED_BROWSER_LOCK_REASON: reason,
       JOED_BROWSER_LOCK_ACQUIRED_AT: 'unavailable', JOED_BROWSER_LOCK_WAIT_SECONDS: '0',
