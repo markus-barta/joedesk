@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import * as filesystem from 'node:fs/promises';
 import { join } from 'node:path';
 import { waitForQuietHost, machineLoadTable, quietWaitCells } from '../scripts/browser/machine-load.mjs';
 import { createQuietWaitBudget } from '../scripts/browser/quiet-wait-budget.mjs';
@@ -21,7 +22,7 @@ test('JOED-180 (a): busy then quiet returns at the first quiet sample with waite
   const h = host([43, 18, 13, 2]);
   const result = await waitForQuietHost(h.options);
   assert.deepEqual(result, { waitedSeconds: 10, quiet: true, threshold: 13, startLoad1: 43,
-    budgetBeforeSeconds: 300, budgetAfterSeconds: 290, skipped: false, skipReason: null, budgetState: 'per-process' });
+    budgetBeforeSeconds: 300, budgetAfterSeconds: 290, skipped: false, skipReason: null, budgetState: 'per-process', refundBudgetState: 'per-process' });
   assert.deepEqual(h.sleeps, [5000, 5000]);
   assert.equal(h.reads, 3, 'the inclusive threshold ends polling immediately');
   assert.match(machineLoadTable([{ viewport: '390', phase: 'live', attempt: 2, attempts: 2, quietWait: result }]),
@@ -32,7 +33,7 @@ test('JOED-180 (b): never quiet returns at 300 seconds with quiet false', async 
   const h = host([43]);
   const result = await waitForQuietHost(h.options);
   assert.deepEqual(result, { waitedSeconds: 300, quiet: false, threshold: 13, startLoad1: 43,
-    budgetBeforeSeconds: 300, budgetAfterSeconds: 0, skipped: false, skipReason: null, budgetState: 'per-process' });
+    budgetBeforeSeconds: 300, budgetAfterSeconds: 0, skipped: false, skipReason: null, budgetState: 'per-process', refundBudgetState: 'per-process' });
   assert.equal(h.sleeps.length, 60);
   assert.ok(h.sleeps.every(ms => ms === 5000));
   assert.equal(h.reads, 61);
@@ -48,7 +49,7 @@ test('JOED-180 (e): threshold uses availableParallelism before the injectable CP
   fallback.options.parallelism = null;
   assert.deepEqual(await waitForQuietHost(fallback.options),
     { waitedSeconds: 0, quiet: true, threshold: 16, startLoad1: 15,
-      budgetBeforeSeconds: 300, budgetAfterSeconds: 300, skipped: false, skipReason: null, budgetState: 'per-process' });
+      budgetBeforeSeconds: 300, budgetAfterSeconds: 300, skipped: false, skipReason: null, budgetState: 'per-process', refundBudgetState: 'per-process' });
 });
 
 test('JOED-180: an initially quiet host needs no sleep, and timer delays reduce the remaining polling time', async () => {
@@ -132,6 +133,110 @@ test('JOED-180: exhausted budgets skip without sleeping, and local calls share a
   assert.equal(skipped.skipReason, 'budget exhausted');
   assert.equal(skipped.budgetBeforeSeconds, 0);
   assert.equal(skipped.budgetAfterSeconds, 0);
+});
+
+for (const code of ['EEXIST', 'EACCES', 'ENOSPC', 'EISDIR']) {
+  test(`JOED-180 budget I/O ${code}: reservation and refund failures are recorded without rejecting`, async t => {
+    for (const failingTransaction of [1, 2]) {
+      const root = scratch(`joed-budget-${code.toLowerCase()}-`);
+      t.after(() => discard(root, `JOED-180 ${code} budget test`));
+      const file = join(root, 'joedesk-quiet-wait-budget.json');
+      let transactions = 0;
+      // Permission/disk-full failures are injected at the real I/O boundary,
+      // independent of host privileges or the workstation's free disk space.
+      const io = { ...filesystem,
+        readFile: async (...args) => {
+          if (code === 'EACCES' && transactions === failingTransaction) throw Object.assign(new Error(code), { code });
+          return filesystem.readFile(...args);
+        },
+        writeFile: async (...args) => {
+          if (code === 'ENOSPC' && transactions === failingTransaction) throw Object.assign(new Error(code), { code });
+          return filesystem.writeFile(...args);
+        },
+      };
+      const store = createQuietWaitBudget(root, io);
+      const budget = async change => {
+        if (++transactions === failingTransaction) {
+          if (code === 'EEXIST') await filesystem.mkdir(`${file}.lock`);
+          if (code === 'EISDIR') {
+            if (failingTransaction === 2) await filesystem.rename(file, `${file}.saved`);
+            await filesystem.mkdir(file);
+          }
+        }
+        return store(change);
+      };
+      const h = host([43, 2]);
+      const result = await waitForQuietHost({ ...h.options, budget });
+      assert.equal(result.budgetState, `unavailable (${code})`);
+      assert.equal(result.budgetAfterSeconds, null, 'failed persistence leaves the allowance unknown');
+      assert.ok(quietWaitCells(result).includes(`unavailable (${code})`));
+      if (failingTransaction === 1) {
+        assert.equal(result.skipped, true);
+        assert.equal(result.skipReason, 'quiet-wait budget unavailable');
+        assert.equal(result.budgetBeforeSeconds, null);
+        assert.equal(result.waitedSeconds, 0);
+        assert.deepEqual(h.sleeps, []);
+        assert.equal(transactions, 1, 'an unavailable reservation never attempts a refund');
+      } else {
+        assert.equal(result.refundBudgetState, `unavailable (${code})`);
+        assert.equal(result.budgetBeforeSeconds, 300);
+        assert.equal(result.waitedSeconds, 5);
+        assert.equal(result.quiet, true);
+        assert.equal(transactions, 2);
+      }
+      if (code !== 'EEXIST') assert.ok(!readdirSync(root).includes('joedesk-quiet-wait-budget.json.lock'), 'the owned transaction lock is released');
+      assert.ok(!readdirSync(root).some(name => name.endsWith('.tmp')), 'failed atomic writes leave no temporary files');
+    }
+  });
+}
+
+test('JOED-180 budget stale lock: abandoned reservation and refund locks skip safely and are recorded', async t => {
+  for (const failingTransaction of [1, 2]) {
+    const root = scratch('joed-budget-stale-lock-');
+    t.after(() => discard(root, 'JOED-180 stale lock test'));
+    const lock = join(root, 'joedesk-quiet-wait-budget.json.lock');
+    const store = createQuietWaitBudget(root);
+    let transactions = 0;
+    const budget = async change => {
+      if (++transactions === failingTransaction) {
+        await filesystem.mkdir(lock);
+        const old = new Date(Date.now() - 20_000);
+        await filesystem.utimes(lock, old, old);
+      }
+      return store(change);
+    };
+    const h = host([43, 2]);
+    const result = await waitForQuietHost({ ...h.options, budget });
+    assert.equal(result.budgetState, 'unavailable (EEXIST)');
+    assert.match(result.skipReason, /abandoned quiet-wait budget lock \(>10 s\)/);
+    assert.equal(result.waitedSeconds, failingTransaction === 1 ? 0 : 5);
+    assert.equal(result.skipped, failingTransaction === 1);
+    if (failingTransaction === 2) assert.equal(result.refundBudgetState, 'unavailable (EEXIST)');
+    assert.ok((await filesystem.stat(lock)).isDirectory(), 'an unowned lock is never deleted');
+    assert.ok(quietWaitCells(result).includes('abandoned quiet-wait budget lock'));
+  }
+});
+
+test('JOED-180 budget refund: absent and corrupt resets record their own source without replenishing spent time', async t => {
+  for (const source of ['created', 'corrupt (reset to 300 s)']) {
+    const root = scratch('joed-budget-refund-source-');
+    t.after(() => discard(root, 'JOED-180 refund source test'));
+    const file = join(root, 'joedesk-quiet-wait-budget.json');
+    const store = createQuietWaitBudget(root);
+    await store(state => { state.remainingSeconds = 100; });
+    const h = host([43, 2]);
+    const result = await waitForQuietHost({ ...h.options, budget: store, sleep: async ms => {
+      await h.options.sleep(ms);
+      if (source === 'created') await filesystem.rename(file, `${file}.saved`);
+      else await filesystem.writeFile(file, '{corrupt');
+    } });
+    assert.equal(result.budgetState, 'existing');
+    assert.equal(result.refundBudgetState, source);
+    assert.equal(result.budgetBeforeSeconds, 100);
+    assert.equal(result.budgetAfterSeconds, 95);
+    assert.ok(quietWaitCells(result).includes(`refund: ${source}`));
+    assert.deepEqual(JSON.parse(readFileSync(file)), { remainingSeconds: 95, failed: false });
+  }
 });
 
 test('JOED-180: overlapping waits cannot spend the same allowance twice', async t => {

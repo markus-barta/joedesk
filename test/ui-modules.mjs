@@ -2,7 +2,8 @@
 // the host gate and desk changes. The browser serves public/joe/time.mjs and
 // public/joe/contracts/* from the repo root; this hook mirrors that mapping.
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import * as nodeModule from 'node:module';
 import { test } from 'node:test';
@@ -2476,7 +2477,7 @@ test('browser budget: reference limits stay strict with no re-measure', () => {
 
 // Exercise the exact runner with synthetic CDP replies, without a browser,
 // servers or real time. Each load consumes one phase's scripted measurement.
-async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD, waitForQuiet = async () => ({ waitedSeconds: 0, quiet: true, threshold: 13, startLoad1: 2 }) } = {}) {
+async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD, useDefaultWait = false, waitForQuiet = async () => ({ waitedSeconds: 0, quiet: true, threshold: 13, startLoad1: 2 }) } = {}) {
   let phase, sample, reads;
   const loads = { cold: 0, live: 0 }, boards = [], checks = [], events = [];
   const timings = (reason, count, ms) => Array.from({ length: count }, (_, i) => ({ reason, at: 200 + i * 20, ms }));
@@ -2500,7 +2501,7 @@ async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD, wa
       assert.ok(source.includes('.click()') || source === 'window.__joedesk.refresh()' || source === 'window.__joedesk.refresh(); window.__joedesk.refreshAccount?.()', source);
     },
   };
-  const context = { decideTaskGuard, TIMING_GUARDS, observeBudgetTasks, attributeBudgetTasks,
+  const context = { decideTaskGuard, TIMING_GUARDS, observeBudgetTasks, attributeBudgetTasks, waitForQuietHost,
     max: list => list.length ? Math.max(...list) : NaN,
     VIEWPORTS: [{ name: '390' }], NOW: '2026-10-14T17:42:22.000Z', ACTOR: 'fixture',
     largeScenario: (now, points = 9000) => ({ snapshot: { seq: 1001 }, history: { receivedAt: now, points: Array(points) } }),
@@ -2519,12 +2520,12 @@ async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD, wa
   };
   const execute = runInNewContext(`(${runBudget.toString()})`, context);
   const traces = await execute({ page, limits,
-    waitForQuiet: async () => {
+    ...(!useDefaultWait ? { waitForQuiet: async () => {
       events.push('wait-start');
       const result = await waitForQuiet();
       events.push('wait-end');
       return result;
-    },
+    } } : {}),
     sampleLoad: () => { events.push('sample-load'); return { sampledAt: `sample-${boards.length}`, loadavg: [1, 2, 3], cpuCount: 8, browserProcesses: 4 }; },
     newBoard: async ({ history, accountHistory }) => {
       const board = { history, accountHistory, url: `http://fixture/${boards.length}/`, pushes: [], setNow() {},
@@ -2657,7 +2658,7 @@ test('browser budget: runBudget statically allows at most one re-measure per vie
 
 // Run the Results orchestration against scripted page replies. Navigation
 // consumes a sample, so an unexpected third measurement fails immediately.
-async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUARD, waitForQuiet = async () => ({ waitedSeconds: 0, quiet: true, threshold: 13, startLoad1: 2 }) } = {}) {
+async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUARD, useDefaultWait = false, waitForQuiet = async () => ({ waitedSeconds: 0, quiet: true, threshold: 13, startLoad1: 2 }) } = {}) {
   let viewport, sample, unserved = false;
   const loads = Object.fromEntries(Object.keys(samples).map(width => [width, 0])), checks = [], observers = [], events = [];
   const page = {
@@ -2676,7 +2677,7 @@ async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUA
       assert.ok(source === 'window.__joedesk.timings.length = 0' || source.includes('.click()'), source);
     },
   };
-  const context = { decideTaskGuard, TIMING_GUARDS, TextEncoder,
+  const context = { decideTaskGuard, TIMING_GUARDS, TextEncoder, waitForQuietHost,
     max: list => list.length ? Math.max(...list) : NaN,
     VIEWPORTS: Object.keys(samples).map(name => ({ name })), NOW: '2026-10-27T04:00:00.000Z',
     scenario: () => ({ snapshot: {}, history: {} }), at: (base, seconds) => `${base}/${seconds}`,
@@ -2692,12 +2693,12 @@ async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUA
   const execute = runInNewContext(`(${runResultsBudget.toString()})`, context);
   let loadSamples = 0;
   const traces = await execute({ page, limits,
-    waitForQuiet: async () => {
+    ...(!useDefaultWait ? { waitForQuiet: async () => {
       events.push('wait-start');
       const result = await waitForQuiet();
       events.push('wait-end');
       return result;
-    },
+    } } : {}),
     sampleLoad: () => { events.push('sample-load'); return { sampledAt: `sample-${++loadSamples}`, loadavg: [4, 5, 6], cpuCount: 16, browserProcesses: 7 }; },
     newBoard: async () => ({ url: 'http://fixture/', setNow() {}, async push() { return { status: 200 }; } }),
     serve: async () => async () => { unserved = true; },
@@ -2831,7 +2832,7 @@ test('JOED-180 (b): after the full busy-host wait, both runners measure once mor
       assert.equal(run.checks.every(c => c.ok), second.worker !== false);
       const last = run.traces.at(-1);
       assert.deepEqual(last.quietWait, { waitedSeconds: 300, quiet: false, threshold: 13, startLoad1: 43,
-        budgetBeforeSeconds: 300, budgetAfterSeconds: 0, skipped: false, skipReason: null, budgetState: 'per-process' });
+        budgetBeforeSeconds: 300, budgetAfterSeconds: 0, skipped: false, skipReason: null, budgetState: 'per-process', refundBudgetState: 'per-process' });
       assert.equal(last.attempt, 2);
       assert.ok(run.traces.filter(r => r.attempt === 1).every(r => !('quietWait' in r)));
       const table = runner === 'board' ? budgetTable(run.traces, CI_GUARD) : resultsBudgetTable(run.traces, CI_GUARD);
@@ -2939,24 +2940,55 @@ test('JOED-180 (h): after a not-quiet wait later second attempts in both runners
   }
 });
 
-test('JOED-180 (j): reference runners never read or write an absent or corrupt job budget', async t => {
-  const root = scratch('joed-reference-budget-');
-  t.after(() => discard(root, 'JOED-180 reference budget test'));
-  const file = join(root, 'joedesk-quiet-wait-budget.json');
-  for (const corrupt of [false, true]) {
-    if (corrupt) writeFileSync(file, '{corrupt');
-    const before = readdirSync(root);
-    const store = createQuietWaitBudget(root);
-    const waitForQuiet = () => waitForQuietHost({ budget: (...args) => {
-      assert.fail('reference path must not read or write the job budget');
-      return store(...args);
-    } });
-    const board = await simulatedBudget({ limits: REFERENCE_BUDGET, cold: [{ historyMs: 51 }], live: [{ patchMs: 17 }], waitForQuiet });
-    const results = await simulatedResultsBudget({ limits: REFERENCE_BUDGET, samples: { 390: [{ switchMs: 17 }] }, waitForQuiet });
+test('JOED-180 (j): reference runners with the real default wait leave the job budget directory empty', async t => {
+  if (process.env.JOED_REFERENCE_BUDGET_CHILD === '1') {
+    const root = process.env.JOED_QA_ROOT;
+    assert.equal(root, process.env.RUNNER_TEMP);
+    assert.deepEqual(readdirSync(root), []);
+    const board = await simulatedBudget({ limits: REFERENCE_BUDGET, cold: [{ historyMs: 51 }], live: [{ patchMs: 17 }], useDefaultWait: true });
+    const results = await simulatedResultsBudget({ limits: REFERENCE_BUDGET, samples: { 390: [{ switchMs: 17 }] }, useDefaultWait: true });
     assert.deepEqual(board.loads, { cold: 1, live: 1 });
     assert.deepEqual(results.loads, { 390: 1 });
-    assert.deepEqual(readdirSync(root), before);
-    if (corrupt) assert.equal(readFileSync(file, 'utf8'), '{corrupt');
+    for (const run of [board, results]) assert.ok(run.traces.every(r => !('quietWait' in r)));
+    assert.deepEqual(readdirSync(root), [], 'import and both reference runners perform no budget I/O');
+    return;
+  }
+  const root = scratch('joed-reference-budget-');
+  t.after(() => discard(root, 'JOED-180 reference budget test'));
+  const childEnv = { ...process.env, RUNNER_TEMP: root, JOED_QA_ROOT: root, JOED_REFERENCE_BUDGET_CHILD: '1' };
+  // Start an independent test runner, not another child of the parent's
+  // internal reporter protocol (which can otherwise exit with no tests).
+  delete childEnv.NODE_TEST_CONTEXT;
+  const child = spawnSync(process.execPath, ['--test', '--test-reporter=tap', '--test-name-pattern=JOED-180 \\(j\\)', new URL(import.meta.url).pathname], {
+    encoding: 'utf8', timeout: 15_000, env: childEnv,
+  });
+  assert.equal(child.status, 0, `${child.stdout}\n${child.stderr}`);
+  assert.match(child.stdout, /ok 1 - JOED-180 \(j\):/, 'the child must execute the reference test');
+  assert.match(child.stdout, /# pass 1\b/);
+  assert.deepEqual(readdirSync(root), [], 'no budget file or lock was created in the configured job root');
+});
+
+test('JOED-180 budget I/O: both runners still re-measure and let the second result decide after reservation or refund errors', async () => {
+  for (const code of ['EEXIST', 'EACCES', 'ENOSPC', 'EISDIR']) {
+    for (const failingTransaction of [1, 2]) {
+      for (const second of [{}, { worker: false }]) {
+        for (const runner of ['board', 'results']) {
+          const store = createQuietWaitBudget();
+          let transactions = 0;
+          const waitForQuiet = () => waitForQuietHost({ load: () => [2], parallelism: () => 26,
+            budget: change => {
+              if (++transactions === failingTransaction) throw Object.assign(new Error(code), { code });
+              return store(change);
+            } });
+          const run = runner === 'board'
+            ? await simulatedBudget({ live: [{ patchMs: 41 }, second], waitForQuiet })
+            : await simulatedResultsBudget({ samples: { 390: [{ switchMs: 41 }, second] }, waitForQuiet });
+          assert.equal(run.loads[runner === 'board' ? 'live' : '390'], 2);
+          assert.equal(run.checks.every(c => c.ok), second.worker !== false);
+          assert.equal(run.traces.at(-1).quietWait.budgetState, `unavailable (${code})`);
+        }
+      }
+    }
   }
 });
 

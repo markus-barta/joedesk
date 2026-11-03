@@ -502,13 +502,21 @@ host configuration or runner labels are changed by the workflow. Hosted jobs use
 without the lock; fork PRs retain the hosted-only runner guard.
 
 Jobs can overlap while their browser phases wait for the lock. This preserves
-queued runs without a concurrency-group cap. The job timeout is 125 minutes:
-60 minutes waiting (two typical 30-minute locked runs), 45 minutes for its own
+queued runs without a concurrency-group cap. The job timeout is 150 minutes:
+60 minutes waiting for one push-sized run ahead, up to 70 minutes for its own
 browser work, at most 5 minutes of quiet-host waits shared across the job, and
-15 minutes for setup/uploads. `flock --wait 3600` gives lock
+15 minutes for setup/uploads. PR work is about 45 minutes
+([41272183028](https://github.com/markus-barta/joedesk/actions/runs/41272183028),
+[41211304715](https://github.com/markus-barta/joedesk/actions/runs/41211304715));
+push and dispatch work is 55–70 minutes
+([41276169961](https://github.com/markus-barta/joedesk/actions/runs/41276169961),
+[41215247109](https://github.com/markus-barta/joedesk/actions/runs/41215247109),
+[41602540403](https://github.com/markus-barta/joedesk/actions/runs/41602540403),
+which stopped at 59.8 minutes with phases still to run). `flock --wait 3600` gives lock
 waiting a separate one-hour bound; timeout fails clearly before any browser
-phase starts. This sizes for three overlapping jobs at the typical duration;
-flock makes no FIFO guarantee, so sustained contention can still exhaust the
+phase starts. Even two PR-sized runs ahead need about 90 minutes, beyond the
+lock bound; three overlapping jobs are not guaranteed to acquire the lock.
+`flock` makes no FIFO guarantee, so sustained contention can still exhaust the
 explicit wait bound. Timeout or cancellation remains visible; it never
 supersedes another pending PR run. Wait start/acquisition UTC times and waited
 seconds appear in the step log and summary and beside the machine-load tables
@@ -522,7 +530,11 @@ in QA `index.md` (and the reference command's output). Counts include the active
 browser and its helpers; failed process inspection prints `unavailable`, never
 zero. Inspection requests executable names only, not process arguments. Load
 now delays the CI re-measure until quiet or the job's shared 300 s wait budget
-is spent; it changes no limit or decision.
+is spent; it changes no limit or decision. Budget I/O failures are recorded as
+`unavailable (<code>)` and skip waiting so the second attempt still runs. A budget
+lock older than 10 seconds is treated as abandoned, recorded, and skipped without
+deleting it. Refunds record their own budget source; failures leave the remaining
+allowance marked unavailable.
 
 Chrome installation runs hosted-only. Self-hosted jobs first use a non-empty,
 executable `BROWSER_PATH`; otherwise they resolve `chromium`, `chromium-browser`,

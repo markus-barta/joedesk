@@ -71,7 +71,7 @@ test('runner expression stays hosted by default and for fork PRs even when opted
 });
 
 const ci = parse(workflows.get('ci.yml'));
-test('JOED-180 budget: CI retains every run and locks all seven browser phases once with room for three typical queued jobs', () => {
+test('JOED-180 budget: CI retains every run and sizes all seven locked phases for push and dispatch work', () => {
   assert.equal(ci.concurrency, undefined, 'workflow concurrency must not replace pending PR runs');
   for (const job of Object.values(ci.jobs)) assert.equal(job.concurrency, undefined);
   const steps = ci.jobs.browser.steps.filter(step => /scripts\/(?:browser-p[3456]|browser\/signed-out-pages|preview-capture(?:-ci)?)\.mjs|npm run test:results/.test(step.run ?? ''));
@@ -81,7 +81,7 @@ test('JOED-180 budget: CI retains every run and locks all seven browser phases o
   for (const script of ['browser-p3', 'browser/signed-out-pages', 'browser-p5', 'browser-p6', 'preview-capture', 'preview-capture-ci']) {
     assert.ok(steps[0].run.includes(`scripts/${script}.mjs`));
   }
-  assert.equal(ci.jobs.browser['timeout-minutes'], 60 + 45 + 5 + 15);
+  assert.equal(ci.jobs.browser['timeout-minutes'], 60 + 70 + 5 + 15);
 });
 
 function simulateBrowserPhases(t, { event = 'push', fail = '' } = {}) {

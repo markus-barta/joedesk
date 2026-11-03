@@ -11,13 +11,22 @@ import { quietWaitBudget, QUIET_WAIT_SECONDS } from './quiet-wait-budget.mjs';
 export async function waitForQuietHost({ load = os.loadavg, parallelism = os.availableParallelism,
   cpuList = os.cpus, now = () => performance.now(), sleep = setTimeout, budget = quietWaitBudget } = {}) {
   const threshold = (typeof parallelism === 'function' ? parallelism() : cpuList().length) / 2;
-  const reservation = await budget((state, budgetState) => {
-    const skipReason = state.failed ? 'an earlier wait never reached a quiet host'
-      : state.remainingSeconds <= 0 ? 'budget exhausted' : null;
-    const budgetBeforeSeconds = state.remainingSeconds;
-    if (!skipReason) state.remainingSeconds = 0;
-    return { budgetBeforeSeconds, budgetState, skipped: !!skipReason, skipReason };
-  });
+  let reservation;
+  try {
+    reservation = await budget((state, budgetState) => {
+      const skipReason = state.failed ? 'an earlier wait never reached a quiet host'
+        : state.remainingSeconds <= 0 ? 'budget exhausted' : null;
+      const budgetBeforeSeconds = state.remainingSeconds;
+      if (!skipReason) state.remainingSeconds = 0;
+      return { budgetBeforeSeconds, budgetState, skipped: !!skipReason, skipReason };
+    });
+  } catch (error) {
+    const startLoad1 = load()[0];
+    return { waitedSeconds: 0, quiet: startLoad1 <= threshold, threshold, startLoad1,
+      budgetBeforeSeconds: null, budgetAfterSeconds: null, skipped: true,
+      skipReason: error.staleLock ? 'abandoned quiet-wait budget lock (>10 s)' : 'quiet-wait budget unavailable',
+      budgetState: `unavailable (${error.code ?? 'unknown'})` };
+  }
   const started = now(), startLoad1 = load()[0];
   let load1 = startLoad1;
   while (!reservation.skipped && load1 > threshold) {
@@ -28,18 +37,31 @@ export async function waitForQuietHost({ load = os.loadavg, parallelism = os.ava
   }
   const waitedSeconds = reservation.skipped ? 0 : (now() - started) / 1000;
   const quiet = load1 <= threshold;
-  const budgetAfterSeconds = reservation.skipped ? reservation.budgetBeforeSeconds : await budget(state => {
-    state.remainingSeconds = Math.min(QUIET_WAIT_SECONDS,
-      state.remainingSeconds + Math.max(0, reservation.budgetBeforeSeconds - waitedSeconds));
-    state.failed ||= !quiet;
-    return state.remainingSeconds;
-  });
-  return { waitedSeconds, quiet, threshold, startLoad1, ...reservation, budgetAfterSeconds };
+  let budgetAfterSeconds = reservation.budgetBeforeSeconds, refundBudgetState;
+  if (!reservation.skipped) {
+    try {
+      budgetAfterSeconds = await budget((state, source) => {
+        refundBudgetState = source;
+        // A reset during refund must not replenish already-spent time.
+        const remaining = source === 'existing' || source === 'per-process' ? state.remainingSeconds : 0;
+        state.remainingSeconds = Math.min(QUIET_WAIT_SECONDS,
+          remaining + Math.max(0, reservation.budgetBeforeSeconds - waitedSeconds));
+        state.failed ||= !quiet;
+        return state.remainingSeconds;
+      });
+    } catch (error) {
+      refundBudgetState = reservation.budgetState = `unavailable (${error.code ?? 'unknown'})`;
+      budgetAfterSeconds = null;
+      if (error.staleLock) reservation.skipReason = 'abandoned quiet-wait budget lock (>10 s) during refund';
+    }
+  }
+  return { waitedSeconds, quiet, threshold, startLoad1, ...reservation, budgetAfterSeconds,
+    ...(!reservation.skipped ? { refundBudgetState } : {}) };
 }
 
 const loadCell = n => Number.isFinite(n) ? n.toFixed(2) : 'unavailable';
 export function quietWaitCells(wait) {
-  return wait ? ` ${wait.waitedSeconds.toFixed(1)} | ${wait.quiet ? 'yes' : 'no'} | ${wait.threshold} | ${loadCell(wait.startLoad1)} | ${wait.budgetBeforeSeconds?.toFixed(1) ?? 'unavailable'} | ${wait.budgetAfterSeconds?.toFixed(1) ?? 'unavailable'} | ${wait.skipped ? 'yes' : 'no'} | ${wait.skipReason ?? '—'} | ${wait.budgetState ?? 'unavailable'} |`
+  return wait ? ` ${wait.waitedSeconds.toFixed(1)} | ${wait.quiet ? 'yes' : 'no'} | ${wait.threshold} | ${loadCell(wait.startLoad1)} | ${wait.budgetBeforeSeconds?.toFixed(1) ?? 'unavailable'} | ${wait.budgetAfterSeconds?.toFixed(1) ?? 'unavailable'} | ${wait.skipped ? 'yes' : 'no'} | ${wait.skipReason ?? '—'} | ${wait.budgetState ?? 'unavailable'}${wait.refundBudgetState ? `; refund: ${wait.refundBudgetState}` : ''} |`
     : ' — | — | — | — | — | — | — | — | — |';
 }
 
