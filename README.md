@@ -479,6 +479,9 @@ and requires approval for all outside collaborators; `pull_request_target` is
 forbidden. Checkout explicitly cleans the workspace, and CI temporary files and
 npm's cache stay under `RUNNER_TEMP`.
 
+Signed-out CI runs the invariant-enforced `--subset` on PRs (544 cases) and
+the complete `--full` matrix on main pushes and workflow dispatches (2,496 cases).
+
 JOED-169: CI keeps every PR run; it has no workflow concurrency group. GitHub's
 default concurrency queue replaces older pending runs even with
 `cancel-in-progress: false`; `queue: max` still cancels overflow beyond 100
@@ -2513,8 +2516,9 @@ receipt may go backwards. The P4 stale fixture advances server time while
 re-serving one fixed record and refreshing its independent money input; it
 does not manufacture an older receipt on the second read. P3's signed-out fixture
 now checks that successful feed responses leave the old page frozen and a fresh
-page load resumes rendering. `scripts/browser/signed-out-pages.mjs` keeps all
-2,496 matrix cases and changes each resume assertion to observe a probe-triggered
+page load resumes rendering. CI runs `scripts/browser/signed-out-pages.mjs --subset`
+on PRs (544 cases, including cross-shape DOM invariants) and `--full` on main pushes
+and workflow dispatches (all 2,496 cases). Each resume assertion observes a probe-triggered
 page reload and a live new document, including the Results-503 case with its cold
 unavailable state. It also exercises the real manual Reload control. All
 seven CI browser phases run in the same locked shell; signed-out checks retain
@@ -2537,8 +2541,14 @@ detection and the stored hashes stay unchanged.
 `TZ=UTC node scripts/browser/signed-out-pages.mjs` runs the same whole-document
 oracle on the actual app in one headless browser, using synthetic loopback reads.
 It exercises every native auth response shape on every protected transport,
-including workers, plus opaque redirects independently on each endpoint. A
-controlled monotonic clock invokes the actual registered page timer callbacks
+including workers, plus opaque redirects independently on each endpoint. The
+PR subset rotates one full shape per width through every reason and screen;
+the other shapes retain warm values and one sampled reason on every screen.
+`test/signed-out-plan.mjs` enforces identical classification through the actual
+page transport and session for the complete native shape list, and subset browser
+runs require identical captured signed-out DOM across all shapes for one sampled
+reason per width and screen, starting from fresh documents with identical inputs.
+A controlled monotonic clock invokes the actual registered page timer callbacks
 125 seconds later to cross minute boundaries without suspending worker event
 loops. The browser audit also exercises chart hover/focus/keys/wheel, an open
 native modal, Reload reachability, per-section stale marks and muted values,

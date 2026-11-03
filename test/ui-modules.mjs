@@ -18,6 +18,7 @@ import './browser-machine-load.mjs';
 import './theme-geometry.mjs';
 import './theme-copy.mjs';
 import './board-sweep-plan.mjs';
+import './signed-out-plan.mjs';
 import './feed-robust.mjs';
 import './signed-out-presentation.mjs';
 import './signed-out-pages.mjs';
