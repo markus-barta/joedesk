@@ -2,6 +2,7 @@
 // Assertions consume only the resulting document, never presentation helpers.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { setImmediate as nextTurn } from 'node:timers/promises';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
@@ -54,6 +55,9 @@ function snapshot(doc, width) {
   return renderedSnapshot(doc, shown);
 }
 async function preview(t, width, shape = '401', populated = true, { html = readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'), cleanup = true } = {}) {
+  // Thousands of in-memory page cases otherwise chain only microtasks. Give
+  // the test runner's reporter and pipe backpressure a turn between cases.
+  await nextTurn();
   const restoreSession = freshPageSession();
   const controls = { ...R.RS };
   Object.assign(R.RS, { period: 'week', anchor: null, sel: null, desk: 'all', cal: null, moved: false });
@@ -174,6 +178,23 @@ export function resetPreview() {
     async fail503() { failed503 = true; await feed.refresh(); await refreshBoardSettings(); },
     async recover() { refused = failed503 = false; await feed.refresh(); await refreshBoardSettings(); }, f };
 }
+
+test('JOED-181: signed-out page cases let the event loop report progress', async t => {
+  // Two cases on the same path as the exhaustive matrix. Resolved fetch/body
+  // promises alone only drain microtasks, starving the runner's TAP pipe.
+  for (const screen of ['desk', 'settings']) {
+    let reported = false;
+    const report = setImmediate(() => { reported = true; });
+    t.after(() => clearImmediate(report));
+    const p = await preview(t, 390);
+    p.render(p.context(null), screen);
+    const before = p.capture();
+    await p.signOut();
+    assertSignedOutPage(p.capture(), before, screen);
+    p.close();
+    assert.equal(reported, true, `${screen}: page cases must yield to the event loop, not just to promises`);
+  }
+});
 
 // Every earlier reproducer now exercises the same structural invariant; these
 // names retain the review history, with populated account history and dirty fields.

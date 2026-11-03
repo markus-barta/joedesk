@@ -2483,6 +2483,11 @@ bars, position counts, the account’s 1M change and Since start comparison,
 phone learning and aggregate kept worth. Oracle mutation tests reject arbitrary
 new wording, changed inputs and vanished values. The historical non-auth page
 hashes from `a941776` and builder hashes from `fa6db1d` remain unchanged.
+The Node fixture yields an event-loop turn between page cases (JOED-181).
+Without that turn, its in-memory reads chain microtasks across thousands of
+cases and delay TAP output, making the combined UI run appear stuck after
+the cold account-expiry test. A two-case regression checks that queued
+progress callbacks run; the matrix and its exact oracles stay intact.
 `test/signed-out-fix5.mjs` and `test/signed-out-fix6.mjs` retain inert/modal,
 hover/focus/key, pre-expiry timer, version clipboard, collapsed-section,
 abandoned-write, board-settings GET and frozen account-history regressions.
