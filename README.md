@@ -505,12 +505,21 @@ host configuration or runner labels are changed by the workflow. Hosted jobs use
 without the lock; fork PRs retain the hosted-only runner guard.
 
 Jobs can overlap while their browser phases wait for the lock. This preserves
-queued runs without a concurrency-group cap. The job timeout is 120 minutes:
-60 minutes waiting (two typical 30-minute locked runs), 45 minutes for its own
-browser work, and 15 minutes for setup/uploads. `flock --wait 3600` gives lock
+queued runs without a concurrency-group cap. The job timeout is 150 minutes:
+60 minutes waiting for one push-sized run ahead, up to 70 minutes for its own
+browser work, at most 5 minutes of quiet-host waits shared across the job, and
+15 minutes for setup/uploads. PR work is about 45 minutes
+([41272183028](https://github.com/markus-barta/joedesk/actions/runs/41272183028),
+[41211304715](https://github.com/markus-barta/joedesk/actions/runs/41211304715));
+push and dispatch work is 55–70 minutes
+([41276169961](https://github.com/markus-barta/joedesk/actions/runs/41276169961),
+[41215247109](https://github.com/markus-barta/joedesk/actions/runs/41215247109),
+[41602540403](https://github.com/markus-barta/joedesk/actions/runs/41602540403),
+which stopped at 59.8 minutes with phases still to run). `flock --wait 3600` gives lock
 waiting a separate one-hour bound; timeout fails clearly before any browser
-phase starts. This sizes for three overlapping jobs at the typical duration;
-flock makes no FIFO guarantee, so sustained contention can still exhaust the
+phase starts. Even two PR-sized runs ahead need about 90 minutes, beyond the
+lock bound; three overlapping jobs are not guaranteed to acquire the lock.
+`flock` makes no FIFO guarantee, so sustained contention can still exhaust the
 explicit wait bound. Timeout or cancellation remains visible; it never
 supersedes another pending PR run. Wait start/acquisition UTC times and waited
 seconds appear in the step log and summary and beside the machine-load tables
@@ -523,7 +532,12 @@ logical CPU count and host-wide browser process count beside the budget table
 in QA `index.md` (and the reference command's output). Counts include the active
 browser and its helpers; failed process inspection prints `unavailable`, never
 zero. Inspection requests executable names only, not process arguments. Load
-evidence does not change a budget, guard, failure decision or re-measure rule.
+now delays the CI re-measure until quiet or the job's shared 300 s wait budget
+is spent; it changes no limit or decision. Budget I/O failures are recorded as
+`unavailable (<code>)` and skip waiting so the second attempt still runs. A budget
+lock older than 10 seconds is treated as abandoned, recorded, and skipped without
+deleting it. Refunds record their own budget source; failures leave the remaining
+allowance marked unavailable.
 
 Chrome installation runs hosted-only. Self-hosted jobs first use a non-empty,
 executable `BROWSER_PATH`; otherwise they resolve `chromium`, `chromium-browser`,
@@ -656,7 +670,18 @@ settles; setup tasks remain in the trace separately, and tasks crossing into
 an update window still count. The CI guard remains 125 ms (2.5 × reference).
 The Board and Results CI guards re-measure once per viewport (the Board:
 per viewport and phase), only when every failed condition is a render-time
-or long-task limit. The second measurement is final; a reproduced breach or
+or long-task limit. Before that CI-only second attempt, poll load1 every 5 s
+until it is at most half the affinity-aware available CPU count (falling back
+to the logical CPU count), bounded by one 300 s wait budget shared by every
+Board and Results runner process in the CI job, then measure anyway. The budget
+is kept in an atomically updated file under `JOED_QA_ROOT`, or `RUNNER_TEMP`
+when no QA root is set; the directory is created as needed. Without either,
+the allowance is per process. After any wait ends without quiet, later second
+attempts skip waiting and measure immediately. Each second attempt records
+waited seconds, quiet yes/no, the threshold, starting load1, budget before/after,
+and whether waiting was skipped with reason “budget exhausted” or “an earlier
+wait never reached a quiet host”; a corrupt budget resets to 300 s and is recorded.
+The second measurement is final; a reproduced breach or
 any functional failure still fails. Both
 attempts appear in the trace, table and failure detail. Results keeps its
 40 ms switch-render guard and rejects tasks reaching 125 ms; worker/main-thread

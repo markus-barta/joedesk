@@ -1,10 +1,71 @@
 // Value-free host evidence, sampled before a budget attempt, outside its
 // measured page work. Process inspection reads executable names, never argv.
 import { spawnSync } from 'node:child_process';
-import { cpus, loadavg } from 'node:os';
+import * as os from 'node:os';
 import { basename } from 'node:path';
+import { setTimeout } from 'node:timers/promises';
+import { quietWaitBudget, QUIET_WAIT_SECONDS } from './quiet-wait-budget.mjs';
 
-export function captureMachineLoad({ clock = () => new Date(), cpuList = cpus, load = loadavg, ps = spawnSync } = {}) {
+// Only the runners' timing-only CI retry branch calls this helper. Load
+// polling stays outside measured page work and never inspects process argv.
+export async function waitForQuietHost({ load = os.loadavg, parallelism = os.availableParallelism,
+  cpuList = os.cpus, now = () => performance.now(), sleep = setTimeout, budget = quietWaitBudget } = {}) {
+  const threshold = (typeof parallelism === 'function' ? parallelism() : cpuList().length) / 2;
+  let reservation;
+  try {
+    reservation = await budget((state, budgetState) => {
+      const skipReason = state.failed ? 'an earlier wait never reached a quiet host'
+        : state.remainingSeconds <= 0 ? 'budget exhausted' : null;
+      const budgetBeforeSeconds = state.remainingSeconds;
+      if (!skipReason) state.remainingSeconds = 0;
+      return { budgetBeforeSeconds, budgetState, skipped: !!skipReason, skipReason };
+    });
+  } catch (error) {
+    const startLoad1 = load()[0];
+    return { waitedSeconds: 0, quiet: startLoad1 <= threshold, threshold, startLoad1,
+      budgetBeforeSeconds: null, budgetAfterSeconds: null, skipped: true,
+      skipReason: error.staleLock ? 'abandoned quiet-wait budget lock (>10 s)' : 'quiet-wait budget unavailable',
+      budgetState: `unavailable (${error.code ?? 'unknown'})` };
+  }
+  const started = now(), startLoad1 = load()[0];
+  let load1 = startLoad1;
+  while (!reservation.skipped && load1 > threshold) {
+    const remaining = reservation.budgetBeforeSeconds * 1000 - (now() - started);
+    if (remaining <= 0) break;
+    await sleep(Math.min(5000, remaining));
+    load1 = load()[0];
+  }
+  const waitedSeconds = reservation.skipped ? 0 : (now() - started) / 1000;
+  const quiet = load1 <= threshold;
+  let budgetAfterSeconds = reservation.budgetBeforeSeconds, refundBudgetState;
+  if (!reservation.skipped) {
+    try {
+      budgetAfterSeconds = await budget((state, source) => {
+        refundBudgetState = source;
+        // A reset during refund must not replenish already-spent time.
+        const remaining = source === 'existing' || source === 'per-process' ? state.remainingSeconds : 0;
+        state.remainingSeconds = Math.min(QUIET_WAIT_SECONDS,
+          remaining + Math.max(0, reservation.budgetBeforeSeconds - waitedSeconds));
+        state.failed ||= !quiet;
+        return state.remainingSeconds;
+      });
+    } catch (error) {
+      refundBudgetState = reservation.budgetState = `unavailable (${error.code ?? 'unknown'})`;
+      budgetAfterSeconds = null;
+      if (error.staleLock) reservation.skipReason = 'abandoned quiet-wait budget lock (>10 s) during refund';
+    }
+  }
+  return { waitedSeconds, quiet, threshold, startLoad1, ...reservation, budgetAfterSeconds,
+    ...(!reservation.skipped ? { refundBudgetState } : {}) };
+}
+
+const loadCell = n => Number.isFinite(n) ? n.toFixed(2) : 'unavailable';
+export function quietWaitCells(wait) {
+  return wait ? ` ${wait.waitedSeconds.toFixed(1)} | ${wait.quiet ? 'yes' : 'no'} | ${wait.threshold} | ${loadCell(wait.startLoad1)} | ${wait.budgetBeforeSeconds?.toFixed(1) ?? 'unavailable'} | ${wait.budgetAfterSeconds?.toFixed(1) ?? 'unavailable'} | ${wait.skipped ? 'yes' : 'no'} | ${wait.skipReason ?? '—'} | ${wait.budgetState ?? 'unavailable'}${wait.refundBudgetState ? `; refund: ${wait.refundBudgetState}` : ''} |`
+    : ' — | — | — | — | — | — | — | — | — |';
+}
+
+export function captureMachineLoad({ clock = () => new Date(), cpuList = os.cpus, load = os.loadavg, ps = spawnSync } = {}) {
   const processes = ps('ps', ['-A', '-o', 'comm='], { encoding: 'utf8', timeout: 2000, maxBuffer: 4 * 1024 * 1024 });
   const known = !processes.error && processes.status === 0 && typeof processes.stdout === 'string';
   return { sampledAt: clock().toISOString(), loadavg: load(), cpuCount: cpuList().length,
@@ -21,11 +82,11 @@ export function machineLoadTable(traces, lock = process.env) {
 
 Machine load before each attempt (host-wide browser processes include this browser and its helpers; unavailable counts are not zero):
 
-| Width | Phase | Attempt | Sampled (UTC) | Loadavg 1 / 5 / 15 min | Logical CPUs | Browser processes |
-| --- | --- | --- | --- | --- | --- | --- |
+| Width | Phase | Attempt | Quiet wait seconds | Quiet reached | Quiet threshold (load1) | Wait start load1 | Job wait budget before (s) | Job wait budget after (s) | Wait skipped | Skip reason | Budget state | Sampled (UTC) | Loadavg 1 / 5 / 15 min | Logical CPUs | Browser processes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 ${traces.map(r => {
     const m = r.machineLoad;
-    return `| ${r.viewport} | ${r.phase} | ${r.attempt ?? 1}/${r.attempts ?? 1} | ${m?.sampledAt ?? 'unavailable'} | ${m?.loadavg.map(n => n.toFixed(2)).join(' / ') ?? 'unavailable'} | ${m?.cpuCount ?? 'unavailable'} | ${m?.browserProcesses ?? 'unavailable'} |`;
+    return `| ${r.viewport} | ${r.phase} | ${r.attempt ?? 1}/${r.attempts ?? 1} |${quietWaitCells(r.quietWait)} ${m?.sampledAt ?? 'unavailable'} | ${m?.loadavg?.map(loadCell).join(' / ') ?? 'unavailable'} | ${m?.cpuCount ?? 'unavailable'} | ${m?.browserProcesses ?? 'unavailable'} |`;
   }).join('\n')}
 `;
 }
