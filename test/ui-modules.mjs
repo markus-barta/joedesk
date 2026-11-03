@@ -2,7 +2,8 @@
 // the host gate and desk changes. The browser serves public/joe/time.mjs and
 // public/joe/contracts/* from the repo root; this hook mirrors that mapping.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import * as nodeModule from 'node:module';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
@@ -11,6 +12,8 @@ import { observeBudgetTasks, attributeBudgetTasks } from '../scripts/browser/bud
 import { CI_GUARD, REFERENCE_BUDGET, TIMING_GUARDS, decideTaskGuard, runBudget, budgetTable } from '../scripts/browser/budget.mjs';
 import { runResultsBudget, resultsBudgetTable } from '../scripts/browser/results-budget.mjs';
 import { waitForQuietHost } from '../scripts/browser/machine-load.mjs';
+import { createQuietWaitBudget } from '../scripts/browser/quiet-wait-budget.mjs';
+import { scratch, discard } from '../scripts/browser/scratch.mjs';
 import { createGate } from '../scripts/browser/gate.mjs';
 import { captureHeaderCrop } from '../scripts/browser/header-crop.mjs';
 import './browser-settled.mjs';
@@ -2813,9 +2816,10 @@ test('JOED-180 (b): after the full busy-host wait, both runners measure once mor
   for (const second of [{}, { worker: false }]) {
     for (const runner of ['board', 'results']) {
       let elapsed = 0, waits = 0;
+      const budget = createQuietWaitBudget();
       const waitForQuiet = async () => {
         waits++;
-        return waitForQuietHost({ load: () => [43, 20, 10], parallelism: () => 26,
+        return waitForQuietHost({ budget, load: () => [43, 20, 10], parallelism: () => 26,
           now: () => elapsed, sleep: async ms => { elapsed += ms; } });
       };
       const run = runner === 'board'
@@ -2826,7 +2830,8 @@ test('JOED-180 (b): after the full busy-host wait, both runners measure once mor
       assert.equal(run.loads[runner === 'board' ? 'live' : '390'], 2);
       assert.equal(run.checks.every(c => c.ok), second.worker !== false);
       const last = run.traces.at(-1);
-      assert.deepEqual(last.quietWait, { waitedSeconds: 300, quiet: false, threshold: 13, startLoad1: 43 });
+      assert.deepEqual(last.quietWait, { waitedSeconds: 300, quiet: false, threshold: 13, startLoad1: 43,
+        budgetBeforeSeconds: 300, budgetAfterSeconds: 0, skipped: false, skipReason: null, budgetState: 'per-process' });
       assert.equal(last.attempt, 2);
       assert.ok(run.traces.filter(r => r.attempt === 1).every(r => !('quietWait' in r)));
       const table = runner === 'board' ? budgetTable(run.traces, CI_GUARD) : resultsBudgetTable(run.traces, CI_GUARD);
@@ -2860,10 +2865,11 @@ test('JOED-180 (d): first-attempt functional failures never wait or re-measure i
 test('JOED-180 (a): both runners wait before sampling and measuring the second attempt only', async () => {
   for (const runner of ['board', 'results']) {
     let waits = 0;
+    const budget = createQuietWaitBudget();
     const waitForQuiet = async () => {
       waits++;
       let elapsed = 0;
-      return waitForQuietHost({ load: () => [elapsed === 0 ? 40 : 2, 0, 0], parallelism: () => 26,
+      return waitForQuietHost({ budget, load: () => [elapsed === 0 ? 40 : 2, 0, 0], parallelism: () => 26,
         now: () => elapsed, sleep: async ms => { elapsed += ms; } });
     };
     const run = runner === 'board'
@@ -2876,6 +2882,91 @@ test('JOED-180 (a): both runners wait before sampling and measuring the second a
     const attempts = phase => ['sample-load', `measure-${phase}`, 'wait-start', 'wait-end', 'sample-load', `measure-${phase}`];
     assert.deepEqual(run.events, runner === 'board' ? [...attempts('cold'), ...attempts('live')]
       : [...attempts('results'), 'sample-load', 'measure-results']);
+  }
+});
+
+test('JOED-180 (g): Board and Results invocations share their remaining quiet-wait budget through the file', async t => {
+  const root = scratch('joed-runner-budget-');
+  t.after(() => discard(root, 'JOED-180 runner budget test'));
+  let elapsed = 0;
+  const board = await simulatedBudget({ cold: [{ historyMs: 126 }, {}], waitForQuiet: () => waitForQuietHost({
+    budget: createQuietWaitBudget(root), load: () => [elapsed === 0 ? 43 : 2], parallelism: () => 26,
+    now: () => elapsed, sleep: async ms => { elapsed += ms; },
+  }) });
+  const results = await simulatedResultsBudget({ samples: { 390: [{ switchMs: 41 }, {}] },
+    waitForQuiet: () => waitForQuietHost({ budget: createQuietWaitBudget(root), load: () => [43],
+      parallelism: () => 26, now: () => elapsed, sleep: async ms => { elapsed += ms; } }) });
+  const first = board.traces.find(r => r.attempt === 2).quietWait;
+  const second = results.traces.at(-1).quietWait;
+  assert.equal(first.budgetBeforeSeconds, 300);
+  assert.equal(first.budgetAfterSeconds, 295);
+  assert.equal(second.budgetBeforeSeconds, 295);
+  assert.equal(second.budgetAfterSeconds, 0);
+  assert.equal(second.waitedSeconds, 295);
+  assert.equal(elapsed, 300_000);
+  assert.ok(board.checks.every(c => c.ok) && results.checks.every(c => c.ok));
+});
+
+test('JOED-180 (h): after a not-quiet wait later second attempts in both runners skip and measure immediately', async t => {
+  const root = scratch('joed-runner-failed-wait-');
+  t.after(() => discard(root, 'JOED-180 failed-wait test'));
+  let elapsed = 0, sleeps = 0;
+  const waitForQuiet = () => waitForQuietHost({ budget: createQuietWaitBudget(root), load: () => [43],
+    parallelism: () => 26, now: () => elapsed, sleep: async ms => { sleeps++; elapsed += ms; } });
+  const board = await simulatedBudget({ cold: [{ historyMs: 126 }, {}], live: [{ patchMs: 41 }, {}], waitForQuiet });
+  const results = await simulatedResultsBudget({ samples: { 390: [{ switchMs: 41 }, { worker: false }] }, waitForQuiet });
+  assert.equal(elapsed, 300_000);
+  assert.equal(sleeps, 60, 'only the first wait sleeps');
+  assert.deepEqual(board.loads, { cold: 2, live: 2 });
+  assert.deepEqual(results.loads, { 390: 2 });
+  assert.ok(board.checks.every(c => c.ok));
+  assert.ok(results.checks.some(c => !c.ok), 'a skipped wait still leaves the second result final');
+  const secondAttempts = [...board.traces, ...results.traces].filter(r => r.attempt === 2);
+  assert.equal(secondAttempts[0].quietWait.skipped, false);
+  for (const row of secondAttempts.slice(1)) {
+    assert.equal(row.quietWait.waitedSeconds, 0);
+    assert.equal(row.quietWait.skipped, true);
+    assert.equal(row.quietWait.skipReason, 'an earlier wait never reached a quiet host');
+    assert.equal(row.quietWait.budgetBeforeSeconds, 0);
+    assert.equal(row.quietWait.budgetAfterSeconds, 0);
+  }
+  for (const table of [budgetTable(board.traces, CI_GUARD), resultsBudgetTable(results.traces, CI_GUARD)]) {
+    assert.match(table, /0\.0 \| no \| 13 \| 43\.00 \| 0\.0 \| 0\.0 \| yes \| an earlier wait never reached a quiet host/);
+    for (const block of table.split('\n\n').filter(part => part.startsWith('|'))) {
+      const rows = block.trim().split('\n');
+      assert.ok(rows.every(row => row.split('|').length === rows[0].split('|').length), 'table headers and rows have the same column count');
+    }
+  }
+});
+
+test('JOED-180 (j): reference runners never read or write an absent or corrupt job budget', async t => {
+  const root = scratch('joed-reference-budget-');
+  t.after(() => discard(root, 'JOED-180 reference budget test'));
+  const file = join(root, 'joedesk-quiet-wait-budget.json');
+  for (const corrupt of [false, true]) {
+    if (corrupt) writeFileSync(file, '{corrupt');
+    const before = readdirSync(root);
+    const store = createQuietWaitBudget(root);
+    const waitForQuiet = () => waitForQuietHost({ budget: (...args) => {
+      assert.fail('reference path must not read or write the job budget');
+      return store(...args);
+    } });
+    const board = await simulatedBudget({ limits: REFERENCE_BUDGET, cold: [{ historyMs: 51 }], live: [{ patchMs: 17 }], waitForQuiet });
+    const results = await simulatedResultsBudget({ limits: REFERENCE_BUDGET, samples: { 390: [{ switchMs: 17 }] }, waitForQuiet });
+    assert.deepEqual(board.loads, { cold: 1, live: 1 });
+    assert.deepEqual(results.loads, { 390: 1 });
+    assert.deepEqual(readdirSync(root), before);
+    if (corrupt) assert.equal(readFileSync(file, 'utf8'), '{corrupt');
+  }
+});
+
+test('JOED-180 L2: production Board and Results callers use the real quiet-host wait by default', () => {
+  for (const [runner, source] of [[runBudget, 'browser-p3.mjs'], [runResultsBudget, 'browser-p4.mjs']]) {
+    assert.match(runner.toString(), /waitForQuiet = waitForQuietHost/);
+    const caller = readFileSync(new URL(`../scripts/${source}`, import.meta.url), 'utf8');
+    const call = caller.slice(caller.indexOf(`await ${runner.name}(`));
+    assert.ok(call.startsWith(`await ${runner.name}(`));
+    assert.doesNotMatch(call.slice(0, call.indexOf('\n')), /waitForQuiet\s*:/);
   }
 });
 

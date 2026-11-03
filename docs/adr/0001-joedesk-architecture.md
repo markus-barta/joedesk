@@ -478,8 +478,15 @@ The Board and Results CI guards re-measure once per viewport (the Board:
 per viewport and phase), only when every failed condition is a render-time
 or long-task limit. Before that CI-only second attempt, poll load1 every 5 s
 until it is at most half the affinity-aware available CPU count (falling back
-to the logical CPU count), or 300 s elapse, then measure anyway and record
-waited seconds, whether quiet was reached, the threshold and starting load1.
+to the logical CPU count), bounded by one 300 s wait budget shared by every
+Board and Results runner process in the CI job, then measure anyway. The budget
+is kept in an atomically updated file under `JOED_QA_ROOT`, or `RUNNER_TEMP`
+when no QA root is set; the directory is created as needed. Without either,
+the allowance is per process. After any wait ends without quiet, later second
+attempts skip waiting and measure immediately. Each second attempt records
+waited seconds, quiet yes/no, the threshold, starting load1, budget before/after,
+and whether waiting was skipped with reason “budget exhausted” or “an earlier
+wait never reached a quiet host”; a corrupt budget resets to 300 s and is recorded.
 The second measurement is final; a reproduced breach or
 any functional failure still fails. Both
 attempts appear in the trace, table and failure detail. Results keeps its

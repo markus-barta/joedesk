@@ -98,8 +98,8 @@ export async function runResultsBudget({ page, newBoard, check, limits, serve, s
 
 export function resultsBudgetTable(traces, limits) {
   const remeasured = traces.some(r => r.remeasured);
-  return `| Width | Record |${remeasured ? ' Attempt | Quiet wait seconds | Quiet reached | Quiet threshold (load1) | Wait start load1 |' : ''} Results render worst (ms) | Renders | Long task worst (ms) | Long tasks (≥ 50 ms) | Tasks ≥ ${limits.taskMs} ms |
-| --- | --- |${remeasured ? ' --- | --- | --- | --- | --- |' : ''} --- | --- | --- | --- | --- |
+  return `| Width | Record |${remeasured ? ' Attempt | Quiet wait seconds | Quiet reached | Quiet threshold (load1) | Wait start load1 | Job wait budget before (s) | Job wait budget after (s) | Wait skipped | Skip reason | Budget state |' : ''} Results render worst (ms) | Renders | Long task worst (ms) | Long tasks (≥ 50 ms) | Tasks ≥ ${limits.taskMs} ms |
+| --- | --- |${remeasured ? ' --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |' : ''} --- | --- | --- | --- | --- |
 ${traces.map(r => `| ${r.viewport} | ${r.phase} |${remeasured ? ` ${r.attempt}/${r.attempts}${r.remeasured ? ' (re-measured)' : ''} |${quietWaitCells(r.quietWait)}` : ''} ${r.switchWorst.toFixed(1)} | ${r.switches} | ${r.longTasks.length ? max(r.longTasks).toFixed(1) : '—'} | ${r.longTasks.length} | ${r.longTasks.filter(ms => ms >= limits.taskMs).length} |`).join('\n')}
 
 ${machineLoadTable(traces)}

@@ -202,8 +202,8 @@ export async function runBudget({ page, newBoard, check, limits, sampleLoad = ca
 export function budgetTable(traces, limits) {
   const guard = limits.taskMs > 50;
   const remeasured = traces.some(r => r.remeasured);
-  return `| Width | Phase |${remeasured ? ' Attempt | Quiet wait seconds | Quiet reached | Quiet threshold (load1) | Wait start load1 |' : ''} Desk patch worst (ms) | History draw worst (ms) | Worker read worst (ms) | Long task worst (ms) | Long tasks (≥ 50 ms) |${guard ? ` Tasks ≥ ${limits.taskMs} ms |` : ''}
-| --- | --- |${remeasured ? ' --- | --- | --- | --- | --- |' : ''} --- | --- | --- | --- | --- |${guard ? ' --- |' : ''}
+  return `| Width | Phase |${remeasured ? ' Attempt | Quiet wait seconds | Quiet reached | Quiet threshold (load1) | Wait start load1 | Job wait budget before (s) | Job wait budget after (s) | Wait skipped | Skip reason | Budget state |' : ''} Desk patch worst (ms) | History draw worst (ms) | Worker read worst (ms) | Long task worst (ms) | Long tasks (≥ 50 ms) |${guard ? ` Tasks ≥ ${limits.taskMs} ms |` : ''}
+| --- | --- |${remeasured ? ' --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |' : ''} --- | --- | --- | --- | --- |${guard ? ' --- |' : ''}
 ${traces.map(r => `| ${r.viewport} | ${r.phase} |${remeasured ? ` ${r.attempt}/${r.attempts}${r.remeasured ? ' (re-measured)' : ''} |${quietWaitCells(r.quietWait)}` : ''} ${r.deskWorst?.toFixed?.(1) ?? '—'} | ${(r.historyWorst ?? r.renderWorst)?.toFixed(1)} | ${(r.workerWorst ?? r.workerRead)?.toFixed(1)} | ${r.longTasks.length ? max(r.longTasks).toFixed(1) : '—'} | ${r.longTasks.length} |${guard ? ` ${r.longTasks.filter(ms => ms >= limits.taskMs).length} |` : ''}`).join('\n')}
 
 ${machineLoadTable(traces)}

@@ -502,9 +502,10 @@ host configuration or runner labels are changed by the workflow. Hosted jobs use
 without the lock; fork PRs retain the hosted-only runner guard.
 
 Jobs can overlap while their browser phases wait for the lock. This preserves
-queued runs without a concurrency-group cap. The job timeout is 120 minutes:
+queued runs without a concurrency-group cap. The job timeout is 125 minutes:
 60 minutes waiting (two typical 30-minute locked runs), 45 minutes for its own
-browser work, and 15 minutes for setup/uploads. `flock --wait 3600` gives lock
+browser work, at most 5 minutes of quiet-host waits shared across the job, and
+15 minutes for setup/uploads. `flock --wait 3600` gives lock
 waiting a separate one-hour bound; timeout fails clearly before any browser
 phase starts. This sizes for three overlapping jobs at the typical duration;
 flock makes no FIFO guarantee, so sustained contention can still exhaust the
@@ -520,7 +521,8 @@ logical CPU count and host-wide browser process count beside the budget table
 in QA `index.md` (and the reference command's output). Counts include the active
 browser and its helpers; failed process inspection prints `unavailable`, never
 zero. Inspection requests executable names only, not process arguments. Load
-evidence does not change a budget, guard, failure decision or re-measure rule.
+now delays the CI re-measure until quiet or the job's shared 300 s wait budget
+is spent; it changes no limit or decision.
 
 Chrome installation runs hosted-only. Self-hosted jobs first use a non-empty,
 executable `BROWSER_PATH`; otherwise they resolve `chromium`, `chromium-browser`,
@@ -655,8 +657,15 @@ The Board and Results CI guards re-measure once per viewport (the Board:
 per viewport and phase), only when every failed condition is a render-time
 or long-task limit. Before that CI-only second attempt, poll load1 every 5 s
 until it is at most half the affinity-aware available CPU count (falling back
-to the logical CPU count), or 300 s elapse, then measure anyway and record
-waited seconds, whether quiet was reached, the threshold and starting load1.
+to the logical CPU count), bounded by one 300 s wait budget shared by every
+Board and Results runner process in the CI job, then measure anyway. The budget
+is kept in an atomically updated file under `JOED_QA_ROOT`, or `RUNNER_TEMP`
+when no QA root is set; the directory is created as needed. Without either,
+the allowance is per process. After any wait ends without quiet, later second
+attempts skip waiting and measure immediately. Each second attempt records
+waited seconds, quiet yes/no, the threshold, starting load1, budget before/after,
+and whether waiting was skipped with reason “budget exhausted” or “an earlier
+wait never reached a quiet host”; a corrupt budget resets to 300 s and is recorded.
 The second measurement is final; a reproduced breach or
 any functional failure still fails. Both
 attempts appear in the trace, table and failure detail. Results keeps its

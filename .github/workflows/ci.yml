@@ -48,8 +48,8 @@ jobs:
 
   browser:
     runs-on: ${{ (vars.JOEDESK_AGM2 == 'on' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","agm2"]') || 'ubuntu-latest' }}
-    # 60 min wait (two typical 30 min runs) + 45 min work + 15 min setup/upload.
-    timeout-minutes: 120
+    # 60 min lock wait + 45 min work + at most 5 min quiet waits + 15 min setup/upload.
+    timeout-minutes: 125
     steps:
       - name: Keep temporary files under RUNNER_TEMP
         run: |

@@ -4,26 +4,43 @@ import { spawnSync } from 'node:child_process';
 import * as os from 'node:os';
 import { basename } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
+import { quietWaitBudget, QUIET_WAIT_SECONDS } from './quiet-wait-budget.mjs';
 
 // Only the runners' timing-only CI retry branch calls this helper. Load
 // polling stays outside measured page work and never inspects process argv.
 export async function waitForQuietHost({ load = os.loadavg, parallelism = os.availableParallelism,
-  cpuList = os.cpus, now = () => performance.now(), sleep = setTimeout } = {}) {
+  cpuList = os.cpus, now = () => performance.now(), sleep = setTimeout, budget = quietWaitBudget } = {}) {
   const threshold = (typeof parallelism === 'function' ? parallelism() : cpuList().length) / 2;
+  const reservation = await budget((state, budgetState) => {
+    const skipReason = state.failed ? 'an earlier wait never reached a quiet host'
+      : state.remainingSeconds <= 0 ? 'budget exhausted' : null;
+    const budgetBeforeSeconds = state.remainingSeconds;
+    if (!skipReason) state.remainingSeconds = 0;
+    return { budgetBeforeSeconds, budgetState, skipped: !!skipReason, skipReason };
+  });
   const started = now(), startLoad1 = load()[0];
   let load1 = startLoad1;
-  while (load1 > threshold) {
-    const remaining = 300_000 - (now() - started);
+  while (!reservation.skipped && load1 > threshold) {
+    const remaining = reservation.budgetBeforeSeconds * 1000 - (now() - started);
     if (remaining <= 0) break;
     await sleep(Math.min(5000, remaining));
     load1 = load()[0];
   }
-  return { waitedSeconds: (now() - started) / 1000, quiet: load1 <= threshold, threshold, startLoad1 };
+  const waitedSeconds = reservation.skipped ? 0 : (now() - started) / 1000;
+  const quiet = load1 <= threshold;
+  const budgetAfterSeconds = reservation.skipped ? reservation.budgetBeforeSeconds : await budget(state => {
+    state.remainingSeconds = Math.min(QUIET_WAIT_SECONDS,
+      state.remainingSeconds + Math.max(0, reservation.budgetBeforeSeconds - waitedSeconds));
+    state.failed ||= !quiet;
+    return state.remainingSeconds;
+  });
+  return { waitedSeconds, quiet, threshold, startLoad1, ...reservation, budgetAfterSeconds };
 }
 
+const loadCell = n => Number.isFinite(n) ? n.toFixed(2) : 'unavailable';
 export function quietWaitCells(wait) {
-  return wait ? ` ${wait.waitedSeconds.toFixed(1)} | ${wait.quiet ? 'yes' : 'no'} | ${wait.threshold} | ${wait.startLoad1.toFixed(2)} |`
-    : ' — | — | — | — |';
+  return wait ? ` ${wait.waitedSeconds.toFixed(1)} | ${wait.quiet ? 'yes' : 'no'} | ${wait.threshold} | ${loadCell(wait.startLoad1)} | ${wait.budgetBeforeSeconds?.toFixed(1) ?? 'unavailable'} | ${wait.budgetAfterSeconds?.toFixed(1) ?? 'unavailable'} | ${wait.skipped ? 'yes' : 'no'} | ${wait.skipReason ?? '—'} | ${wait.budgetState ?? 'unavailable'} |`
+    : ' — | — | — | — | — | — | — | — | — |';
 }
 
 export function captureMachineLoad({ clock = () => new Date(), cpuList = os.cpus, load = os.loadavg, ps = spawnSync } = {}) {
@@ -43,11 +60,11 @@ export function machineLoadTable(traces, lock = process.env) {
 
 Machine load before each attempt (host-wide browser processes include this browser and its helpers; unavailable counts are not zero):
 
-| Width | Phase | Attempt | Quiet wait seconds | Quiet reached | Quiet threshold (load1) | Wait start load1 | Sampled (UTC) | Loadavg 1 / 5 / 15 min | Logical CPUs | Browser processes |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Width | Phase | Attempt | Quiet wait seconds | Quiet reached | Quiet threshold (load1) | Wait start load1 | Job wait budget before (s) | Job wait budget after (s) | Wait skipped | Skip reason | Budget state | Sampled (UTC) | Loadavg 1 / 5 / 15 min | Logical CPUs | Browser processes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 ${traces.map(r => {
     const m = r.machineLoad;
-    return `| ${r.viewport} | ${r.phase} | ${r.attempt ?? 1}/${r.attempts ?? 1} |${quietWaitCells(r.quietWait)} ${m?.sampledAt ?? 'unavailable'} | ${m?.loadavg.map(n => n.toFixed(2)).join(' / ') ?? 'unavailable'} | ${m?.cpuCount ?? 'unavailable'} | ${m?.browserProcesses ?? 'unavailable'} |`;
+    return `| ${r.viewport} | ${r.phase} | ${r.attempt ?? 1}/${r.attempts ?? 1} |${quietWaitCells(r.quietWait)} ${m?.sampledAt ?? 'unavailable'} | ${m?.loadavg?.map(loadCell).join(' / ') ?? 'unavailable'} | ${m?.cpuCount ?? 'unavailable'} | ${m?.browserProcesses ?? 'unavailable'} |`;
   }).join('\n')}
 `;
 }
