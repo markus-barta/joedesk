@@ -5,6 +5,8 @@ import { readFileSync } from 'node:fs';
 const { CELL_REASON } = await import('../../public/joe/health.js');
 export const reasons = Object.keys(CELL_REASON);
 export const authShapes = ['302 to SSO', '303 to SSO', 'opaqueredirect', '401', '403', 'HTML content type', 'HTML body', 'HTML fragment', 'followed cross-origin redirect'];
+// redirect:manual prevents the defensive followed-cross-origin shape natively.
+export const nativeAuthShapes = authShapes.filter(shape => shape !== 'followed cross-origin redirect');
 export const widths = [390, 1440];
 export const screens = ['desk', 'history', 'results', 'settings'];
 export const blame = 'Broker connection down — tell Amy to check the feed; stale; not exact';
