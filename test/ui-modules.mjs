@@ -10,11 +10,13 @@ import { decimalUnits } from '../contracts/decimal.mjs';
 import { observeBudgetTasks, attributeBudgetTasks } from '../scripts/browser/budget-tasks.mjs';
 import { CI_GUARD, REFERENCE_BUDGET, TIMING_GUARDS, decideTaskGuard, runBudget, budgetTable } from '../scripts/browser/budget.mjs';
 import { runResultsBudget, resultsBudgetTable } from '../scripts/browser/results-budget.mjs';
+import { waitForQuietHost } from '../scripts/browser/machine-load.mjs';
 import { createGate } from '../scripts/browser/gate.mjs';
 import { captureHeaderCrop } from '../scripts/browser/header-crop.mjs';
 import './browser-settled.mjs';
 import './browser-group-timing.mjs';
 import './browser-machine-load.mjs';
+import './budget-quiet-host.mjs';
 import './theme-geometry.mjs';
 import './theme-copy.mjs';
 import './board-sweep-plan.mjs';
@@ -2471,9 +2473,9 @@ test('browser budget: reference limits stay strict with no re-measure', () => {
 
 // Exercise the exact runner with synthetic CDP replies, without a browser,
 // servers or real time. Each load consumes one phase's scripted measurement.
-async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD } = {}) {
+async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD, waitForQuiet = async () => ({ waitedSeconds: 0, quiet: true, threshold: 13, startLoad1: 2 }) } = {}) {
   let phase, sample, reads;
-  const loads = { cold: 0, live: 0 }, boards = [], checks = [];
+  const loads = { cold: 0, live: 0 }, boards = [], checks = [], events = [];
   const timings = (reason, count, ms) => Array.from({ length: count }, (_, i) => ({ reason, at: 200 + i * 20, ms }));
   const page = {
     async s() { return { identifier: 'observer' }; },
@@ -2504,6 +2506,7 @@ async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD } =
     configure: async () => {}, go: async () => {}, settle: async () => {}, waitFor: async () => {},
     load: async (page, url, panel) => {
       phase = panel === 'desk' ? 'live' : 'cold';
+      events.push(`measure-${phase}`);
       const samples = phase === 'live' ? live : cold;
       sample = samples[loads[phase]++];
       assert.ok(sample, `unexpected extra ${phase} attempt`);
@@ -2513,7 +2516,13 @@ async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD } =
   };
   const execute = runInNewContext(`(${runBudget.toString()})`, context);
   const traces = await execute({ page, limits,
-    sampleLoad: () => ({ sampledAt: `sample-${boards.length}`, loadavg: [1, 2, 3], cpuCount: 8, browserProcesses: 4 }),
+    waitForQuiet: async () => {
+      events.push('wait-start');
+      const result = await waitForQuiet();
+      events.push('wait-end');
+      return result;
+    },
+    sampleLoad: () => { events.push('sample-load'); return { sampledAt: `sample-${boards.length}`, loadavg: [1, 2, 3], cpuCount: 8, browserProcesses: 4 }; },
     newBoard: async ({ history, accountHistory }) => {
       const board = { history, accountHistory, url: `http://fixture/${boards.length}/`, pushes: [], setNow() {},
         async push(payload) { this.pushes.push(payload); return { status: 200 }; } };
@@ -2522,7 +2531,7 @@ async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD } =
     },
     check: (ac, name, ok, detail) => checks.push({ name, ok, detail }),
   });
-  return { traces, checks, loads, boards };
+  return { traces, checks, loads, boards, events };
 }
 
 test('browser budget: cold and live re-measure on fresh boards, retaining both attributed rows and table attempts', async () => {
@@ -2645,9 +2654,9 @@ test('browser budget: runBudget statically allows at most one re-measure per vie
 
 // Run the Results orchestration against scripted page replies. Navigation
 // consumes a sample, so an unexpected third measurement fails immediately.
-async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUARD } = {}) {
+async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUARD, waitForQuiet = async () => ({ waitedSeconds: 0, quiet: true, threshold: 13, startLoad1: 2 }) } = {}) {
   let viewport, sample, unserved = false;
-  const loads = Object.fromEntries(Object.keys(samples).map(width => [width, 0])), checks = [], observers = [];
+  const loads = Object.fromEntries(Object.keys(samples).map(width => [width, 0])), checks = [], observers = [], events = [];
   const page = {
     async s(method, params) {
       observers.push({ method, params });
@@ -2672,6 +2681,7 @@ async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUA
     configure: async (page, width) => { viewport = width.name; },
     load: async (page, url, panel) => {
       assert.equal(panel, 'results');
+      events.push('measure-results');
       sample = samples[viewport][loads[viewport]++];
       assert.ok(sample, `unexpected extra Results measurement at ${viewport}`);
     }, settle: async () => {}, waitFor: async () => {},
@@ -2679,7 +2689,13 @@ async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUA
   const execute = runInNewContext(`(${runResultsBudget.toString()})`, context);
   let loadSamples = 0;
   const traces = await execute({ page, limits,
-    sampleLoad: () => ({ sampledAt: `sample-${++loadSamples}`, loadavg: [4, 5, 6], cpuCount: 16, browserProcesses: 7 }),
+    waitForQuiet: async () => {
+      events.push('wait-start');
+      const result = await waitForQuiet();
+      events.push('wait-end');
+      return result;
+    },
+    sampleLoad: () => { events.push('sample-load'); return { sampledAt: `sample-${++loadSamples}`, loadavg: [4, 5, 6], cpuCount: 16, browserProcesses: 7 }; },
     newBoard: async () => ({ url: 'http://fixture/', setNow() {}, async push() { return { status: 200 }; } }),
     serve: async () => async () => { unserved = true; },
     check: (ac, name, ok, detail) => checks.push({ name, ok, detail }),
@@ -2692,7 +2708,7 @@ async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUA
     Object.values(loads).reduce((sum, count) => sum + count, 0), 'each attempt installs a fresh observer');
   assert.equal(observers.filter(o => o.method === 'Page.removeScriptToEvaluateOnNewDocument').length,
     observers.filter(o => o.method === 'Page.addScriptToEvaluateOnNewDocument').length);
-  return { traces, checks, loads };
+  return { traces, checks, loads, events };
 }
 
 test('Results budget: each timing-only breach re-measures once and the second sample decides', async () => {
@@ -2790,6 +2806,76 @@ test('browser budgets: absent long-task duration is null in both attempts and a 
     assert.match(table, /Long task worst \(ms\)/);
     const rows = table.split('\n\n')[0].trim().split('\n').slice(2);
     assert.ok(rows.every(row => /\| — \| 0 \| 0 \|$/.test(row)), table);
+  }
+});
+
+test('JOED-180 (b): after the full busy-host wait, both runners measure once more and that result is final', async () => {
+  for (const second of [{}, { worker: false }]) {
+    for (const runner of ['board', 'results']) {
+      let elapsed = 0, waits = 0;
+      const waitForQuiet = async () => {
+        waits++;
+        return waitForQuietHost({ load: () => [43, 20, 10], parallelism: () => 26,
+          now: () => elapsed, sleep: async ms => { elapsed += ms; } });
+      };
+      const run = runner === 'board'
+        ? await simulatedBudget({ live: [{ patchMs: 41 }, second], waitForQuiet })
+        : await simulatedResultsBudget({ samples: { 390: [{ switchMs: 41 }, second] }, waitForQuiet });
+      assert.equal(waits, 1);
+      assert.equal(elapsed, 300_000);
+      assert.equal(run.loads[runner === 'board' ? 'live' : '390'], 2);
+      assert.equal(run.checks.every(c => c.ok), second.worker !== false);
+      const last = run.traces.at(-1);
+      assert.deepEqual(last.quietWait, { waitedSeconds: 300, quiet: false, threshold: 13, startLoad1: 43 });
+      assert.equal(last.attempt, 2);
+      assert.ok(run.traces.filter(r => r.attempt === 1).every(r => !('quietWait' in r)));
+      const table = runner === 'board' ? budgetTable(run.traces, CI_GUARD) : resultsBudgetTable(run.traces, CI_GUARD);
+      assert.equal(table.match(/300\.0 \| no \| 13 \| 43\.00/g).length, 2, 'both attempt and machine-load tables record the wait');
+      assert.ok(run.checks.filter(c => c.detail.attemptRows).every(c => c.detail.quietWait === last.quietWait));
+    }
+  }
+});
+
+test('JOED-180 (c): reference limits never wait in either budget runner', async () => {
+  const waitForQuiet = async () => { assert.fail('reference measurements never wait'); };
+  const board = await simulatedBudget({ cold: [{ historyMs: 51 }], live: [{ patchMs: 17 }], limits: REFERENCE_BUDGET, waitForQuiet });
+  const results = await simulatedResultsBudget({ samples: { 390: [{ switchMs: 17 }] }, limits: REFERENCE_BUDGET, waitForQuiet });
+  assert.deepEqual(board.loads, { cold: 1, live: 1 });
+  assert.deepEqual(results.loads, { 390: 1 });
+  for (const run of [board, results]) assert.ok(run.traces.every(r => !('quietWait' in r)));
+});
+
+test('JOED-180 (d): first-attempt functional failures never wait or re-measure in either runner', async () => {
+  const waitForQuiet = async () => { assert.fail('functional failures never wait'); };
+  const board = await simulatedBudget({ cold: [{ historyMs: 126, worker: false }], live: [{ patchMs: 41, worker: false }], waitForQuiet });
+  const results = await simulatedResultsBudget({ samples: { 390: [{ switchMs: 41, worker: false }] }, waitForQuiet });
+  assert.deepEqual(board.loads, { cold: 1, live: 1 });
+  assert.deepEqual(results.loads, { 390: 1 });
+  for (const run of [board, results]) {
+    assert.ok(run.checks.some(c => !c.ok));
+    assert.ok(run.traces.every(r => r.attempts === 1 && !('quietWait' in r)));
+  }
+});
+
+test('JOED-180 (a): both runners wait before sampling and measuring the second attempt only', async () => {
+  for (const runner of ['board', 'results']) {
+    let waits = 0;
+    const waitForQuiet = async () => {
+      waits++;
+      let elapsed = 0;
+      return waitForQuietHost({ load: () => [elapsed === 0 ? 40 : 2, 0, 0], parallelism: () => 26,
+        now: () => elapsed, sleep: async ms => { elapsed += ms; } });
+    };
+    const run = runner === 'board'
+      ? await simulatedBudget({ cold: [{ historyMs: 126 }, {}], live: [{ patchMs: 41 }, {}], waitForQuiet })
+      : await simulatedResultsBudget({ samples: { 390: [{ switchMs: 41 }, {}], 1024: [{}] }, waitForQuiet });
+    assert.ok(run.checks.every(c => c.ok));
+    assert.equal(waits, runner === 'board' ? 2 : 1);
+    assert.equal(run.traces.filter(r => r.quietWait).length, runner === 'board' ? 2 : 1);
+    assert.ok(run.traces.filter(r => r.quietWait).every(r => r.attempt === 2 && r.quietWait.quiet && r.quietWait.waitedSeconds === 5));
+    const attempts = phase => ['sample-load', `measure-${phase}`, 'wait-start', 'wait-end', 'sample-load', `measure-${phase}`];
+    assert.deepEqual(run.events, runner === 'board' ? [...attempts('cold'), ...attempts('live')]
+      : [...attempts('results'), 'sample-load', 'measure-results']);
   }
 });
 

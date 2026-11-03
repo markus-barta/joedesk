@@ -653,7 +653,11 @@ settles; setup tasks remain in the trace separately, and tasks crossing into
 an update window still count. The CI guard remains 125 ms (2.5 × reference).
 The Board and Results CI guards re-measure once per viewport (the Board:
 per viewport and phase), only when every failed condition is a render-time
-or long-task limit. The second measurement is final; a reproduced breach or
+or long-task limit. Before that CI-only second attempt, poll load1 every 5 s
+until it is at most half the affinity-aware available CPU count (falling back
+to the logical CPU count), or 300 s elapse, then measure anyway and record
+waited seconds, whether quiet was reached, the threshold and starting load1.
+The second measurement is final; a reproduced breach or
 any functional failure still fails. Both
 attempts appear in the trace, table and failure detail. Results keeps its
 40 ms switch-render guard and rejects tasks reaching 125 ms; worker/main-thread
