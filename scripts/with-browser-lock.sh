@@ -2,6 +2,7 @@
 # Serialize browser execution across the agm2 runners, without GitHub's
 # pending-run replacement. This inode must be shared and must never be unlinked.
 set -euo pipefail
+lock_path=/run/joedesk-browser/browser.lock
 export JOED_BROWSER_LOCK_REASON=''
 export JOED_BROWSER_LOCK_WAIT_STARTED_AT=unavailable JOED_BROWSER_LOCK_ACQUIRED_AT=unavailable JOED_BROWSER_LOCK_WAIT_SECONDS=0
 
@@ -17,12 +18,13 @@ case "$runner_kind" in
   self-hosted)
     # Host-local, independent of the runner's per-job RUNNER_TEMP. Infrastructure
     # failures degrade visibly; actual contention still has a hard wait bound.
-    umask 077
+    # The setgid directory supplies the shared runner group on first creation.
+    umask 007
     if ! command -v flock >/dev/null; then
       lock_unavailable 'flock not found'
     # Keep the same open file description through every phase and teardown.
-    elif ! { exec 9>> /dev/shm/joedesk-browser.lock; }; then
-      lock_unavailable 'cannot open /dev/shm/joedesk-browser.lock'
+    elif ! { exec 9>> "$lock_path"; }; then
+      lock_unavailable "cannot open $lock_path; shared directory may be missing"
     else
       JOED_BROWSER_LOCK_WAIT_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
       SECONDS=0

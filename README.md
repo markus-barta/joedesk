@@ -479,18 +479,24 @@ and requires approval for all outside collaborators; `pull_request_target` is
 forbidden. Checkout explicitly cleans the workspace, and CI temporary files and
 npm's cache stay under `RUNNER_TEMP`.
 
+Signed-out CI runs the invariant-enforced `--subset` on PRs (544 cases) and
+the complete `--full` matrix on main pushes and workflow dispatches (2,496 cases).
+
 JOED-169: CI keeps every PR run; it has no workflow concurrency group. GitHub's
 default concurrency queue replaces older pending runs even with
 `cancel-in-progress: false`; `queue: max` still cancels overflow beyond 100
 pending runs ([GitHub concurrency semantics](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)).
 Instead, one combined browser step uses `scripts/with-browser-lock.sh`.
-On agm2, `flock` acquires `/dev/shm/joedesk-browser.lock` once for all six
+On agm2, `flock` acquires `/run/joedesk-browser/browser.lock` once for all six
 browser phases: Board, Results (all zones), Settings, both preview checks and
 release carry-overs, including browser teardown. There is no mid-job release
 or reacquisition. Setup and artifact uploads stay outside the lock. Results
 and Settings still execute after an earlier gate failure; preview checks and
-carry-overs require the preceding gates to pass. The three runners must
-share that host-local filesystem and service user for serialization. Missing
+carry-overs require the preceding gates to pass. The three runner users belong
+to the `joedesk-browser` group and share the setgid `/run/joedesk-browser`
+directory (mode 2770); `umask 007` creates the lock with mode 0660.
+This avoids `fs.protected_regular` refusing another runner user's create/open
+in the sticky, world-writable `/dev/shm` directory. Missing
 `flock`, denied lock-file access, or a non-timeout acquisition error emits a
 `::warning::` and a step-summary warning, then runs the phases UNLOCKED; timing
 budgets may contend. These runs export `JOED_BROWSER_LOCK_STATE=unavailable`
@@ -502,12 +508,24 @@ host configuration or runner labels are changed by the workflow. Hosted jobs use
 without the lock; fork PRs retain the hosted-only runner guard.
 
 Jobs can overlap while their browser phases wait for the lock. This preserves
-queued runs without a concurrency-group cap. The job timeout is 120 minutes:
-60 minutes waiting (two typical 30-minute locked runs), 45 minutes for its own
-browser work, and 15 minutes for setup/uploads. `flock --wait 3600` gives lock
+queued runs without a concurrency-group cap. The job timeout is 150 minutes:
+up to 60 minutes waiting for the lock, up to 70 minutes for its own browser
+work, at most 5 minutes of quiet-host waits shared across the job, and 15
+minutes for setup/uploads. The 60-minute lock bound covers one PR-sized run
+ahead (about 45 minutes plus its quiet waits). A push-sized run ahead can hold
+the lock for up to 75 minutes, which exceeds the bound: the waiting job then
+fails with exit 75 before any browser phase starts. PR work is about 45 minutes
+([41272183028](https://github.com/markus-barta/joedesk/actions/runs/41272183028),
+[41211304715](https://github.com/markus-barta/joedesk/actions/runs/41211304715));
+push and dispatch work is 55–70 minutes
+([41276169961](https://github.com/markus-barta/joedesk/actions/runs/41276169961),
+[41215247109](https://github.com/markus-barta/joedesk/actions/runs/41215247109),
+[41602540403](https://github.com/markus-barta/joedesk/actions/runs/41602540403),
+which stopped at 59.8 minutes with phases still to run). `flock --wait 3600` gives lock
 waiting a separate one-hour bound; timeout fails clearly before any browser
-phase starts. This sizes for three overlapping jobs at the typical duration;
-flock makes no FIFO guarantee, so sustained contention can still exhaust the
+phase starts. Even two PR-sized runs ahead need about 90 minutes, beyond the
+lock bound; three overlapping jobs are not guaranteed to acquire the lock.
+`flock` makes no FIFO guarantee, so sustained contention can still exhaust the
 explicit wait bound. Timeout or cancellation remains visible; it never
 supersedes another pending PR run. Wait start/acquisition UTC times and waited
 seconds appear in the step log and summary and beside the machine-load tables
@@ -520,7 +538,12 @@ logical CPU count and host-wide browser process count beside the budget table
 in QA `index.md` (and the reference command's output). Counts include the active
 browser and its helpers; failed process inspection prints `unavailable`, never
 zero. Inspection requests executable names only, not process arguments. Load
-evidence does not change a budget, guard, failure decision or re-measure rule.
+now delays the CI re-measure until quiet or the job's shared 300 s wait budget
+is spent; it changes no limit or decision. Budget I/O failures are recorded as
+`unavailable (<code>)` and skip waiting so the second attempt still runs. A budget
+lock older than 10 seconds is treated as abandoned, recorded, and skipped without
+deleting it. Refunds record their own budget source; failures leave the remaining
+allowance marked unavailable.
 
 Chrome installation runs hosted-only. Self-hosted jobs first use a non-empty,
 executable `BROWSER_PATH`; otherwise they resolve `chromium`, `chromium-browser`,
@@ -653,7 +676,18 @@ settles; setup tasks remain in the trace separately, and tasks crossing into
 an update window still count. The CI guard remains 125 ms (2.5 × reference).
 The Board and Results CI guards re-measure once per viewport (the Board:
 per viewport and phase), only when every failed condition is a render-time
-or long-task limit. The second measurement is final; a reproduced breach or
+or long-task limit. Before that CI-only second attempt, poll load1 every 5 s
+until it is at most half the affinity-aware available CPU count (falling back
+to the logical CPU count), bounded by one 300 s wait budget shared by every
+Board and Results runner process in the CI job, then measure anyway. The budget
+is kept in an atomically updated file under `JOED_QA_ROOT`, or `RUNNER_TEMP`
+when no QA root is set; the directory is created as needed. Without either,
+the allowance is per process. After any wait ends without quiet, later second
+attempts skip waiting and measure immediately. Each second attempt records
+waited seconds, quiet yes/no, the threshold, starting load1, budget before/after,
+and whether waiting was skipped with reason “budget exhausted” or “an earlier
+wait never reached a quiet host”; a corrupt budget resets to 300 s and is recorded.
+The second measurement is final; a reproduced breach or
 any functional failure still fails. Both
 attempts appear in the trace, table and failure detail. Results keeps its
 40 ms switch-render guard and rejects tasks reaching 125 ms; worker/main-thread
@@ -2483,6 +2517,11 @@ bars, position counts, the account’s 1M change and Since start comparison,
 phone learning and aggregate kept worth. Oracle mutation tests reject arbitrary
 new wording, changed inputs and vanished values. The historical non-auth page
 hashes from `a941776` and builder hashes from `fa6db1d` remain unchanged.
+The Node fixture yields an event-loop turn between page cases (JOED-181).
+Without that turn, its in-memory reads chain microtasks across thousands of
+cases and delay TAP output, making the combined UI run appear stuck after
+the cold account-expiry test. A two-case regression checks that queued
+progress callbacks run; the matrix and its exact oracles stay intact.
 `test/signed-out-fix5.mjs` and `test/signed-out-fix6.mjs` retain inert/modal,
 hover/focus/key, pre-expiry timer, version clipboard, collapsed-section,
 abandoned-write, board-settings GET and frozen account-history regressions.
@@ -2513,8 +2552,9 @@ receipt may go backwards. The P4 stale fixture advances server time while
 re-serving one fixed record and refreshing its independent money input; it
 does not manufacture an older receipt on the second read. P3's signed-out fixture
 now checks that successful feed responses leave the old page frozen and a fresh
-page load resumes rendering. `scripts/browser/signed-out-pages.mjs` keeps all
-2,496 matrix cases and changes each resume assertion to observe a probe-triggered
+page load resumes rendering. CI runs `scripts/browser/signed-out-pages.mjs --subset`
+on PRs (544 cases, including cross-shape DOM invariants) and `--full` on main pushes
+and workflow dispatches (all 2,496 cases). Each resume assertion observes a probe-triggered
 page reload and a live new document, including the Results-503 case with its cold
 unavailable state. It also exercises the real manual Reload control. All
 seven CI browser phases run in the same locked shell; signed-out checks retain
@@ -2537,8 +2577,19 @@ detection and the stored hashes stay unchanged.
 `TZ=UTC node scripts/browser/signed-out-pages.mjs` runs the same whole-document
 oracle on the actual app in one headless browser, using synthetic loopback reads.
 It exercises every native auth response shape on every protected transport,
-including workers, plus opaque redirects independently on each endpoint. A
-controlled monotonic clock invokes the actual registered page timer callbacks
+including workers, plus opaque redirects independently on each endpoint. The
+PR subset sweeps every reason and screen through a redirect at 390px and a
+401 status at 1440px, selected by response path. The other shapes retain warm
+values and one sampled reason on every screen: `refresh_failed` at 390px and
+`feed_not_received` at 1440px, with distinct health wording.
+`test/signed-out-plan.mjs` enforces identical classification through the actual
+page transport, feed reads and history/account worker hand-offs for the complete
+native shape list; only transport status and redirect metadata vary by shape.
+Its execution test rejects a missing shape/endpoint visit, while `test/workflows.mjs`
+executes the CI shell to verify event-specific mode arguments. Subset browser
+runs require identical captured signed-out DOM across all shapes for one sampled
+reason per width and screen, starting from fresh documents with identical inputs.
+A controlled monotonic clock invokes the actual registered page timer callbacks
 125 seconds later to cross minute boundaries without suspending worker event
 loops. The browser audit also exercises chart hover/focus/keys/wheel, an open
 native modal, Reload reachability, per-section stale marks and muted values,
