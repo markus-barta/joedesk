@@ -184,19 +184,36 @@ test('JOED-187 (h): calibration rejects missing probes, incomplete grids and mix
   assert.throws(() => calibrateProbe([cold]), /probe unavailable/);
 });
 
-test('JOED-187: step summary records exact calibration provenance or uncalibrated absolute guards', async () => {
-  const dir = scratch('joed-187-summary-');
-  const previous = process.env.GITHUB_STEP_SUMMARY;
-  try {
-    const path = join(dir, 'summary.txt'); process.env.GITHUB_STEP_SUMMARY = path;
-    reportCalibration({ status: 'uncalibrated', cap: 3 });
-    reportCalibration(calibrated());
-    const summary = readFileSync(path, 'utf8');
-    assert.match(summary, /uncalibrated: absolute guards/);
-    assert.ok(summary.includes(calibrationSummary(calibrated())));
-    for (const value of Object.values(evidence().source)) assert.ok(summary.includes(String(value)));
-  } finally {
-    if (previous === undefined) delete process.env.GITHUB_STEP_SUMMARY; else process.env.GITHUB_STEP_SUMMARY = previous;
-    await discard(dir, 'step summary fixture');
+test('JOED-187: injected step summary records exact calibration provenance or uncalibrated absolute guards', () => {
+  const summaries = [];
+  const write = text => summaries.push(text);
+  reportCalibration({ status: 'uncalibrated', cap: 3 }, [], write);
+  reportCalibration(calibrated(), [], write);
+  assert.equal(summaries.length, 2);
+  const summary = summaries.join('');
+  assert.match(summary, /uncalibrated: absolute guards/);
+  assert.ok(summary.includes(calibrationSummary(calibrated())));
+  for (const value of Object.values(evidence().source)) assert.ok(summary.includes(String(value)));
+  assert.doesNotMatch(summary, /Host too slow to judge:/);
+});
+
+test('JOED-187 (j): summary groups all widths and kinds and retains the worst over-cap ratio without changing evidence', () => {
+  const calibration = calibrated();
+  const traces = [];
+  for (const width of ['1440', '1024', '390']) {
+    for (const kind of ['board-live', 'results']) {
+      const quiet = calibration.quiet[width][kind].medianMs;
+      for (const k of [3.5, 4.234, 1.6]) {
+        traces.push({ viewport: width, ...attemptGuard(CI_GUARD, true, calibration, width, kind, captured(quiet * k), calibration.source) });
+      }
+    }
   }
+  const before = JSON.stringify(traces);
+  const summaries = [];
+  reportCalibration(calibration, traces, text => summaries.push(text));
+  assert.equal(summaries.length, 1);
+  assert.deepEqual(summaries[0].split('\n').filter(line => line.startsWith('Host too slow to judge:')),
+    ['1440', '1024', '390'].flatMap(width => ['board-live', 'results'].map(kind =>
+      `Host too slow to judge: ${width} ${kind}, k = 4.23× (cap 3×); absolute guards applied`)));
+  assert.equal(JSON.stringify(traces), before);
 });

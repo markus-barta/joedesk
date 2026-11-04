@@ -539,8 +539,13 @@ Budget and machine-load tables show k to two decimals and applied
 patch/history/task limits to 0.1 ms; check names round fractional limits to
 0.1 ms. JSON evidence keeps exact values. Failure-line `measurements` keep each
 attempt's k, `limitMs`, `hostTooSlowToJudge` (true or false), probe and load before
-task attribution. P3 and P4 each report calibration provenance once per CI job
-in the step summary; the runners and their simulated tests never write it.
+task attribution. P3 and P4 each write the step summary once per CI job after
+the budget run: calibration provenance plus one line per width/kind with any
+over-cap attempt, using its highest k, even if a re-measure passed:
+`Host too slow to judge: <width> <kind>, k = <k>× (cap <cap>×); absolute guards applied`.
+Over-cap failure labels end with `host too slow to judge (absolute guards applied)`.
+Uncalibrated and within-cap attempts add no such line. The runners never write
+the summary file; their simulated tests inject a writer that captures the text.
 
 To prepare calibration, retain Board and Results evidence from 1–5 quiet CI
 runs on the same host and Chrome, then pass 1–5 evidence files to

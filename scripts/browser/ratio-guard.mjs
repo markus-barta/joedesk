@@ -75,16 +75,28 @@ export function applyAttemptGuard(result, guard) {
   return result;
 }
 export function guardCheck(name, conditions, row, timingKeys) {
-  if (!row.hostTooSlowToJudge || !Object.keys(conditions).some(key => timingKeys.includes(key))) return { name, conditions };
-  return { name: `${name}; host too slow to judge (k = ${row.k.toFixed(2)}× the quiet probe, cap ${row.cap}): absolute guards`, conditions };
+  if (!row.hostTooSlowToJudge || (!Object.keys(conditions).some(key => timingKeys.includes(key)) && Object.values(conditions).every(Boolean))) return { name, conditions };
+  return { name: `${name}; k = ${row.k.toFixed(2)}× (cap ${row.cap}×); host too slow to judge (absolute guards applied)`, conditions };
 }
 export function calibrationSummary(record = PROBE_CALIBRATION) {
   if (record.status === 'uncalibrated') return 'uncalibrated: absolute guards';
   const s = record.source;
   return `calibrated: run ${s.runId}, attempt ${s.attempt}, ${s.capturedAt}, host ${s.host}, Chrome ${s.chrome}; cap ${record.cap}×${record.sources ? `; quiet runs ${record.sources.map(r => `${r.runId}/${r.attempt} at ${r.capturedAt}`).join(', ')}` : ''}`;
 }
-export function reportCalibration(record) {
-  if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Probe calibration: ${calibrationSummary(record)}\n\n`);
+function writeStepSummary(summary) {
+  if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
+}
+// Called once by P3/P4 after the budget run, never by the budget runners.
+// Retain the worst over-cap attempt per width/kind, even if a retry passed.
+export function reportCalibration(record, traces = [], writeSummary = writeStepSummary) {
+  const slow = new Map();
+  for (const row of traces) {
+    if (!row.hostTooSlowToJudge) continue;
+    const key = `${row.viewport}/${row.kind}`;
+    if (!slow.has(key) || row.k > slow.get(key).k) slow.set(key, row);
+  }
+  const lines = [...slow.values()].map(row => `Host too slow to judge: ${row.viewport} ${row.kind}, k = ${row.k.toFixed(2)}× (cap ${row.cap}×); absolute guards applied`);
+  writeSummary(`Probe calibration: ${calibrationSummary(record)}\n\n${lines.length ? `${lines.join('\n\n')}\n\n` : ''}`);
 }
 export function ratioCells(row, limits) {
   const l = row.limitMs ?? limits;

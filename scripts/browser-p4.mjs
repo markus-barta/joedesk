@@ -670,7 +670,6 @@ const engine = await browser.send('Browser.getVersion');
 const reference = `${engine.product} (headless, ${process.platform} ${process.arch}), ${cpus()[0]?.model ?? 'unknown CPU'}, ${cpus().length} cores, Node ${process.version}`;
 const probeSource = { runId: process.env.GITHUB_RUN_ID ?? `local-${Date.now()}`, attempt: Number(process.env.GITHUB_RUN_ATTEMPT ?? 1),
   host: hostname(), chrome: engine.product };
-reportCalibration(PROBE_CALIBRATION);
 const page = await openPage(browser, { headers: { 'x-auth-request-user': ACTOR } });
 const hostTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const expectedTimeZone = new Intl.DateTimeFormat('en', { timeZone: process.env.TZ ?? hostTimeZone }).resolvedOptions().timeZone;
@@ -2886,6 +2885,7 @@ try {
   timing.enter('cleanup');
   await browser.close();
   for (const b of boards) await b.close();
+  reportCalibration(PROBE_CALIBRATION, budgetTrace ?? []);
 }
 const timePerGroup = groupTimingTable(timing.finish());
 
