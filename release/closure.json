@@ -100,12 +100,12 @@
     {
       "path": "package.json",
       "size": 1750,
-      "sha256": "7f23d44e3d4e6f3de7b4d24c5fa67601c3bb5d9dcd6162287fa0c64e7f3040e6"
+      "sha256": "a97f90f9ecff47ad70644518432effeefabb5d0fc391b4f644318e856afe2dda"
     },
     {
       "path": "public/joe/account-model.js",
-      "size": 24313,
-      "sha256": "0dd1aa00c2677b91b542e87be3af60d54adc205dda845e860e7d8cb20d5eadb4"
+      "size": 24377,
+      "sha256": "50f372820dce1899072bda3b3ed94c34103290fd17f897c9bc6f5acfe6d49b00"
     },
     {
       "path": "public/joe/account-worker.js",
@@ -230,12 +230,12 @@
     {
       "path": "public/joe/index.html",
       "size": 46162,
-      "sha256": "aef03b93e8494f6d56a3420b6ff597eee76b138064d08b071c7f16629ea8e9b9"
+      "sha256": "50cc50a2640fb79e3d5ad681cf47a235b31a444cd272805172ef118a4a6427a1"
     },
     {
       "path": "public/joe/joe-version.js",
-      "size": 21546,
-      "sha256": "535a665b03e0b2b0f58aa40bc333bea1abcc4a4731789f4c99cf0388a81c027d"
+      "size": 21978,
+      "sha256": "4bed8ea628f2956755e180c4abaff9bd406409a8cbef07bb499e03d9480abdba"
     },
     {
       "path": "public/joe/performance.js",
@@ -334,8 +334,8 @@
     },
     {
       "path": "release.json",
-      "size": 326,
-      "sha256": "6913c6cb904ab68ac416535217ce5eff727b9e3fa44d6a0b98914b9aaf29e56a"
+      "size": 313,
+      "sha256": "368d42ec77eb0413fdff18ca63806523f0abf0724bc9ea96907d967989287db4"
     },
     {
       "path": "release/contracts.json",
@@ -349,8 +349,8 @@
     },
     {
       "path": "release/preparation.json",
-      "size": 6964,
-      "sha256": "b58a8d70365c7b5dae38fb2e9c3fe024eeacbb666c38fef192675e69df8aa296"
+      "size": 6788,
+      "sha256": "ec42ae44dfe22e5a9520c9c9a2ab5934ba457da37f39565d0175e8b2d938cad1"
     },
     {
       "path": "release/versioning.mjs",
@@ -364,8 +364,8 @@
     },
     {
       "path": "server/account-history.mjs",
-      "size": 8734,
-      "sha256": "11c6d4f0facc6a7bc896c282e2d048ad5f993fbe83a05be431089a43fab8d4d0"
+      "size": 9366,
+      "sha256": "7729c8adf985a8133b17975720578183a973c7f458dcf2b9b3172926d4c2b5f3"
     },
     {
       "path": "server/account-store.mjs",
