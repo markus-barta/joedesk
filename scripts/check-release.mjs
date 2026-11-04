@@ -55,6 +55,7 @@ export function checkRelease({ root = repoRoot } = {}) {
     execFileSync('git', ['ls-files', '--error-unmatch', '--', 'release/closure.json', 'scripts/check-release.mjs', ...names], { cwd: root, stdio: 'pipe' });
   }
   const active = json('release.json'), prep = json('release/preparation.json'), pkg = json('package.json');
+  if (closure.candidate_version !== active.version) throw new Error('closure_candidate_mismatch');
   const reserved = reserveVersion(prep.previous_release, prep.reservation.reserved_at);
   for (const key of Object.keys(reserved)) if (reserved[key] !== prep.reservation[key]) throw new Error('reservation_mismatch');
   if (compareReleases(prep.previous_release, prep.reservation, prep.anchor) !== -1) throw new Error('anchor_order');

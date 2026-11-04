@@ -130,11 +130,14 @@ test('P6 reservation: one UTC second, no collisions, continued sequence, mixed-e
   const later = reserveVersion({ ...next, version_scheme: 'inspr-calendar-v2' }, laterUTC);
   assert.equal(later.version_scheme, 'inspr-calver-3'); assert.equal(later.release_sequence, next.release_sequence + 1);
 });
+test('JOED-183: closure names the active candidate version', () => {
+  assert.equal(read('release/closure.json').candidate_version, active.version);
+});
 test('JOED-183: sequence 44 follows adopted 43 and preserves About history', () => {
   assert.equal(prep.ticket, 'JOED-183');
   assert.equal(next.release_sequence, 44);
   assert.equal(active.status, 'candidate');
-  assert.equal(active.note, 'The account chart shows gaps only for real outages and unavailable values, keeping history thinned for space connected.');
+  assert.equal(active.note, 'History thinned to save space now stays connected; only real outages and unavailable values show as gaps.');
   const adoption = read('adoption/261101023838.0.0.json');
   assert.deepEqual(oldRelease, {
     product: 'JoeDesk', version_scheme: 'inspr-calver-3', version: '261101023838.0.0',
@@ -798,6 +801,21 @@ test('P6 normal build verifies pinned offline bundle/closure; corruption, extra,
   }
   const run = () => spawnSync(process.execPath, [join(root, 'scripts/check-release.mjs')], { encoding: 'utf8' });
   assert.equal(run().status, 0);
+  const closurePath = join(root, 'release/closure.json'), closureBytes = fs.readFileSync(closurePath);
+  const checkerPath = join(root, 'scripts/check-release.mjs'), checkerSource = fs.readFileSync(checkerPath, 'utf8');
+  for (const candidate_version of [oldRelease.version, undefined]) {
+    const closure = { ...JSON.parse(closureBytes), candidate_version };
+    const bytes = JSON.stringify(closure, null, 2) + '\n';
+    fs.writeFileSync(closurePath, bytes);
+    // Reseal only this fixture so the checker reaches candidate validation.
+    const pin = createHash('sha256').update(bytes).digest('hex');
+    fs.writeFileSync(checkerPath, checkerSource.replace(/export const CLOSURE_SHA256 = '[a-f0-9]{64}';/, `export const CLOSURE_SHA256 = '${pin}';`));
+    const rejected = run();
+    assert.equal(rejected.status, 1);
+    assert.match(rejected.stderr, /release-check: closure_candidate_mismatch/);
+  }
+  fs.writeFileSync(closurePath, closureBytes);
+  fs.writeFileSync(checkerPath, checkerSource);
   const target = join(root, 'public/joe/app.js'), original = fs.readFileSync(target);
   fs.appendFileSync(target, '\n'); assert.equal(run().status, 1); fs.writeFileSync(target, original);
   const extra = join(root, 'public/joe/extra.js'); fs.writeFileSync(extra, ''); assert.equal(run().status, 1); fs.renameSync(extra, join(root, 'extra.js'));

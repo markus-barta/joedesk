@@ -1,6 +1,6 @@
 {
   "schema": "joedesk.runtime-closure.v1",
-  "candidate_version": "261101023838.0.0",
+  "candidate_version": "261104111323.0.0",
   "files": [
     {
       "path": "contracts/accept.mjs",

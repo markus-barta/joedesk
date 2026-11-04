@@ -1776,7 +1776,7 @@ byte for byte. About orders 44, 43, 42, 41, 40, 39, 38, 37 through 26, then
 legacy; all previous entries retain their original content. Earlier
 preparation sections record their reservation-time state.
 
-- The account chart shows gaps only for real outages and unavailable values, keeping history thinned for space connected.
+- History thinned to save space now stays connected; only real outages and unavailable values show as gaps.
 - History thinned before this release keeps its old gaps until it ages out within 14 days.
 
 Contract revision 11 remains accepted beside revision 10 under the same schema

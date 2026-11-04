@@ -5,5 +5,5 @@
   "release_channel": "stable",
   "release_sequence": 44,
   "status": "candidate",
-  "note": "The account chart shows gaps only for real outages and unavailable values, keeping history thinned for space connected."
+  "note": "History thinned to save space now stays connected; only real outages and unavailable values show as gaps."
 }

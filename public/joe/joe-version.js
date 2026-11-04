@@ -12,7 +12,7 @@
         date: "2026-11-04",
         title: "Honest account chart gaps",
         changes: [
-          "The account chart shows gaps only for real outages and unavailable values, keeping history thinned for space connected.",
+          "History thinned to save space now stays connected; only real outages and unavailable values show as gaps.",
           "History thinned before this release keeps its old gaps until it ages out within 14 days.",
         ],
       },
