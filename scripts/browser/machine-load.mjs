@@ -2,6 +2,7 @@
 // measured page work. Process inspection reads executable names, never argv.
 import { spawnSync } from 'node:child_process';
 import * as os from 'node:os';
+import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { quietWaitBudget, QUIET_WAIT_SECONDS } from './quiet-wait-budget.mjs';
@@ -66,10 +67,30 @@ export function quietWaitCells(wait) {
     : ' — | — | — | — | — | — | — | — | — |';
 }
 
-export function captureMachineLoad({ clock = () => new Date(), cpuList = os.cpus, load = os.loadavg, ps = spawnSync } = {}) {
+// Independent, best-effort reads: missing Linux evidence must never stop a run.
+// Keep the full cgroup path for lookup, even when its displayed value is capped.
+function cpuEvidence({ platform, parallelism, readFile }) {
+  const evidence = { availableParallelism: 'unavailable', cpusAllowed: 'unavailable', cgroup: 'unavailable', cpuMax: 'unavailable' };
+  if (platform !== 'linux') return evidence;
+  const cell = value => value.trim().replace(/[|\r\n]/g, ' ').slice(0, 80) || 'unavailable';
+  try { evidence.availableParallelism = parallelism(); } catch {}
+  try { evidence.cpusAllowed = cell(readFile('/proc/self/status', 'utf8').match(/^Cpus_allowed_list:.*$/m)?.[0] ?? ''); } catch {}
+  try {
+    const cgroup = readFile('/proc/self/cgroup', 'utf8').match(/^0::(\/[^\r\n]*)$/m)?.[1];
+    if (cgroup && !cgroup.split('/').includes('..')) {
+      evidence.cgroup = cell(cgroup);
+      try { evidence.cpuMax = cell(readFile(`/sys/fs/cgroup${cgroup === '/' ? '' : cgroup}/cpu.max`, 'utf8')); } catch {}
+    }
+  } catch {}
+  return evidence;
+}
+
+export function captureMachineLoad({ clock = () => new Date(), cpuList = os.cpus, load = os.loadavg, ps = spawnSync,
+  platform = process.platform, parallelism = os.availableParallelism, readFile = readFileSync } = {}) {
   const processes = ps('ps', ['-A', '-o', 'comm='], { encoding: 'utf8', timeout: 2000, maxBuffer: 4 * 1024 * 1024 });
   const known = !processes.error && processes.status === 0 && typeof processes.stdout === 'string';
   return { sampledAt: clock().toISOString(), loadavg: load(), cpuCount: cpuList().length,
+    ...cpuEvidence({ platform, parallelism, readFile }),
     browserProcesses: known ? processes.stdout.split('\n').filter(line =>
       /^(?:chrome(?:[-_].*)?|chromium(?:[-_].*)?|headless_shell|Google Chrome(?: Helper.*)?|Chromium(?: Helper.*)?)$/i.test(basename(line.trim()))).length : null };
 }
@@ -83,11 +104,11 @@ export function machineLoadTable(traces, lock = process.env) {
 
 Machine load before each attempt (host-wide browser processes include this browser and its helpers; unavailable counts are not zero):
 
-| Width | Phase | Probe layout / JS (ms) | Attempt | Quiet wait seconds | Quiet reached | Quiet threshold (load1) | Wait start load1 | Job wait budget before (s) | Job wait budget after (s) | Wait skipped | Skip reason | Budget state | Sampled (UTC) | Loadavg 1 / 5 / 15 min | Logical CPUs | Browser processes |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Width | Phase | Probe layout / JS (ms) | Attempt | Quiet wait seconds | Quiet reached | Quiet threshold (load1) | Wait start load1 | Job wait budget before (s) | Job wait budget after (s) | Wait skipped | Skip reason | Budget state | Sampled (UTC) | Loadavg 1 / 5 / 15 min | Logical CPUs | availableParallelism | cpusAllowed | cgroup | cpuMax | Browser processes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 ${traces.map(r => {
     const m = r.machineLoad;
-    return `| ${r.viewport} | ${r.phase} | ${probeCell(r)} | ${r.attempt ?? 1}/${r.attempts ?? 1} |${quietWaitCells(r.quietWait)} ${m?.sampledAt ?? 'unavailable'} | ${m?.loadavg?.map(loadCell).join(' / ') ?? 'unavailable'} | ${m?.cpuCount ?? 'unavailable'} | ${m?.browserProcesses ?? 'unavailable'} |`;
+    return `| ${r.viewport} | ${r.phase} | ${probeCell(r)} | ${r.attempt ?? 1}/${r.attempts ?? 1} |${quietWaitCells(r.quietWait)} ${m?.sampledAt ?? 'unavailable'} | ${m?.loadavg?.map(loadCell).join(' / ') ?? 'unavailable'} | ${m?.cpuCount ?? 'unavailable'} | ${m?.availableParallelism ?? 'unavailable'} | ${m?.cpusAllowed ?? 'unavailable'} | ${m?.cgroup ?? 'unavailable'} | ${m?.cpuMax ?? 'unavailable'} | ${m?.browserProcesses ?? 'unavailable'} |`;
   }).join('\n')}
 `;
 }
