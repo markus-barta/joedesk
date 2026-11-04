@@ -10,6 +10,7 @@ export const ACCOUNT_HISTORY_CAP = 2 * 1024 * 1024;
 export const emptyAccountHistory = () => ({ schema: 'inspr.joe.account-series.v1',
   generatedAt: null, receivedAt: null, points: [] });
 const MAX_AGE = 14 * 86400000;
+const COMPACTION_MAX_INTERVAL_MS = 15 * 60 * 1000;
 export const ACCOUNT_CLOSES_FORMAT = 'joedesk.account-closes-store.v1';
 export const ACCOUNT_CLOSES_SCHEMA = 'inspr.joe.account-closes.v1';
 export const ACCOUNT_CLOSES_CAP = 2 * 1024 * 1024;
@@ -86,6 +87,17 @@ export function compactAccountPoints(points, bucketSize = 64) {
     previousPresence = presence; previousDay = day;
   }
   dailyLast.forEach(index => keep.add(index));
+  // Keep an actual observation before the next would exceed 15 minutes
+  // from the last kept one. Preserve both sides of every longer raw gap;
+  // this also protects the floor when compacting already-thinned points.
+  const times = points.map(p => Date.parse(p.t));
+  let lastKept = times[0];
+  for (let i = 0; i + 1 < points.length; i++) {
+    if (keep.has(i)) lastKept = times[i];
+    if (times[i + 1] - lastKept <= COMPACTION_MAX_INTERVAL_MS) continue;
+    keep.add(i); lastKept = times[i];
+    if (times[i + 1] - times[i] > COMPACTION_MAX_INTERVAL_MS) keep.add(i + 1);
+  }
   return points.filter((_, i) => keep.has(i));
 }
 

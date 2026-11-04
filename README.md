@@ -925,6 +925,10 @@ and null gaps, never the UI's assumed/interpolated continuity values.
 JOED-150 records exact whole-account EUR equity/cash (including kept holdings)
 in **`account-history-state.json`**, envelope `joedesk.account-history.v1`.
 It has its own 14-day retention, bounded account compaction and 2 MiB cap.
+Compaction keeps recorded points at most 15 minutes apart wherever the input
+points were that close, preserving real gap edges and exact values.
+History thinned before this release keeps its old gaps until it ages out
+within 14 days.
 Desk `history-state.json` stays byte-compatible v2: its fields, compaction timing
 and `sizeBytes` remain desk-only. Authenticated GET-only
 `/joe/account-history.json` exposes the account points and independent daily
