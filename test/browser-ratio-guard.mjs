@@ -141,6 +141,45 @@ test('JOED-187 L2/L6/L7: several quiet runs use median per cell, retain provenan
   }
 });
 
+test('JOED-187 L1: calibration refuses duplicate probe instants with different timestamp spelling', () => {
+  const record = evidence();
+  const row = structuredClone(record.traces[0]);
+  row.probeCapturedAt = row.probeCapturedAt.replace('.000Z', 'Z');
+  assert.equal(Date.parse(row.probeCapturedAt), Date.parse(record.traces[0].probeCapturedAt));
+  record.traces.push(row);
+  assert.throws(() => calibrateProbe([record]), /duplicate probe evidence/);
+});
+
+test('JOED-187 L1: calibration refuses renamed phases within the same cold/live bucket', () => {
+  for (const bucket of ['results', 'cold']) {
+    const record = evidence();
+    let row = record.traces.find(row => row.kind === 'results');
+    if (bucket === 'cold') {
+      row = { ...record.traces[0], phase: 'cold 9000 points' };
+      record.traces.push(row);
+      assert.deepEqual(calibrateProbe([record]), calibrated(), 'cold and live probes remain distinct');
+    }
+    record.traces.push({ ...row, phase: `${row.phase} renamed` });
+    assert.throws(() => calibrateProbe([record]), /duplicate probe evidence/, bucket);
+  }
+});
+
+test('JOED-187 L1: calibration refuses unparseable probe timestamps', () => {
+  for (const timestamp of ['not-a-timestamp', '2026-13-04T10:00:00.000Z']) {
+    const record = evidence();
+    record.traces[0].probeCapturedAt = timestamp;
+    assert.throws(() => calibrateProbe([record]), /source.capturedAt/);
+  }
+});
+
+test('JOED-187 L1: calibration accepts matching probe instants from genuinely different runs', () => {
+  const first = evidence(), second = evidence();
+  second.source.runId = 'quiet-fixture-188';
+  const result = calibrateProbe([first, second]);
+  assert.deepEqual(result.quiet, calibrated().quiet);
+  assert.deepEqual(result.sources.map(source => source.runId), [first.source.runId, second.source.runId]);
+});
+
 test('JOED-187 (g): malformed committed calibration fails loudly on module import before any browser starts', async () => {
   const dir = scratch('joed-187-validator-');
   try {

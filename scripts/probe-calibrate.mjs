@@ -39,13 +39,15 @@ export function analyzeProbeCalibration(records) {
       if (!PROBE_WIDTHS.includes(row.viewport) || !PROBE_KINDS.includes(row.kind)) throw new Error('Unknown probe width/kind');
       // Provenance comes from the actual probe, never the browser launch.
       validateCalibrationSource({ ...record.source, capturedAt: row.probeCapturedAt });
-      const identity = JSON.stringify([record.source.runId, record.source.attempt, row.viewport, row.phase, row.kind, row.probeCapturedAt]);
+      const probeCapturedAtMs = Date.parse(row.probeCapturedAt);
+      const isCold = row.kind === 'board-live' && row.phase !== 'live';
+      const identity = JSON.stringify([record.source.runId, record.source.attempt, row.viewport, isCold, row.kind, probeCapturedAtMs]);
       if (seen.has(identity)) throw new Error('Refusing calibration: duplicate probe evidence');
       seen.add(identity);
       if (!run.source.capturedAt || Date.parse(row.probeCapturedAt) > Date.parse(run.source.capturedAt)) run.source.capturedAt = row.probeCapturedAt;
       // The Board cold read is evidence too, but the requested baseline kind
       // is board-live. Never mix its cold probe into that live baseline.
-      if (row.kind === 'board-live' && row.phase !== 'live') {
+      if (isCold) {
         cold[row.viewport].push(row.probe.medianMs);
         continue;
       }

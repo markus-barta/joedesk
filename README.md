@@ -612,8 +612,10 @@ is the latest actual probe time, rather than the browser launch time. Every
 recorded attempt must have known load1 < 5 and an available positive probe;
 each run (ID and attempt) must include all three widths and both kinds across
 its evidence files (a P3 index plus each P4 zone index is accepted). Duplicate
-probe evidence, identified by run, attempt, viewport, phase, kind and probe
-capture timestamp, is refused. The five-run cap counts distinct runs, not files.
+probe evidence, identified by run, attempt, viewport, cold/live bucket, kind and
+probe capture instant in integer milliseconds, is refused even if timestamp
+spelling or the phase name within its bucket changes. Unparseable timestamps
+are refused. The five-run cap counts distinct runs, not files.
 The tool takes the median of recorded live/Results medians within each width
 and kind across the quiet runs. It prints per-cell min/max
 spread across those samples and per-width cold/live total-median ratios to stderr (or an explicit unavailable
