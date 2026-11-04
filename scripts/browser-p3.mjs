@@ -1671,7 +1671,12 @@ try {
   // so this gate holds the 2.5 × regression guard; the budget itself (16 ms
   // patch, no task reaching 50 ms) is measured on a reference device by
   // scripts/budget-reference.mjs.
-  budgetTrace = await runBudget({ page, newBoard, check, limits: CI_GUARD, runSource: probeSource });
+  budgetTrace = [];
+  try {
+    await runBudget({ page, newBoard, check, limits: CI_GUARD, runSource: probeSource, traces: budgetTrace });
+  } finally {
+    reportCalibration(PROBE_CALIBRATION, budgetTrace, undefined, { phase: 'P3', zone: process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone });
+  }
   console.log('render trace', JSON.stringify(budgetTrace));
   }
 
@@ -1690,7 +1695,6 @@ try {
   timing.enter('cleanup');
   await browser.close();
   for (const b of boards) await b.close();
-  reportCalibration(PROBE_CALIBRATION, budgetTrace ?? []);
 }
 const timePerGroup = groupTimingTable(timing.finish());
 const sweepCoverage = boardSweepTable(sweepPlan, sweepRan);

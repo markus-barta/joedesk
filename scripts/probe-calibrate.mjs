@@ -22,7 +22,7 @@ const grid = () => Object.fromEntries(PROBE_WIDTHS.map(width => [width, Object.f
 export function analyzeProbeCalibration(records) {
   if (!records.length) throw new Error('No quiet run evidence');
   const host = records[0].source?.host, chrome = records[0].source?.chrome;
-  const runs = new Map(), grouped = grid();
+  const runs = new Map(), grouped = grid(), seen = new Set();
   const cold = Object.fromEntries(PROBE_WIDTHS.map(width => [width, []]));
   for (const record of records) {
     if (!record?.source || !Array.isArray(record.traces) || !record.traces.length) throw new Error('Missing run source or traces');
@@ -39,6 +39,9 @@ export function analyzeProbeCalibration(records) {
       if (!PROBE_WIDTHS.includes(row.viewport) || !PROBE_KINDS.includes(row.kind)) throw new Error('Unknown probe width/kind');
       // Provenance comes from the actual probe, never the browser launch.
       validateCalibrationSource({ ...record.source, capturedAt: row.probeCapturedAt });
+      const identity = JSON.stringify([record.source.runId, record.source.attempt, row.viewport, row.phase, row.kind, row.probeCapturedAt]);
+      if (seen.has(identity)) throw new Error('Refusing calibration: duplicate probe evidence');
+      seen.add(identity);
       if (!run.source.capturedAt || Date.parse(row.probeCapturedAt) > Date.parse(run.source.capturedAt)) run.source.capturedAt = row.probeCapturedAt;
       // The Board cold read is evidence too, but the requested baseline kind
       // is board-live. Never mix its cold probe into that live baseline.
@@ -69,7 +72,7 @@ export function calibrateProbe(records) {
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    if (process.argv.length < 3 || process.argv.length > 7) throw new Error('Usage: node scripts/probe-calibrate.mjs <1–5 index.md or JSON evidence files>');
+    if (process.argv.length < 3) throw new Error('Usage: node scripts/probe-calibrate.mjs <index.md or JSON evidence files from 1–5 quiet CI runs>');
     const records = process.argv.slice(2).flatMap(file => readProbeEvidence(readFileSync(file, 'utf8')));
     const { record, spread, coldLiveRatio } = analyzeProbeCalibration(records);
     for (const width of PROBE_WIDTHS) {

@@ -29,7 +29,7 @@ export async function serveResults(browser, page, board, payload) {
   return async () => { await page.setFetch(null); browser.off(handler); };
 }
 
-export async function runResultsBudget({ page, newBoard, check, limits, serve, sampleLoad = captureMachineLoad, waitForQuiet = waitForQuietHost, probe = runReferenceProbe, calibration = PROBE_CALIBRATION, runSource }) {
+export async function runResultsBudget({ page, newBoard, check, limits, serve, sampleLoad = captureMachineLoad, waitForQuiet = waitForQuietHost, probe = runReferenceProbe, calibration = PROBE_CALIBRATION, runSource, traces = [] }) {
   validateCalibration(calibration);
   const within = (ms, limit) => (limits.atMost ? ms <= limit : ms < limit);
   const displayMs = limit => Number.isInteger(limit) ? limit : limit.toFixed(1);
@@ -42,7 +42,6 @@ export async function runResultsBudget({ page, newBoard, check, limits, serve, s
   const record = largeResults(NOW);
   const sizeBytes = new TextEncoder().encode(JSON.stringify(record)).length;
   const unserve = await serve(record, board);
-  const traces = [];
   const measure = async (viewport, timing) => {
     const { identifier } = await page.s('Page.addScriptToEvaluateOnNewDocument', { source: `window.__long = []; new PerformanceObserver(list => { for (const e of list.getEntries()) window.__long.push([e.startTime, Math.round(e.duration)]); }).observe({ type: 'longtask', buffered: true });` });
     await load(page, board.url, 'results');
@@ -76,6 +75,8 @@ export async function runResultsBudget({ page, newBoard, check, limits, serve, s
       const firstGuard = attemptGuard(limits, limits === CI_GUARD, calibration, viewport.name, 'results', firstProbe, runSource);
       const first = await measure(viewport, firstGuard.limitMs);
       applyAttemptGuard(first, firstGuard);
+      const rows = [{ ...first.row, machineLoad: firstLoad, ...firstProbe, attempt: 1 }];
+      traces.push(rows[0]);
       let decision = decideTaskGuard(conditions(first), null, limits);
       // Two explicit calls: only a CI timing-only breach gets a second sample.
       const quietWait = decision.remeasure ? await waitForQuiet() : null;
@@ -83,13 +84,13 @@ export async function runResultsBudget({ page, newBoard, check, limits, serve, s
       const secondProbe = decision.remeasure ? await captureReferenceProbe(page, probe, waitFor) : null;
       const secondGuard = decision.remeasure ? attemptGuard(limits, limits === CI_GUARD, calibration, viewport.name, 'results', secondProbe, runSource) : null;
       const second = decision.remeasure ? await measure(viewport, secondGuard.limitMs) : null;
-      if (second) applyAttemptGuard(second, secondGuard);
+      if (second) {
+        applyAttemptGuard(second, secondGuard);
+        rows.push({ ...second.row, machineLoad: secondLoad, ...secondProbe, quietWait, attempt: 2 });
+        traces.push(rows[1]);
+      }
       if (second) decision = decideTaskGuard(conditions(first), conditions(second), limits);
-      const rows = (decision.remeasured ? [first, second] : [first]).map((result, i) => ({ ...result.row,
-        machineLoad: i === 0 ? firstLoad : secondLoad, ...(i === 0 ? firstProbe : secondProbe),
-        ...(i === 1 ? { quietWait } : {}),
-        attempt: i + 1, attempts: decision.attempts, remeasured: decision.remeasured }));
-      traces.push(...rows);
+      for (const row of rows) Object.assign(row, { attempts: decision.attempts, remeasured: decision.remeasured });
       const result = decision.remeasured ? second : first;
       for (const original of result.checks) {
         const { name, conditions } = guardCheck(original.name, original.conditions, rows.at(-1), TIMING_GUARDS);

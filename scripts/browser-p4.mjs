@@ -2874,7 +2874,12 @@ try {
     // 7 · The Results render budget's CI guard (ADR §9; the reference budget is
     // measured on a reference device by scripts/budget-reference.mjs).
     if (!view('budget', 'render')) throw new Error('Budget view must run in full mode');
-    budgetTrace = await runResultsBudget({ page, newBoard, check, limits: CI_GUARD, runSource: probeSource, serve: async (body, board) => { await serve(served(body, board)); return () => serve(null); } });
+    budgetTrace = [];
+    try {
+      await runResultsBudget({ page, newBoard, check, limits: CI_GUARD, runSource: probeSource, traces: budgetTrace, serve: async (body, board) => { await serve(served(body, board)); return () => serve(null); } });
+    } finally {
+      reportCalibration(PROBE_CALIBRATION, budgetTrace, undefined, { phase: 'P4', zone: expectedTimeZone });
+    }
   }
   timing.enter('host-timezone');
   requireView('host-timezone', 'hosts');
@@ -2885,7 +2890,6 @@ try {
   timing.enter('cleanup');
   await browser.close();
   for (const b of boards) await b.close();
-  reportCalibration(PROBE_CALIBRATION, budgetTrace ?? []);
 }
 const timePerGroup = groupTimingTable(timing.finish());
 

@@ -75,7 +75,8 @@ export function applyAttemptGuard(result, guard) {
   return result;
 }
 export function guardCheck(name, conditions, row, timingKeys) {
-  if (!row.hostTooSlowToJudge || (!Object.keys(conditions).some(key => timingKeys.includes(key)) && Object.values(conditions).every(Boolean))) return { name, conditions };
+  const failed = Object.keys(conditions).filter(key => !conditions[key]);
+  if (!row.hostTooSlowToJudge || !failed.length || !failed.every(key => timingKeys.includes(key))) return { name, conditions };
   return { name: `${name}; k = ${row.k.toFixed(2)}× (cap ${row.cap}×); host too slow to judge (absolute guards applied)`, conditions };
 }
 export function calibrationSummary(record = PROBE_CALIBRATION) {
@@ -86,16 +87,17 @@ export function calibrationSummary(record = PROBE_CALIBRATION) {
 function writeStepSummary(summary) {
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
 }
-// Called once by P3/P4 after the budget run, never by the budget runners.
+// Called once per budget process (P3, and each P4 zone), including on error.
 // Retain the worst over-cap attempt per width/kind, even if a retry passed.
-export function reportCalibration(record, traces = [], writeSummary = writeStepSummary) {
+export function reportCalibration(record, traces = [], writeSummary = writeStepSummary, { phase, zone } = {}) {
   const slow = new Map();
   for (const row of traces) {
     if (!row.hostTooSlowToJudge) continue;
     const key = `${row.viewport}/${row.kind}`;
     if (!slow.has(key) || row.k > slow.get(key).k) slow.set(key, row);
   }
-  const lines = [...slow.values()].map(row => `Host too slow to judge: ${row.viewport} ${row.kind}, k = ${row.k.toFixed(2)}× (cap ${row.cap}×); absolute guards applied`);
+  const context = [phase, zone].filter(Boolean).join(' ');
+  const lines = [...slow.values()].map(row => `Host too slow to judge: ${context ? `${context} ` : ''}${row.viewport} ${row.kind}, k = ${row.k.toFixed(2)}× (cap ${row.cap}×); absolute guards applied`);
   writeSummary(`Probe calibration: ${calibrationSummary(record)}\n\n${lines.length ? `${lines.join('\n\n')}\n\n` : ''}`);
 }
 export function ratioCells(row, limits) {

@@ -34,7 +34,7 @@ export function decideTaskGuard(firstConditions, secondConditions, limits) {
     remeasure: timingOnly && !remeasured, remeasured, attempts: remeasured ? 2 : 1 };
 }
 
-export async function runBudget({ page, newBoard, check, limits, sampleLoad = captureMachineLoad, waitForQuiet = waitForQuietHost, probe = runReferenceProbe, calibration = PROBE_CALIBRATION, runSource }) {
+export async function runBudget({ page, newBoard, check, limits, sampleLoad = captureMachineLoad, waitForQuiet = waitForQuietHost, probe = runReferenceProbe, calibration = PROBE_CALIBRATION, runSource, traces = [] }) {
   validateCalibration(calibration);
   const within = (ms, limit) => (limits.atMost ? ms <= limit : ms < limit);
   const displayMs = limit => Number.isInteger(limit) ? limit : limit.toFixed(1);
@@ -55,7 +55,6 @@ export async function runBudget({ page, newBoard, check, limits, sampleLoad = ca
       calibration: row.calibration,
       offendingTasks: row.longTaskDetails?.filter(t => t.duration >= row.limitMs.taskMs), ...row });
   };
-  const traces = [];
   const runViewport = async (viewport, measure) => {
     await configure(page, viewport, 'light');
     const conditions = result => Object.assign({}, ...result.checks.map(c => c.conditions));
@@ -64,6 +63,9 @@ export async function runBudget({ page, newBoard, check, limits, sampleLoad = ca
     const firstGuard = attemptGuard(limits, limits === CI_GUARD, calibration, viewport.name, 'board-live', firstProbe, runSource);
     const first = await measure(viewport, firstGuard.limitMs);
     applyAttemptGuard(first, firstGuard);
+    const rows = [{ ...first.row, machineLoad: firstLoad, ...firstProbe, attempt: 1,
+      offendingTasks: first.row.longTaskDetails.filter(t => t.duration >= first.row.limitMs.taskMs) }];
+    traces.push(rows[0]);
     let decision = decideTaskGuard(conditions(first), null, limits);
     // Two explicit calls, never a retry loop: at most once per width/phase.
     const quietWait = decision.remeasure ? await waitForQuiet() : null;
@@ -71,14 +73,14 @@ export async function runBudget({ page, newBoard, check, limits, sampleLoad = ca
     const secondProbe = decision.remeasure ? await captureReferenceProbe(page, probe, waitFor) : null;
     const secondGuard = decision.remeasure ? attemptGuard(limits, limits === CI_GUARD, calibration, viewport.name, 'board-live', secondProbe, runSource) : null;
     const second = decision.remeasure ? await measure(viewport, secondGuard.limitMs) : null;
-    if (second) applyAttemptGuard(second, secondGuard);
+    if (second) {
+      applyAttemptGuard(second, secondGuard);
+      rows.push({ ...second.row, machineLoad: secondLoad, ...secondProbe, quietWait, attempt: 2,
+        offendingTasks: second.row.longTaskDetails.filter(t => t.duration >= second.row.limitMs.taskMs) });
+      traces.push(rows[1]);
+    }
     if (second) decision = decideTaskGuard(conditions(first), conditions(second), limits);
-    const rows = (decision.remeasured ? [first, second] : [first]).map((result, i) => ({ ...result.row,
-      machineLoad: i === 0 ? firstLoad : secondLoad, ...(i === 0 ? firstProbe : secondProbe),
-      ...(i === 1 ? { quietWait } : {}),
-      attempt: i + 1, attempts: decision.attempts, remeasured: decision.remeasured,
-      offendingTasks: result.row.longTaskDetails.filter(t => t.duration >= result.row.limitMs.taskMs) }));
-    traces.push(...rows);
+    for (const row of rows) Object.assign(row, { attempts: decision.attempts, remeasured: decision.remeasured });
     const result = decision.remeasured ? second : first;
     for (const { name, conditions } of result.checks) {
       const label = decision.remeasured && Object.keys(conditions).some(key => TIMING_GUARDS.includes(key))

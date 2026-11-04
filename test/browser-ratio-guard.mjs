@@ -99,6 +99,8 @@ test('JOED-187 L2/L6/L7: several quiet runs use median per cell, retain provenan
   assert.equal(calibrateProbe(records.slice(0, 2)).quiet['1440']['board-live'].medianMs, 15, 'even run counts use the middle pair');
   const repeated = structuredClone(records);
   repeated[0].traces.push({ ...repeated[0].traces[0], probe: { layoutMedianMs: 400, jsMedianMs: 600, medianMs: 1000 } });
+  assert.throws(() => analyzeProbeCalibration(repeated), /duplicate probe evidence/);
+  repeated[0].traces.at(-1).probeCapturedAt = '2026-11-04T10:00:01.000Z';
   const repeatedAnalysis = analyzeProbeCalibration(repeated);
   assert.equal(repeatedAnalysis.record.quiet['1440']['board-live'].medianMs, 30, 'all recorded sample medians contribute within their cell');
   assert.deepEqual(repeatedAnalysis.spread['1440']['board-live'].medianMs, { min: 10, max: 1000 });
@@ -111,11 +113,22 @@ test('JOED-187 L2/L6/L7: several quiet runs use median per cell, retain provenan
     assert.deepEqual(JSON.parse(run.stdout), record);
     assert.match(run.stderr, /1440\/board-live spread \(ms\): layoutMedianMs 4\.0–16\.0, jsMedianMs 6\.0–24\.0, medianMs 10\.0–40\.0/);
     for (const width of ['1440', '1024', '390']) assert.ok(run.stderr.includes(`${width} cold/live ratio: 1.50`));
-    const tooMany = spawnSync(process.execPath, [cli, ...Array(6).fill(paths[0])], { encoding: 'utf8' });
-    assert.notEqual(tooMany.status, 0); assert.match(tooMany.stderr, /1–5/);
-    const five = spawnSync(process.execPath, [cli, ...paths, paths[0], paths[1]], { encoding: 'utf8' });
-    assert.equal(five.status, 0, five.stderr);
-    assert.equal(JSON.parse(five.stdout).sources.length, 3);
+    const duplicate = spawnSync(process.execPath, [cli, paths[0], paths[0]], { encoding: 'utf8' });
+    assert.notEqual(duplicate.status, 0);
+    assert.equal(duplicate.stdout, '');
+    assert.match(duplicate.stderr, /duplicate probe evidence/);
+    const splitPaths = records.slice(0, 2).flatMap((r, i) => {
+      const bundles = [r.traces.filter(row => row.kind === 'board-live'),
+        ...['1440', '1024', '390'].map(width => r.traces.filter(row => row.kind === 'results' && row.viewport === width))];
+      return bundles.map((traces, j) => {
+        const path = join(dir, `run-${i}-phase-${j}.json`);
+        writeFileSync(path, JSON.stringify({ source: r.source, traces }));
+        return path;
+      });
+    });
+    const split = spawnSync(process.execPath, [cli, ...splitPaths], { encoding: 'utf8' });
+    assert.equal(split.status, 0, split.stderr);
+    assert.deepEqual(JSON.parse(split.stdout), calibrateProbe(records.slice(0, 2)));
   } finally { await discard(dir, 'multi-run calibration fixtures'); }
   assert.throws(() => calibrateProbe(Array.from({ length: 6 }, (_, i) => ({ ...evidence(), source: { ...evidence().source, runId: `ci-${i}` } }))), /1–5/);
   for (const mutate of [r => { r.source.runId = 'local-42'; }, r => { delete r.traces[0].probeCapturedAt; }]) {
