@@ -15,6 +15,7 @@ import { setDeskDisclosures, phoneDeskSnapshot } from './browser/desk-disclosure
 import { heroWordingFixtures } from './browser/hero-wording-fixtures.mjs';
 import { focusTermTips } from './browser/term-focus.mjs';
 import { runBudget, budgetTable, CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
+import { PROBE_CALIBRATION, reportCalibration } from './browser/ratio-guard.mjs';
 import { TERMS } from '../public/joe/terms.js';
 import { createGate, proportional, shifted, WIDE_FONT } from './browser/gate.mjs';
 import { phaseBChecks, deskRankingFocusChecks } from './browser/phase-b.mjs';
@@ -477,7 +478,8 @@ const browser = await launch({ hostRules: 'MAP joedesk.example.test 127.0.0.1' }
 const engine = await browser.send('Browser.getVersion');
 const reference = `${engine.product} (headless, ${process.platform} ${process.arch}), ${cpus()[0]?.model ?? 'unknown CPU'}, ${cpus().length} cores, Node ${process.version}`;
 const probeSource = { runId: process.env.GITHUB_RUN_ID ?? `local-${Date.now()}`, attempt: Number(process.env.GITHUB_RUN_ATTEMPT ?? 1),
-  capturedAt: new Date().toISOString(), host: hostname(), chrome: engine.product };
+  host: hostname(), chrome: engine.product };
+reportCalibration(PROBE_CALIBRATION);
 const page = await openPage(browser, { headers: { 'x-auth-request-user': ACTOR } });
 await page.s('Page.addScriptToEvaluateOnNewDocument', { source: AUDIT });
 let board = null, current = null, budgetTrace = null;
@@ -1670,7 +1672,7 @@ try {
   // so this gate holds the 2.5 × regression guard; the budget itself (16 ms
   // patch, no task reaching 50 ms) is measured on a reference device by
   // scripts/budget-reference.mjs.
-  budgetTrace = await runBudget({ page, newBoard, check, limits: CI_GUARD });
+  budgetTrace = await runBudget({ page, newBoard, check, limits: CI_GUARD, runSource: probeSource });
   console.log('render trace', JSON.stringify(budgetTrace));
   }
 

@@ -11,7 +11,7 @@ import { VIEWPORTS, configure, load, go, settle, waitFor } from './shots.mjs';
 import { observeBudgetTasks, attributeBudgetTasks } from './budget-tasks.mjs';
 import { captureMachineLoad, machineLoadTable, waitForQuietHost, quietWaitCells } from './machine-load.mjs';
 import { runReferenceProbe, captureReferenceProbe, probeCell } from './reference-probe.mjs';
-import { PROBE_CALIBRATION, validateCalibration, attemptGuard, applyAttemptGuard, guardCheck, calibrationSummary, reportCalibration, ratioCells, calibrationEvidence } from './ratio-guard.mjs';
+import { PROBE_CALIBRATION, validateCalibration, attemptGuard, applyAttemptGuard, guardCheck, calibrationSummary, ratioCells, calibrationEvidence } from './ratio-guard.mjs';
 
 export const REFERENCE_DEVICES = Object.freeze(['mbp2606', 'mbp2607']);
 export const REFERENCE_BUDGET = Object.freeze({ name: 'reference budget', patchMs: 16, historyMs: 50, taskMs: 50, atMost: false });
@@ -34,11 +34,11 @@ export function decideTaskGuard(firstConditions, secondConditions, limits) {
     remeasure: timingOnly && !remeasured, remeasured, attempts: remeasured ? 2 : 1 };
 }
 
-export async function runBudget({ page, newBoard, check, limits, sampleLoad = captureMachineLoad, waitForQuiet = waitForQuietHost, probe = runReferenceProbe, calibration = PROBE_CALIBRATION }) {
+export async function runBudget({ page, newBoard, check, limits, sampleLoad = captureMachineLoad, waitForQuiet = waitForQuietHost, probe = runReferenceProbe, calibration = PROBE_CALIBRATION, runSource }) {
   validateCalibration(calibration);
-  reportCalibration(calibration);
   const within = (ms, limit) => (limits.atMost ? ms <= limit : ms < limit);
-  const bound = limit => `${limits.atMost ? 'at most' : 'under'} ${limit} ms`;
+  const displayMs = limit => Number.isInteger(limit) ? limit : limit.toFixed(1);
+  const bound = limit => `${limits.atMost ? 'at most' : 'under'} ${displayMs(limit)} ms`;
   const tooLong = (tasks, timing) => tasks.filter(ms => ms >= timing.taskMs);
   const observerSource = `(${observeBudgetTasks.toString()})()`;
   const verify = (name, conditions, row) => {
@@ -47,7 +47,7 @@ export async function runBudget({ page, newBoard, check, limits, sampleLoad = ca
     check('budget', name, !failed.length, { failed, conditions,
       // Put both concise measurements before the potentially large task
       // attribution so the failure log's detail limit cannot hide either one.
-      measurements: (row.attemptRows ?? [row]).map(r => ({ attempt: r.attempt, k: r.k, limitMs: r.limitMs, ratioReason: r.ratioReason,
+      measurements: (row.attemptRows ?? [row]).map(r => ({ attempt: r.attempt, k: r.k, limitMs: r.limitMs, hostTooSlowToJudge: r.hostTooSlowToJudge, ratioReason: r.ratioReason,
         patchMs: r.deskWorst ?? null, historyMs: r.historyWorst ?? r.renderWorst,
         taskMs: r.longTasks.length ? max(r.longTasks) : null, load1: r.machineLoad?.loadavg?.[0] ?? null, probeMs: r.probeMs,
         ...(r.quietWait ? { quietWait: { waitedSeconds: r.quietWait.waitedSeconds, quiet: r.quietWait.quiet,
@@ -61,17 +61,17 @@ export async function runBudget({ page, newBoard, check, limits, sampleLoad = ca
     const conditions = result => Object.assign({}, ...result.checks.map(c => c.conditions));
     const firstLoad = sampleLoad();
     const firstProbe = await captureReferenceProbe(page, probe, waitFor);
-    const firstGuard = attemptGuard(limits, limits === CI_GUARD, calibration, viewport.name, 'board-live', firstProbe);
+    const firstGuard = attemptGuard(limits, limits === CI_GUARD, calibration, viewport.name, 'board-live', firstProbe, runSource);
     const first = await measure(viewport, firstGuard.limitMs);
-    applyAttemptGuard(first, firstGuard, TIMING_GUARDS);
+    applyAttemptGuard(first, firstGuard);
     let decision = decideTaskGuard(conditions(first), null, limits);
     // Two explicit calls, never a retry loop: at most once per width/phase.
     const quietWait = decision.remeasure ? await waitForQuiet() : null;
     const secondLoad = decision.remeasure ? sampleLoad() : null;
     const secondProbe = decision.remeasure ? await captureReferenceProbe(page, probe, waitFor) : null;
-    const secondGuard = decision.remeasure ? attemptGuard(limits, limits === CI_GUARD, calibration, viewport.name, 'board-live', secondProbe) : null;
+    const secondGuard = decision.remeasure ? attemptGuard(limits, limits === CI_GUARD, calibration, viewport.name, 'board-live', secondProbe, runSource) : null;
     const second = decision.remeasure ? await measure(viewport, secondGuard.limitMs) : null;
-    if (second) applyAttemptGuard(second, secondGuard, TIMING_GUARDS);
+    if (second) applyAttemptGuard(second, secondGuard);
     if (second) decision = decideTaskGuard(conditions(first), conditions(second), limits);
     const rows = (decision.remeasured ? [first, second] : [first]).map((result, i) => ({ ...result.row,
       machineLoad: i === 0 ? firstLoad : secondLoad, ...(i === 0 ? firstProbe : secondProbe),
@@ -109,7 +109,7 @@ export async function runBudget({ page, newBoard, check, limits, sampleLoad = ca
     return { row, checks: [
       { name: `${viewport.name}: the ${full.history.points.length}-point (8 MiB) history is read and validated in the worker and drawn`,
         conditions: { worker: trace.worker, historyRead: work.length >= 1, noMainThreadHistory: !row.mainThreadHistory, drawn: trace.lines >= 3 } },
-      { name: `${viewport.name}: drawing the full 8 MiB history takes ${bound(timing.historyMs)} with no task on the page reaching ${timing.taskMs} ms (${limits.name})`,
+      { name: `${viewport.name}: drawing the full 8 MiB history takes ${bound(timing.historyMs)} with no task on the page reaching ${displayMs(timing.taskMs)} ms (${limits.name})`,
         conditions: { measured: renders.length > 0, renderBudget: within(row.renderWorst, timing.historyMs), taskBudget: !tooLong(row.longTasks, timing).length } },
     ] };
   };
@@ -197,7 +197,7 @@ export async function runBudget({ page, newBoard, check, limits, sampleLoad = ca
         conditions: { measured: deskRenders.length > 0, patchBudget: within(row.deskWorst, timing.patchMs) } },
       { name: `${viewport.name}: a History update with the near-maximum series renders in ${bound(timing.historyMs)} (${limits.name})`,
         conditions: { redraws: historyRedraws >= 3, historyBudget: within(row.historyWorst, timing.historyMs) } },
-      { name: `${viewport.name}: no task on the page reaches ${timing.taskMs} ms during these updates (${limits.name})`,
+      { name: `${viewport.name}: no task on the page reaches ${displayMs(timing.taskMs)} ms during these updates (${limits.name})`,
         conditions: { taskBudget: !tooLong(row.longTasks, timing).length } },
       { name: `${viewport.name}: history is read and validated in the worker, never on the page`,
         conditions: { worker: trace.worker, historyReads: work.length >= 3, noMainThreadHistory: !mainAccept } },
@@ -218,7 +218,7 @@ export function budgetTable(traces, limits, source) {
   const remeasured = traces.some(r => r.remeasured);
   return `Probe calibration: ${traces[0]?.calibration ?? calibrationSummary()}
 
-| Width | Phase | Probe layout / JS (ms) | k | Scaled limits patch / history / task (ms) | Ratio evidence |${remeasured ? ' Attempt | Quiet wait seconds | Quiet reached | Quiet threshold (load1) | Wait start load1 | Job wait budget before (s) | Job wait budget after (s) | Wait skipped | Skip reason | Budget state |' : ''} Desk patch worst (ms) | History draw worst (ms) | Worker read worst (ms) | Long task worst (ms) | Long tasks (≥ 50 ms) |${guard ? ` Tasks ≥ scaled task limit |` : ''}
+| Width | Phase | Probe layout / JS (ms) | k | Applied limits patch / history / task (ms) | Ratio evidence |${remeasured ? ' Attempt | Quiet wait seconds | Quiet reached | Quiet threshold (load1) | Wait start load1 | Job wait budget before (s) | Job wait budget after (s) | Wait skipped | Skip reason | Budget state |' : ''} Desk patch worst (ms) | History draw worst (ms) | Worker read worst (ms) | Long task worst (ms) | Long tasks (≥ 50 ms) |${guard ? ` Tasks ≥ applied task limit |` : ''}
 | --- | --- | --- | --- | --- | --- |${remeasured ? ' --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |' : ''} --- | --- | --- | --- | --- |${guard ? ' --- |' : ''}
 ${traces.map(r => `| ${r.viewport} | ${r.phase} | ${probeCell(r)} |${ratioCells(r, limits)}${remeasured ? ` ${r.attempt}/${r.attempts}${r.remeasured ? ' (re-measured)' : ''} |${quietWaitCells(r.quietWait)}` : ''} ${r.deskWorst?.toFixed?.(1) ?? '—'} | ${(r.historyWorst ?? r.renderWorst)?.toFixed(1)} | ${(r.workerWorst ?? r.workerRead)?.toFixed(1)} | ${r.longTasks.length ? max(r.longTasks).toFixed(1) : '—'} | ${r.longTasks.length} |${guard ? ` ${r.longTasks.filter(ms => ms >= (r.limitMs ?? limits).taskMs).length} |` : ''}`).join('\n')}
 

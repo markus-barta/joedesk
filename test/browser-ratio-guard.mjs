@@ -5,8 +5,8 @@ import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { CI_GUARD, REFERENCE_BUDGET } from '../scripts/browser/budget.mjs';
-import { validateCalibration, attemptGuard, calibrationSummary, calibrationEvidence, reportCalibration } from '../scripts/browser/ratio-guard.mjs';
-import { calibrateProbe, readProbeEvidence } from '../scripts/probe-calibrate.mjs';
+import { validateCalibration, attemptGuard, calibrationSummary, calibrationEvidence, reportCalibration, ratioCells } from '../scripts/browser/ratio-guard.mjs';
+import { calibrateProbe, analyzeProbeCalibration, readProbeEvidence } from '../scripts/probe-calibrate.mjs';
 import { scratch, discard } from '../scripts/browser/scratch.mjs';
 
 const fixtureURL = new URL('./fixtures/probe-quiet.json', import.meta.url);
@@ -18,12 +18,33 @@ test('JOED-187 (d/f): ratios floor at one and use only the same width and kind',
   const calibration = calibrated();
   for (const [width, kind, quiet] of [['1440', 'board-live', 10], ['1024', 'board-live', 20], ['390', 'board-live', 40], ['1440', 'results', 20]]) {
     for (const [now, k] of [[quiet / 2, 1], [quiet, 1], [quiet * 1.6, 1.6]]) {
-      const guard = attemptGuard(CI_GUARD, true, calibration, width, kind, captured(now));
+      const guard = attemptGuard(CI_GUARD, true, calibration, width, kind, captured(now), calibration.source);
       assert.equal(guard.k, k);
       assert.deepEqual(guard.limitMs, { patchMs: 40 * k, historyMs: 125 * k, taskMs: 125 * k });
     }
   }
-  assert.equal(attemptGuard(REFERENCE_BUDGET, false, calibration, '1440', 'results', captured(700)).k, 1);
+  assert.equal(attemptGuard(REFERENCE_BUDGET, false, calibration, '1440', 'results', captured(700), calibration.source).k, 1);
+});
+
+test('JOED-187 M2: calibration applies only to its exact host and Chrome, including hosted fallback', () => {
+  const calibration = calibrated();
+  for (const runSource of [{ ...calibration.source, host: 'ubuntu-latest' }, { ...calibration.source, chrome: 'HeadlessChrome upgraded' }, {}]) {
+    const guard = attemptGuard(CI_GUARD, true, calibration, '1440', 'board-live', captured(16), runSource);
+    assert.equal(guard.k, 1);
+    assert.deepEqual(guard.limitMs, { patchMs: 40, historyMs: 125, taskMs: 125 });
+    assert.equal(guard.hostTooSlowToJudge, false);
+    assert.equal(guard.ratioReason, `calibration is for quiet-fixture/HeadlessChrome fixture, this run is ${runSource.host ?? 'unknown'}/${runSource.chrome ?? 'unknown'}: absolute guards`);
+  }
+  assert.equal(attemptGuard(CI_GUARD, true, calibration, '1440', 'board-live', captured(16), calibration.source).k, 1.6);
+});
+
+test('JOED-187 L3: tables round only display values and keep exact ratio and limits in evidence', () => {
+  const calibration = calibrated();
+  const guard = attemptGuard(CI_GUARD, true, calibration, '1440', 'board-live', captured(13.740000000000002), calibration.source);
+  const before = JSON.stringify(guard);
+  assert.match(ratioCells(guard, CI_GUARD), /1\.37 \| 55\.0 \/ 171\.8 \/ 171\.8/);
+  assert.equal(JSON.stringify(guard), before);
+  assert.equal(guard.limitMs.patchMs, 40 * guard.k);
 });
 
 test('JOED-187 (g): strict calibration validator rejects malformed records and accepts the shipped uncalibrated record', () => {
@@ -34,18 +55,76 @@ test('JOED-187 (g): strict calibration validator rejects malformed records and a
     r => { r.quiet['1440']['board-live'].layoutMedianMs = NaN; },
     r => { r.quiet['1440']['board-live'].jsMedianMs = '4'; },
     r => { r.quiet['1440']['board-live'].medianMs = 0; },
-    ...[1, 0, -1, Infinity, '3'].map(cap => r => { r.cap = cap; }),
+    ...[1000, 3.01, 1, 0, -1, Infinity, '3'].map(cap => r => { r.cap = cap; }),
     r => { r.quiet['1440'].unknown = r.quiet['1440'].results; },
     r => { delete r.quiet['1024'].results; },
     r => { r.source.capturedAt = '2026-02-31T12:00:00Z'; },
     r => { r.source.host = ''; },
     r => { r.source.attempt = 0; },
     r => { r.source.runId = 'run|bad'; },
+    r => { r.source.runId = 'local-12345'; },
+    r => { r.sources = null; },
     r => { r.extra = true; },
   ];
   for (const mutate of mutations) { const record = calibrated(); mutate(record); assert.throws(() => validateCalibration(record), /Invalid probe calibration/); }
   for (const record of [null, [], {}, { status: 'unknown', cap: 3 }, { status: 'uncalibrated' }, { status: 'uncalibrated', cap: 3, quiet: {} }]) {
     assert.throws(() => validateCalibration(record), /Invalid probe calibration/);
+  }
+});
+
+test('JOED-187 L2/L6/L7: several quiet runs use median per cell, retain provenance, and print spread and cold/live ratios', async () => {
+  const records = [1, 2, 4].map((scale, i) => {
+    const r = evidence(); r.source.runId = `quiet-ci-${i}`;
+    // A launch timestamp deliberately later than the probe must be ignored.
+    r.source.capturedAt = '2026-11-04T12:00:00.000Z';
+    for (const row of r.traces) {
+      row.probeCapturedAt = `2026-11-04T10:0${i}:00.000Z`;
+      for (const field of ['layoutMedianMs', 'jsMedianMs', 'medianMs']) row.probe[field] *= scale;
+    }
+    for (const width of ['1440', '1024', '390']) {
+      const live = r.traces.find(row => row.viewport === width && row.kind === 'board-live');
+      r.traces.push({ ...live, phase: 'cold 9000 points', probe: { ...live.probe, medianMs: live.probe.medianMs * 1.5 } });
+    }
+    return r;
+  });
+  const { record, spread, coldLiveRatio } = analyzeProbeCalibration(records);
+  assert.deepEqual(record.quiet['1440']['board-live'], { layoutMedianMs: 8, jsMedianMs: 12, medianMs: 20 });
+  assert.deepEqual(record.quiet['390'].results, { layoutMedianMs: 64, jsMedianMs: 96, medianMs: 160 });
+  assert.deepEqual(spread['1440']['board-live'].medianMs, { min: 10, max: 40 });
+  assert.deepEqual(coldLiveRatio, { 1440: 1.5, 1024: 1.5, 390: 1.5 });
+  assert.equal(record.sources.length, 3);
+  assert.deepEqual(record.sources.map(s => s.runId), ['quiet-ci-0', 'quiet-ci-1', 'quiet-ci-2']);
+  assert.equal(record.source.capturedAt, '2026-11-04T10:02:00.000Z');
+  assert.ok(calibrationSummary(record).includes('quiet-ci-0/2 at 2026-11-04T10:00:00.000Z'));
+  assert.equal(calibrateProbe(records.slice(0, 2)).quiet['1440']['board-live'].medianMs, 15, 'even run counts use the middle pair');
+  const repeated = structuredClone(records);
+  repeated[0].traces.push({ ...repeated[0].traces[0], probe: { layoutMedianMs: 400, jsMedianMs: 600, medianMs: 1000 } });
+  const repeatedAnalysis = analyzeProbeCalibration(repeated);
+  assert.equal(repeatedAnalysis.record.quiet['1440']['board-live'].medianMs, 30, 'all recorded sample medians contribute within their cell');
+  assert.deepEqual(repeatedAnalysis.spread['1440']['board-live'].medianMs, { min: 10, max: 1000 });
+  const dir = scratch('joed-187-multi-calibrate-');
+  try {
+    const paths = records.map((r, i) => { const path = join(dir, `run-${i}.json`); writeFileSync(path, JSON.stringify(r)); return path; });
+    const cli = fileURLToPath(new URL('../scripts/probe-calibrate.mjs', import.meta.url));
+    const run = spawnSync(process.execPath, [cli, ...paths], { encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    assert.deepEqual(JSON.parse(run.stdout), record);
+    assert.match(run.stderr, /1440\/board-live spread \(ms\): layoutMedianMs 4\.0–16\.0, jsMedianMs 6\.0–24\.0, medianMs 10\.0–40\.0/);
+    for (const width of ['1440', '1024', '390']) assert.ok(run.stderr.includes(`${width} cold/live ratio: 1.50`));
+    const tooMany = spawnSync(process.execPath, [cli, ...Array(6).fill(paths[0])], { encoding: 'utf8' });
+    assert.notEqual(tooMany.status, 0); assert.match(tooMany.stderr, /1–5/);
+    const five = spawnSync(process.execPath, [cli, ...paths, paths[0], paths[1]], { encoding: 'utf8' });
+    assert.equal(five.status, 0, five.stderr);
+    assert.equal(JSON.parse(five.stdout).sources.length, 3);
+  } finally { await discard(dir, 'multi-run calibration fixtures'); }
+  assert.throws(() => calibrateProbe(Array.from({ length: 6 }, (_, i) => ({ ...evidence(), source: { ...evidence().source, runId: `ci-${i}` } }))), /1–5/);
+  for (const mutate of [r => { r.source.runId = 'local-42'; }, r => { delete r.traces[0].probeCapturedAt; }]) {
+    const invalid = evidence(); mutate(invalid); assert.throws(() => calibrateProbe([invalid]));
+  }
+  const missing = structuredClone(records); missing[1].traces = missing[1].traces.filter(r => r.kind !== 'results');
+  assert.throws(() => calibrateProbe(missing), /Missing quiet probe/);
+  for (const change of [r => { r.sources[0].host = 'other'; }, r => { r.sources.push(r.sources[0]); }]) {
+    const invalid = structuredClone(record); change(invalid); assert.throws(() => validateCalibration(invalid));
   }
 });
 
@@ -89,8 +168,10 @@ test('JOED-187 (h): calibration rejects missing probes, incomplete grids and mix
   for (const mutate of [r => { r.traces[0].probe = null; }, r => { r.traces.pop(); }, r => { r.traces[0].kind = 'unknown'; }]) {
     const record = evidence(); mutate(record); assert.throws(() => calibrateProbe([record]));
   }
-  const mixed = evidence(); mixed.source.runId = 'other-run';
-  assert.throws(() => calibrateProbe([evidence(), mixed]), /mixes runs/);
+  for (const field of ['host', 'chrome']) {
+    const mixed = evidence(); mixed.source[field] = 'other';
+    assert.throws(() => calibrateProbe([evidence(), mixed]), /mixes hosts or Chromes/);
+  }
   const first = evidence(), second = evidence();
   first.traces = first.traces.filter(r => r.kind === 'board-live');
   second.traces = second.traces.filter(r => r.kind === 'results');

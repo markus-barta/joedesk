@@ -571,31 +571,47 @@ allowance remain unchanged.
 
 The strict `scripts/browser/probe-calibration.json` record ships as
 `"uncalibrated"` with cap 3.0: absolute guards and exactly the previous
-decisions. A calibrated ratio is floored at 1; an unavailable probe also uses
-`k = 1` and says so in the evidence. An invalid calibration fails loudly at
-startup. If `k > cap`, that attempt's timing checks fail red with
-`hostTooSlowToJudge` and “host too slow to judge”; a re-measure can pass only
-with its own ratio within the cap and all checks passing. This is not the
-rejected option “(4) inconclusive on overload”: every attempt is judged and
-above-cap attempts fail, never become inconclusive or pass on host load alone.
-Budget and machine-load tables show k and scaled patch/history/task limits;
-failure-line `measurements` keep each attempt's k, `limitMs`, probe and load
-before task attribution. The step summary states calibration provenance or
-“uncalibrated: absolute guards”.
+decisions. The validator requires `1 < cap ≤ 3`. A calibrated ratio is floored
+at 1; an unavailable probe uses `k = 1` and says so in the evidence. Calibration
+applies only to its exact host and Chrome version. A different host (including
+an ubuntu-latest fallback) or Chrome version uses `k = 1`, with the reason
+`calibration is for <host>/<chrome>, this run is <host>/<chrome>: absolute guards`.
+An invalid calibration fails loudly at startup. Within the cap, timing limits
+scale with k. If `k > cap`, the measured ratio remains in the evidence and the
+attempt records `hostTooSlowToJudge: true`, but all timing limits revert to the
+absolute CI guard (`k = 1` for limits): a 35 ms patch passes and a 45 ms patch
+fails at k = 3.5, cap 3. This never judges an overloaded host more loosely or
+more strictly than today's absolute guard. The existing timing-only re-measure
+still uses its own probe and limits. This is not the rejected option
+“(4) inconclusive on overload”: every attempt is judged against timing limits,
+and overload alone grants neither a pass nor a failure.
+Budget and machine-load tables show k to two decimals and applied
+patch/history/task limits to 0.1 ms; check names round fractional limits to
+0.1 ms. JSON evidence keeps exact values. Failure-line `measurements` keep each
+attempt's k, `limitMs`, `hostTooSlowToJudge` (true or false), probe and load before
+task attribution. P3 and P4 each report calibration provenance once per CI job
+in the step summary; the runners and their simulated tests never write it.
 
-To prepare calibration, retain the Board and Results `index.md` evidence from
-the same quiet CI run (same run ID, attempt, host and Chrome), then run
+To prepare calibration, retain Board and Results evidence from 1–5 quiet CI
+runs on the same host and Chrome, then pass 1–5 evidence files to
 `node scripts/probe-calibrate.mjs /path/to/p3/index.md /path/to/p4/index.md`.
-A single combined index or JSON evidence bundle is also accepted. The indices
+A combined index or JSON evidence bundle can include several runs. The indices
 include lossless JSON probe evidence with provenance; JSON input is an object
-or array of `{ source, traces }` bundles with the same fields. Every recorded
-attempt must have known load1 < 5 and an available positive probe; all three
-widths and both kinds must be present. For repeated live/Results samples,
-the tool takes the median of each recorded median within its width and kind.
-It prints a candidate record without writing any file. The coordinator shows
-LEAD the numbers before committing an approved record; no calibration is
-silently learned from loaded runs. Historical phase-1 indices without lossless
-probe evidence are refused rather than reconstructed from rounded table cells.
+or array of `{ source, traces }` bundles. `local-…` run IDs are refused. Probe
+capture records its own timestamp just before the workload; `source.capturedAt`
+is the latest actual probe time, rather than the browser launch time. Every
+recorded attempt must have known load1 < 5 and an available positive probe;
+each run (ID and attempt) must include all three widths and both kinds across
+its evidence files. The tool takes the median of recorded live/Results medians
+within each width and kind across the quiet runs. It prints per-cell min/max
+spread across those samples and per-width cold/live total-median ratios to stderr (or an explicit unavailable
+label without cold probes), plus the candidate JSON record to stdout, without
+writing any file. Multi-run candidates retain every run's provenance in
+`sources`, with the latest probe's run in `source`. The coordinator shows LEAD
+the candidate, spread and cold/live ratios before committing an approved record;
+no calibration is silently learned from loaded runs. Historical phase-1 indices
+without lossless probe evidence are refused rather than reconstructed from
+rounded table cells.
 
 Chrome installation runs hosted-only. Self-hosted jobs first use a non-empty,
 executable `BROWSER_PATH`; otherwise they resolve `chromium`, `chromium-browser`,

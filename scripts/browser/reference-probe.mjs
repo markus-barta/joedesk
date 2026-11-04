@@ -55,15 +55,16 @@ export async function runReferenceProbe(page) {
 // Discard the previous JoeDesk document (including pending layout) before
 // probing. The attempt's existing load() still opens a fresh measured page.
 // Evidence failures must never prevent that attempt or change its decisions.
-export async function captureReferenceProbe(page, probe, waitFor) {
+export async function captureReferenceProbe(page, probe, waitFor, clock = () => new Date()) {
   try {
     await page.s('Page.navigate', { url: 'about:blank' });
     await waitFor(page, `location.href === 'about:blank' && document.readyState === 'complete'`);
+    const probeCapturedAt = clock().toISOString();
     const result = await probe(page);
     if (!result || !['layoutMedianMs', 'jsMedianMs', 'medianMs', 'minMs', 'maxMs', 'reps'].every(field => Number.isFinite(result[field]))) {
       throw new Error('Invalid reference probe: fields must be finite numbers');
     }
-    return { probe: result, probeMs: result.medianMs };
+    return { probe: result, probeMs: result.medianMs, probeCapturedAt };
   } catch (error) {
     const probeReason = String(error?.message ?? error).replace(/[|\r\n]/g, ' ').slice(0, 60);
     return { probe: null, probeMs: null, probeReason };

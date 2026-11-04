@@ -2,7 +2,7 @@
 // the host gate and desk changes. The browser serves public/joe/time.mjs and
 // public/joe/contracts/* from the repo root; this hook mirrors that mapping.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -2484,7 +2484,7 @@ test('browser budget: reference limits stay strict with no re-measure', () => {
 
 // Exercise the exact runner with synthetic CDP replies, without a browser,
 // servers or real time. Each load consumes one phase's scripted measurement.
-async function simulatedBudget({ cold = [{}], live = [{}], viewports = ['390'], limits = CI_GUARD, probe, calibration, useDefaultWait = false, sampleLoad, waitForQuiet = async () => ({ waitedSeconds: 0, quiet: true, threshold: 13, startLoad1: 2 }) } = {}) {
+async function simulatedBudget({ cold = [{}], live = [{}], viewports = ['390'], limits = CI_GUARD, probe, calibration, runSource = { host: 'quiet-fixture', chrome: 'HeadlessChrome fixture' }, useDefaultWait = false, sampleLoad, waitForQuiet = async () => ({ waitedSeconds: 0, quiet: true, threshold: 13, startLoad1: 2 }) } = {}) {
   let phase, sample, reads, neutralReady = false;
   const loads = { cold: 0, live: 0 }, boards = [], checks = [], events = [];
   const timings = (reason, count, ms) => Array.from({ length: count }, (_, i) => ({ reason, at: 200 + i * 20, ms }));
@@ -2547,7 +2547,7 @@ async function simulatedBudget({ cold = [{}], live = [{}], viewports = ['390'], 
     fetch: async () => ({ json: async () => ({ points: Array(7209), sizeBytes: 6 * 1048576 }) }),
   };
   const execute = runInNewContext(`(${runBudget.toString()})`, context);
-  const traces = await execute({ page, limits, ...(probe ? { probe } : {}), ...(calibration ? { calibration } : {}),
+  const traces = await execute({ page, limits, runSource, ...(probe ? { probe } : {}), ...(calibration ? { calibration } : {}),
     ...(!useDefaultWait ? { waitForQuiet: async () => {
       events.push('wait-start');
       const result = await waitForQuiet();
@@ -2818,7 +2818,7 @@ test('browser budget: runBudget statically allows at most one re-measure per vie
 
 // Run the Results orchestration against scripted page replies. Navigation
 // consumes a sample, so an unexpected third measurement fails immediately.
-async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUARD, probe, calibration, useDefaultWait = false, sampleLoad, waitForQuiet = async () => ({ waitedSeconds: 0, quiet: true, threshold: 13, startLoad1: 2 }) } = {}) {
+async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUARD, probe, calibration, runSource = { host: 'quiet-fixture', chrome: 'HeadlessChrome fixture' }, useDefaultWait = false, sampleLoad, waitForQuiet = async () => ({ waitedSeconds: 0, quiet: true, threshold: 13, startLoad1: 2 }) } = {}) {
   let viewport, sample, unserved = false, neutralReady = false;
   const loads = Object.fromEntries(Object.keys(samples).map(width => [width, 0])), checks = [], observers = [], events = [];
   const page = {
@@ -2870,7 +2870,7 @@ async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUA
   };
   const execute = runInNewContext(`(${runResultsBudget.toString()})`, context);
   let loadSamples = 0;
-  const traces = await execute({ page, limits, ...(probe ? { probe } : {}), ...(calibration ? { calibration } : {}),
+  const traces = await execute({ page, limits, runSource, ...(probe ? { probe } : {}), ...(calibration ? { calibration } : {}),
     ...(!useDefaultWait ? { waitForQuiet: async () => {
       events.push('wait-start');
       const result = await waitForQuiet();
@@ -3355,10 +3355,52 @@ function ratioCalibration() {
 const ratioProbe = medianMs => async () => ({ layoutMedianMs: medianMs * 0.4, jsMedianMs: medianMs * 0.6, medianMs, minMs: medianMs, maxMs: medianMs, reps: 7 });
 async function ratioRun(runner, sample, options = {}) {
   const samples = [sample, sample];
-  const settings = { calibration: ratioCalibration(), probe: ratioProbe(16), ...options };
+  const settings = { runSource: { host: 'quiet-fixture', chrome: 'HeadlessChrome fixture' }, calibration: ratioCalibration(), probe: ratioProbe(16), ...options };
   return runner === 'Board' ? simulatedBudget({ ...settings, cold: samples, live: samples })
     : simulatedResultsBudget({ ...settings, samples: { 390: samples } });
 }
+
+test('JOED-187 M1: simulated Board and Results runners never write the CI step summary', async () => {
+  const dir = scratch('joed-187-runner-summary-');
+  const previous = process.env.GITHUB_STEP_SUMMARY;
+  try {
+    const path = join(dir, 'summary.txt'); writeFileSync(path, ''); process.env.GITHUB_STEP_SUMMARY = path;
+    for (const runner of ['Board', 'Results']) {
+      await ratioRun(runner, { patchMs: 80, switchMs: 80 });
+      assert.equal(readFileSync(path, 'utf8'), '');
+    }
+  } finally {
+    if (previous === undefined) delete process.env.GITHUB_STEP_SUMMARY; else process.env.GITHUB_STEP_SUMMARY = previous;
+    await discard(dir, 'runner summary fixture');
+  }
+});
+
+test('JOED-187 M2: both runners fall back on host or Chrome mismatch and scale on exact match', async () => {
+  for (const runner of ['Board', 'Results']) {
+    for (const runSource of [{ host: 'ubuntu-latest', chrome: 'HeadlessChrome fixture' }, { host: 'quiet-fixture', chrome: 'new Chrome' }, { host: 'quiet-fixture', chrome: 'HeadlessChrome fixture' }]) {
+      const exact = runSource.host === 'quiet-fixture' && runSource.chrome === 'HeadlessChrome fixture';
+      const run = await ratioRun(runner, { patchMs: 60, switchMs: 60 }, { runSource });
+      assert.equal(run.checks.every(c => c.ok), exact);
+      assert.ok(run.traces.every(r => r.k === (exact ? 1.6 : 1)));
+      if (!exact) {
+        assert.ok(run.checks.every(c => c.detail.measurements.every(m => /calibration is for .*this run is .*absolute guards/.test(m.ratioReason))));
+        const table = runner === 'Board' ? budgetTable(run.traces, CI_GUARD) : resultsBudgetTable(run.traces, CI_GUARD);
+        assert.ok(table.includes(`this run is ${runSource.host}/${runSource.chrome}: absolute guards`));
+      }
+    }
+  }
+});
+
+test('JOED-187 L3: both runners round fractional limits in check names without rounding measurements', async () => {
+  for (const runner of ['Board', 'Results']) {
+    const run = await ratioRun(runner, { patchMs: 80, switchMs: 80, historyMs: 190, taskMs: 200 }, { probe: ratioProbe(13.740000000000002) });
+    const names = run.checks.map(c => c.name).join('\n');
+    assert.match(names, /at most 55\.0 ms/);
+    assert.match(names, /171\.8 ms/);
+    assert.doesNotMatch(names, /54\.96000000000001|171\.750000/);
+    assert.ok(run.checks.every(c => c.detail.measurements.every(m => m.limitMs.patchMs === 40 * m.k)));
+  }
+});
 
 test('JOED-187 (b): k = 1.6 scales patch, history, cold render, Results render and long-task limits', async () => {
   for (const runner of ['Board', 'Results']) {
@@ -3382,17 +3424,25 @@ test('JOED-187 (b): k = 1.6 scales patch, history, cold render, Results render a
   }
 });
 
-test('JOED-187 (c): k = 3.5 fails red with hostTooSlowToJudge despite tiny times; the cap is inclusive', async () => {
+test('JOED-187 (c/d): above-cap attempts use absolute guards: 35 ms passes, 45 ms fails; the cap is inclusive', async () => {
   for (const runner of ['Board', 'Results']) {
-    const over = await ratioRun(runner, { patchMs: 1, historyMs: 1, switchMs: 1, taskMs: null }, { probe: ratioProbe(35) });
-    const failed = over.checks.filter(c => !c.ok);
-    assert.equal(failed.length, runner === 'Board' ? 4 : 2);
-    assert.ok(failed.every(c => c.detail.failed.includes('hostTooSlowToJudge') && c.detail.conditions.hostTooSlowToJudge === false));
-    assert.ok(failed.every(c => /host too slow to judge \(k = 3\.50× the quiet probe, cap 3\)/.test(c.name)));
-    assert.ok(over.traces.every(r => r.k === 3.5 && r.hostTooSlowToJudge && r.attempts === 2));
-    const atCap = await ratioRun(runner, {}, { probe: ratioProbe(30) });
+    for (const [patchMs, pass] of [[35, true], [45, false]]) {
+      const over = await ratioRun(runner, { patchMs, historyMs: patchMs, switchMs: patchMs, taskMs: null }, { probe: ratioProbe(35) });
+      assert.equal(over.checks.every(c => c.ok), pass);
+      assert.ok(over.traces.every(r => r.k === 3.5 && r.hostTooSlowToJudge && r.limitMs.patchMs === 40 && r.limitMs.historyMs === 125 && r.limitMs.taskMs === 125));
+      assert.equal(runner === 'Board' ? over.loads.live : over.loads['390'], pass ? 1 : 2);
+      assert.ok(over.checks.every(c => c.detail.measurements.every(m => m.hostTooSlowToJudge === true)));
+      assert.ok(over.checks.filter(c => Object.keys(c.detail.conditions).some(k => TIMING_GUARDS.includes(k)))
+        .every(c => /host too slow to judge \(k = 3\.50× the quiet probe, cap 3\): absolute guards/.test(c.name)));
+      assert.ok(over.checks.every(c => !('hostTooSlowToJudge' in c.detail.conditions)), 'the flag records evidence, not an extra failure condition');
+    }
+    const atCap = await ratioRun(runner, { patchMs: 110, switchMs: 110, historyMs: 300, taskMs: 350 }, { probe: ratioProbe(30) });
     assert.ok(atCap.checks.every(c => c.ok));
     assert.ok(atCap.traces.every(r => r.k === 3 && !r.hostTooSlowToJudge && r.attempts === 1));
+    for (const [taskMs, pass] of [[124.9, true], [125, false]]) {
+      const over = await ratioRun(runner, { taskMs, historyMs: 125 }, { probe: ratioProbe(35) });
+      assert.equal(over.checks.every(c => c.ok), pass, 'above cap preserves the absolute task boundary');
+    }
   }
 });
 
@@ -3411,7 +3461,8 @@ test('JOED-187: each re-measure uses its own probe and ratio, and functional fai
     // scaled timing breach; it remains a red final measurement.
     calls = 0;
     const final = await ratioRun(runner, { patchMs: 70, switchMs: 70, historyMs: 210 }, { probe: async () => ratioProbe(++calls % 2 ? 16 : 35)() });
-    assert.ok(final.checks.some(c => c.detail.failed.includes('hostTooSlowToJudge')));
+    assert.ok(final.checks.some(c => !c.ok && /host too slow to judge.*absolute guards/.test(c.name)));
+    assert.ok(final.checks.some(c => c.detail.measurements.some(m => m.hostTooSlowToJudge === true)));
   }
 });
 
@@ -3468,7 +3519,7 @@ test('JOED-187 (i): single and repeated failure lines retain per-attempt k and l
         assert.ok(message.includes('calibrated: run quiet-fixture-187'));
         const measurements = JSON.parse(message.match(/"measurements":(\[.*?\])/)[1]);
         assert.equal(measurements.length, functional ? 1 : 2);
-        for (const m of measurements) { assert.equal(m.k, 1.6); assert.deepEqual(m.limitMs, { patchMs: 64, historyMs: 200, taskMs: 200 }); }
+        for (const m of measurements) { assert.equal(m.k, 1.6); assert.equal(m.hostTooSlowToJudge, false); assert.deepEqual(m.limitMs, { patchMs: 64, historyMs: 200, taskMs: 200 }); }
         const detail = message.slice(message.indexOf(': {') + 2);
         assert.ok(detail.length <= 2400);
       }
@@ -3480,7 +3531,7 @@ test('JOED-187 (f): Board and Results runners select their exact width and kind 
   const calibration = ratioCalibration();
   calibration.quiet['390']['board-live'].medianMs = 100;
   calibration.quiet['1440'].results.medianMs = 20;
-  const options = { calibration, probe: ratioProbe(16) };
+  const options = { runSource: { host: 'quiet-fixture', chrome: 'HeadlessChrome fixture' }, calibration, probe: ratioProbe(16) };
   const board = await simulatedBudget({ ...options, viewports: ['1440'], cold: [{ historyMs: 190 }], live: [{ patchMs: 60 }] });
   assert.ok(board.checks.every(c => c.ok));
   assert.ok(board.traces.every(row => row.viewport === '1440' && row.k === 1.6));

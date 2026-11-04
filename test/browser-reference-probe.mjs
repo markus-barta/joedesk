@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
-import { runReferenceProbe, captureReferenceProbe, probeCell } from '../scripts/browser/reference-probe.mjs';
+import { runReferenceProbe, referenceProbeWorkload, captureReferenceProbe, probeCell } from '../scripts/browser/reference-probe.mjs';
 
 // A DOM recorder exercises the serialized page workload itself, not a second
 // implementation. No browser, JoeDesk data, wall-clock timing or layout engine.
@@ -45,7 +45,8 @@ function fixture({ layoutError = false } = {}) {
 
 test('JOED-186 (a): serialized reference probe repeats exactly the same isolated DOM and CPU shape without public imports', async () => {
   const source = readFileSync(new URL('../scripts/browser/reference-probe.mjs', import.meta.url), 'utf8');
-  assert.doesNotMatch(source, /\bimport\s|public\/|__joedesk|Math\.random|Date\./);
+  assert.doesNotMatch(source, /\bimport\s|public\/|__joedesk|Math\.random/);
+  assert.doesNotMatch(referenceProbeWorkload.toString(), /Date\./);
   for (let run = 0; run < 2; run++) {
     const f = fixture();
     const result = await runReferenceProbe(f.page);
@@ -99,8 +100,8 @@ test('JOED-186 L1/L2: capture waits for a neutral document and tolerates navigat
       assert.equal(expression, "location.href === 'about:blank' && document.readyState === 'complete'");
       events.push('readiness');
       fail('readiness');
-    });
-    const stages = ['navigation', 'readiness', 'probe'];
+    }, () => { events.push('timestamp'); return new Date('2026-11-04T10:00:00.000Z'); });
+    const stages = ['navigation', 'readiness', 'timestamp', 'probe'];
     assert.deepEqual(events, failure ? stages.slice(0, stages.indexOf(failure) + 1) : stages);
     if (failure) {
       assert.equal(captured.probe, null);
@@ -109,7 +110,7 @@ test('JOED-186 L1/L2: capture waits for a neutral document and tolerates navigat
       assert.doesNotMatch(captured.probeReason, /[|\r\n]/);
       assert.equal(probeCell(captured), `unavailable (${captured.probeReason})`);
     } else {
-      assert.deepEqual(captured, { probe: result, probeMs: 12 });
+      assert.deepEqual(captured, { probe: result, probeMs: 12, probeCapturedAt: '2026-11-04T10:00:00.000Z' });
       assert.equal(probeCell(captured), '5.0 / 7.0');
     }
   }

@@ -25,6 +25,7 @@ import { runResultsBudget, resultsBudgetTable } from './browser/results-budget.m
 import { designResults, withTradeSummaries, partialDaysResults, periodHintResults, tradeAmountResults, retainedPartialResults } from './browser/results.mjs';
 import { realResultsFixtures } from './results-fixtures.mjs';
 import { P4_SCENARIOS, createP4Views, createP4ViewRecorder, p4ViewKey, selectP4Views, summarizeP4Views } from './results-gate-plan.mjs';
+import { PROBE_CALIBRATION, reportCalibration } from './browser/ratio-guard.mjs';
 import { TERMS } from '../public/joe/terms.js';
 
 // Fail on missing explicit zoneSensitive metadata before any browser or
@@ -668,7 +669,8 @@ const browser = await launch({ hostRules: 'MAP joedesk.example.test 127.0.0.1' }
 const engine = await browser.send('Browser.getVersion');
 const reference = `${engine.product} (headless, ${process.platform} ${process.arch}), ${cpus()[0]?.model ?? 'unknown CPU'}, ${cpus().length} cores, Node ${process.version}`;
 const probeSource = { runId: process.env.GITHUB_RUN_ID ?? `local-${Date.now()}`, attempt: Number(process.env.GITHUB_RUN_ATTEMPT ?? 1),
-  capturedAt: new Date().toISOString(), host: hostname(), chrome: engine.product };
+  host: hostname(), chrome: engine.product };
+reportCalibration(PROBE_CALIBRATION);
 const page = await openPage(browser, { headers: { 'x-auth-request-user': ACTOR } });
 const hostTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const expectedTimeZone = new Intl.DateTimeFormat('en', { timeZone: process.env.TZ ?? hostTimeZone }).resolvedOptions().timeZone;
@@ -2873,7 +2875,7 @@ try {
     // 7 · The Results render budget's CI guard (ADR §9; the reference budget is
     // measured on a reference device by scripts/budget-reference.mjs).
     if (!view('budget', 'render')) throw new Error('Budget view must run in full mode');
-    budgetTrace = await runResultsBudget({ page, newBoard, check, limits: CI_GUARD, serve: async (body, board) => { await serve(served(body, board)); return () => serve(null); } });
+    budgetTrace = await runResultsBudget({ page, newBoard, check, limits: CI_GUARD, runSource: probeSource, serve: async (body, board) => { await serve(served(body, board)); return () => serve(null); } });
   }
   timing.enter('host-timezone');
   requireView('host-timezone', 'hosts');
