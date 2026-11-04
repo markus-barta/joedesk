@@ -10,6 +10,7 @@ import { largeScenario, wideSnapshot, accountScenario, NOW, at, ACTOR } from './
 import { VIEWPORTS, configure, load, go, settle, waitFor } from './shots.mjs';
 import { observeBudgetTasks, attributeBudgetTasks } from './budget-tasks.mjs';
 import { captureMachineLoad, machineLoadTable, waitForQuietHost, quietWaitCells } from './machine-load.mjs';
+import { runReferenceProbe } from './reference-probe.mjs';
 
 export const REFERENCE_DEVICES = Object.freeze(['mbp2606', 'mbp2607']);
 export const REFERENCE_BUDGET = Object.freeze({ name: 'reference budget', patchMs: 16, historyMs: 50, taskMs: 50, atMost: false });
@@ -32,7 +33,7 @@ export function decideTaskGuard(firstConditions, secondConditions, limits) {
     remeasure: timingOnly && !remeasured, remeasured, attempts: remeasured ? 2 : 1 };
 }
 
-export async function runBudget({ page, newBoard, check, limits, sampleLoad = captureMachineLoad, waitForQuiet = waitForQuietHost }) {
+export async function runBudget({ page, newBoard, check, limits, sampleLoad = captureMachineLoad, waitForQuiet = waitForQuietHost, probe = runReferenceProbe }) {
   const within = (ms, limit) => (limits.atMost ? ms <= limit : ms < limit);
   const bound = limit => `${limits.atMost ? 'at most' : 'under'} ${limit} ms`;
   const tooLong = tasks => tasks.filter(ms => ms >= limits.taskMs);
@@ -44,7 +45,7 @@ export async function runBudget({ page, newBoard, check, limits, sampleLoad = ca
       // attribution so the failure log's detail limit cannot hide either one.
       ...(row.attemptRows ? { measurements: row.attemptRows.map(r => ({ attempt: r.attempt,
         patchMs: r.deskWorst ?? null, historyMs: r.historyWorst ?? r.renderWorst,
-        taskMs: r.longTasks.length ? max(r.longTasks) : null, load1: r.machineLoad?.loadavg?.[0] ?? null,
+        taskMs: r.longTasks.length ? max(r.longTasks) : null, load1: r.machineLoad?.loadavg?.[0] ?? null, probeMs: r.probe.medianMs,
         ...(r.quietWait ? { quietWait: { waitedSeconds: r.quietWait.waitedSeconds, quiet: r.quietWait.quiet,
           threshold: r.quietWait.threshold, skipped: r.quietWait.skipped, skipReason: r.quietWait.skipReason } } : {}) })) } : {}),
       offendingTasks: row.longTaskDetails?.filter(t => t.duration >= limits.taskMs), ...row });
@@ -54,15 +55,17 @@ export async function runBudget({ page, newBoard, check, limits, sampleLoad = ca
     await configure(page, viewport, 'light');
     const conditions = result => Object.assign({}, ...result.checks.map(c => c.conditions));
     const firstLoad = sampleLoad();
+    const firstProbe = await probe(page);
     const first = await measure(viewport);
     let decision = decideTaskGuard(conditions(first), null, limits);
     // Two explicit calls, never a retry loop: at most once per width/phase.
     const quietWait = decision.remeasure ? await waitForQuiet() : null;
     const secondLoad = decision.remeasure ? sampleLoad() : null;
+    const secondProbe = decision.remeasure ? await probe(page) : null;
     const second = decision.remeasure ? await measure(viewport) : null;
     if (second) decision = decideTaskGuard(conditions(first), conditions(second), limits);
     const rows = (decision.remeasured ? [first, second] : [first]).map((result, i) => ({ ...result.row,
-      machineLoad: i === 0 ? firstLoad : secondLoad,
+      machineLoad: i === 0 ? firstLoad : secondLoad, probe: i === 0 ? firstProbe : secondProbe,
       ...(i === 1 ? { quietWait } : {}),
       attempt: i + 1, attempts: decision.attempts, remeasured: decision.remeasured,
       offendingTasks: result.row.longTaskDetails.filter(t => t.duration >= limits.taskMs) }));
@@ -204,9 +207,9 @@ export async function runBudget({ page, newBoard, check, limits, sampleLoad = ca
 export function budgetTable(traces, limits) {
   const guard = limits.taskMs > 50;
   const remeasured = traces.some(r => r.remeasured);
-  return `| Width | Phase |${remeasured ? ' Attempt | Quiet wait seconds | Quiet reached | Quiet threshold (load1) | Wait start load1 | Job wait budget before (s) | Job wait budget after (s) | Wait skipped | Skip reason | Budget state |' : ''} Desk patch worst (ms) | History draw worst (ms) | Worker read worst (ms) | Long task worst (ms) | Long tasks (≥ 50 ms) |${guard ? ` Tasks ≥ ${limits.taskMs} ms |` : ''}
-| --- | --- |${remeasured ? ' --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |' : ''} --- | --- | --- | --- | --- |${guard ? ' --- |' : ''}
-${traces.map(r => `| ${r.viewport} | ${r.phase} |${remeasured ? ` ${r.attempt}/${r.attempts}${r.remeasured ? ' (re-measured)' : ''} |${quietWaitCells(r.quietWait)}` : ''} ${r.deskWorst?.toFixed?.(1) ?? '—'} | ${(r.historyWorst ?? r.renderWorst)?.toFixed(1)} | ${(r.workerWorst ?? r.workerRead)?.toFixed(1)} | ${r.longTasks.length ? max(r.longTasks).toFixed(1) : '—'} | ${r.longTasks.length} |${guard ? ` ${r.longTasks.filter(ms => ms >= limits.taskMs).length} |` : ''}`).join('\n')}
+  return `| Width | Phase | Probe median (ms) |${remeasured ? ' Attempt | Quiet wait seconds | Quiet reached | Quiet threshold (load1) | Wait start load1 | Job wait budget before (s) | Job wait budget after (s) | Wait skipped | Skip reason | Budget state |' : ''} Desk patch worst (ms) | History draw worst (ms) | Worker read worst (ms) | Long task worst (ms) | Long tasks (≥ 50 ms) |${guard ? ` Tasks ≥ ${limits.taskMs} ms |` : ''}
+| --- | --- | --- |${remeasured ? ' --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |' : ''} --- | --- | --- | --- | --- |${guard ? ' --- |' : ''}
+${traces.map(r => `| ${r.viewport} | ${r.phase} | ${r.probe?.medianMs?.toFixed(1) ?? 'unavailable'} |${remeasured ? ` ${r.attempt}/${r.attempts}${r.remeasured ? ' (re-measured)' : ''} |${quietWaitCells(r.quietWait)}` : ''} ${r.deskWorst?.toFixed?.(1) ?? '—'} | ${(r.historyWorst ?? r.renderWorst)?.toFixed(1)} | ${(r.workerWorst ?? r.workerRead)?.toFixed(1)} | ${r.longTasks.length ? max(r.longTasks).toFixed(1) : '—'} | ${r.longTasks.length} |${guard ? ` ${r.longTasks.filter(ms => ms >= limits.taskMs).length} |` : ''}`).join('\n')}
 
 ${machineLoadTable(traces)}
 `;

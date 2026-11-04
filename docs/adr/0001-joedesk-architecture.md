@@ -499,6 +499,13 @@ attempts appear in the trace, table and failure detail. Results keeps its
 40 ms switch-render guard and rejects tasks reaching 125 ms; worker/main-thread
 and render-count failures never trigger a re-measure. The reference budget
 never re-measures and its limits stay unchanged.
+JOED-186 adds a fixed, JoeDesk-independent synthetic table/layout and JavaScript
+probe (seven repetitions, median/min/max ms) before every attempt's navigation,
+including the reference command, so its DOM and tasks precede the budget windows.
+The attempt trace, budget/load tables and concise failure measurements retain
+the probe median; it gates nothing and changes no limit, quiet wait or re-measure.
+Phase 2 will scale the CI guard by a calibrated `probeNow / probeQuiet` ratio,
+capped, and fail when the slowdown exceeds the cap.
 Recorded reference:
 mbp2607 (Apple M5 Max, 18 cores, HeadlessChrome 153.0.8010.12, Node
 v26.11.1) on 2026-10-15: Desk patch worst 7.7 ms, History draw worst

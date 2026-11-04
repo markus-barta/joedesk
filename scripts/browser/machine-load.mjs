@@ -82,11 +82,11 @@ export function machineLoadTable(traces, lock = process.env) {
 
 Machine load before each attempt (host-wide browser processes include this browser and its helpers; unavailable counts are not zero):
 
-| Width | Phase | Attempt | Quiet wait seconds | Quiet reached | Quiet threshold (load1) | Wait start load1 | Job wait budget before (s) | Job wait budget after (s) | Wait skipped | Skip reason | Budget state | Sampled (UTC) | Loadavg 1 / 5 / 15 min | Logical CPUs | Browser processes |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Width | Phase | Probe median (ms) | Attempt | Quiet wait seconds | Quiet reached | Quiet threshold (load1) | Wait start load1 | Job wait budget before (s) | Job wait budget after (s) | Wait skipped | Skip reason | Budget state | Sampled (UTC) | Loadavg 1 / 5 / 15 min | Logical CPUs | Browser processes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 ${traces.map(r => {
     const m = r.machineLoad;
-    return `| ${r.viewport} | ${r.phase} | ${r.attempt ?? 1}/${r.attempts ?? 1} |${quietWaitCells(r.quietWait)} ${m?.sampledAt ?? 'unavailable'} | ${m?.loadavg?.map(loadCell).join(' / ') ?? 'unavailable'} | ${m?.cpuCount ?? 'unavailable'} | ${m?.browserProcesses ?? 'unavailable'} |`;
+    return `| ${r.viewport} | ${r.phase} | ${Number.isFinite(r.probe?.medianMs) ? r.probe.medianMs.toFixed(1) : 'unavailable'} | ${r.attempt ?? 1}/${r.attempts ?? 1} |${quietWaitCells(r.quietWait)} ${m?.sampledAt ?? 'unavailable'} | ${m?.loadavg?.map(loadCell).join(' / ') ?? 'unavailable'} | ${m?.cpuCount ?? 'unavailable'} | ${m?.browserProcesses ?? 'unavailable'} |`;
   }).join('\n')}
 `;
 }

@@ -1,0 +1,44 @@
+// JOED-186: fixed work, independent of JoeDesk modules, data and page styles.
+// Seven 256 × 8 layouts plus seven fixed CPU loops target ~50–150 ms total
+// on a quiet laptop (~1 s on a slow host). No calibration or adaptive work.
+// Keep this function self-contained: CDP evaluates it in the page, once.
+export function referenceProbeWorkload() {
+  const durations = [];
+  for (let rep = 0; rep < 7; rep++) {
+    const start = performance.now();
+    const host = document.createElement('div');
+    host.style.cssText = 'all:initial!important;position:fixed!important;left:-10000px!important;top:0!important;width:1024px!important;height:8192px!important;contain:strict!important;pointer-events:none!important;';
+    try {
+      const root = host.attachShadow({ mode: 'closed' });
+      const style = document.createElement('style');
+      style.textContent = 'table{all:initial;display:table;table-layout:fixed;border-collapse:collapse;width:1024px;font:12px/16px monospace;color:#000;direction:ltr}tr{all:initial;display:table-row}td{all:initial;display:table-cell;box-sizing:border-box;width:128px;height:24px;padding:4px;border:1px solid #888;font:12px/16px monospace;white-space:nowrap}';
+      root.append(style);
+      const table = document.createElement('table');
+      for (let row = 0; row < 256; row++) {
+        const tr = document.createElement('tr');
+        for (let col = 0; col < 8; col++) {
+          const td = document.createElement('td');
+          td.textContent = 'Reference 012345';
+          tr.append(td);
+        }
+        table.append(tr);
+      }
+      root.append(table);
+      document.documentElement.append(host);
+      table.getBoundingClientRect(); // Force style and layout while connected.
+    } finally { host.remove(); }
+    let checksum = 0;
+    for (let i = 0; i < 1000000; i++) checksum = Math.imul(checksum ^ i, 16777619) >>> 0;
+    // Consume the CPU result without retaining state in the page.
+    if (!Number.isFinite(checksum)) throw new Error('Invalid reference probe checksum');
+    durations.push(performance.now() - start);
+  }
+  durations.sort((a, b) => a - b);
+  return { medianMs: durations[3], minMs: durations[0], maxMs: durations[6], reps: durations.length };
+}
+
+// Call before navigation installs the attempt's observer / timing windows.
+// The new document also discards buffered tasks from this evaluate call.
+export async function runReferenceProbe(page) {
+  return page.evaluate(`(${referenceProbeWorkload.toString()})()`);
+}

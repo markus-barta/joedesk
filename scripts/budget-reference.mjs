@@ -26,6 +26,7 @@ let traces = null, resultsTraces = null;
 try {
   const page = await openPage(browser, { headers: { 'x-auth-request-user': ACTOR } });
   const newBoard = async options => { const b = await startBoard(options); boards.push(b); return b; };
+  // Shared runners probe before every reference attempt, just as CI does.
   traces = await runBudget({ page, newBoard, check, limits: REFERENCE_BUDGET });
   // P4: Results with the largest closed-trade record, on the same device.
   resultsTraces = await runResultsBudget({ page, newBoard, check, limits: REFERENCE_BUDGET, serve: (record, board) => serveResults(browser, page, board, record) });

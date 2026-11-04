@@ -550,6 +550,14 @@ claiming that the completed wait was skipped. The concise failure-log
 `measurements` block keeps each attempt's `load1` and the second attempt's
 quiet-wait result ahead of task attribution, so log truncation cannot hide them.
 
+JOED-186 records a fixed synthetic table/layout and JavaScript probe before
+every Board and Results attempt, including re-measurements and the shared
+reference-device run; seven repetitions report median/min/max milliseconds.
+It gates nothing yet: the probe runs before navigation opens the budget windows,
+and its median appears beside each attempt in the budget/load tables and concise
+failure measurements. Phase 2 will scale the CI guard by `probeNow / probeQuiet`,
+capped using calibration data; a slowdown above the cap will fail.
+
 Chrome installation runs hosted-only. Self-hosted jobs first use a non-empty,
 executable `BROWSER_PATH`; otherwise they resolve `chromium`, `chromium-browser`,
 then `google-chrome` from `PATH`. They export the resolved `BROWSER_PATH` and fail
