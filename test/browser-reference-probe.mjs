@@ -49,12 +49,12 @@ test('JOED-186 (a): serialized reference probe repeats exactly the same isolated
   for (let run = 0; run < 2; run++) {
     const f = fixture();
     const result = await runReferenceProbe(f.page);
-    assert.equal(f.page.calls, 1, 'all seven repetitions use one evaluate');
+    assert.equal(f.page.calls, 1, 'warm-up and all seven timed repetitions use one evaluate');
     assert.deepEqual(JSON.parse(JSON.stringify(result)), { layoutMedianMs: 4, jsMedianMs: 4, medianMs: 9, minMs: 7, maxMs: 10, reps: 7 });
-    assert.deepEqual(f.counts(), { layouts: 7, loops: 70000000 });
+    assert.deepEqual(f.counts(), { layouts: 8, loops: 80000000 });
     assert.equal(f.connected.size, 0, 'no probe DOM survives');
-    assert.equal(f.created.filter(n => n.tag === 'div').length, 7);
-    assert.equal(f.created.filter(n => n.tag === 'style').length, 7);
+    assert.equal(f.created.filter(n => n.tag === 'div').length, 8);
+    assert.equal(f.created.filter(n => n.tag === 'style').length, 8);
     for (const root of f.roots) {
       assert.equal(root.children[0].tag, 'style');
       const table = root.children[1];
@@ -111,6 +111,19 @@ test('JOED-186 L1/L2: capture waits for a neutral document and tolerates navigat
     } else {
       assert.deepEqual(captured, { probe: result, probeMs: 12 });
       assert.equal(probeCell(captured), '5.0 / 7.0');
+    }
+  }
+});
+
+test('JOED-187: malformed probe results become unavailable inside capture, before tables or ratio decisions', async () => {
+  const good = { layoutMedianMs: 5, jsMedianMs: 7, medianMs: 12, minMs: 10, maxMs: 14, reps: 7 };
+  for (const field of Object.keys(good)) {
+    for (const invalid of [undefined, null, '12', NaN, Infinity]) {
+      const captured = await captureReferenceProbe({ async s() {} }, async () => ({ ...good, [field]: invalid }), async () => {});
+      assert.equal(captured.probe, null, `${field}: ${invalid}`);
+      assert.equal(captured.probeMs, null);
+      assert.match(captured.probeReason, /finite numbers/);
+      assert.match(probeCell(captured), /unavailable/);
     }
   }
 });

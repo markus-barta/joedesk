@@ -552,14 +552,50 @@ quiet-wait result ahead of task attribution, so log truncation cannot hide them.
 
 JOED-186 records a fixed synthetic table/layout and JavaScript probe before
 every Board and Results attempt, including re-measurements and the shared
-reference-device run; seven repetitions in a fresh `about:blank` document report
-separate layout and JS medians plus total median/min/max milliseconds.
-It gates nothing yet: a fresh navigation opens the budget windows afterward,
-the budget/load tables show layout / JS, concise failure measurements keep the
-total median as `probeMs`, and a probe error records null values with a short
-`unavailable` reason while the budget run continues. Phase 2 will scale the CI
-guard by `probeNow / probeQuiet`, capped using calibration data; a slowdown above
-the cap will fail.
+reference-device run. JOED-187 adds one untimed warm-up before seven timed
+repetitions in a fresh `about:blank` document; a fresh navigation then opens
+the budget windows. Separate layout and JS medians plus total median/min/max
+milliseconds stay in the trace. Non-finite or unavailable probe results are
+caught and recorded as null with a short reason, so the attempt still runs.
+
+JOED-187 scales only CI timing guards by
+`k = max(1, probeNow.medianMs / quiet[width][kind].medianMs)`, using exactly the
+same width (1440, 1024 or 390) and kind (`board-live` or `results`). Board cold
+History and live measurements use that width's `board-live` baseline; cold
+probes are retained as evidence but excluded when building the live calibration.
+Patch and Results renders use `40 × k` ms, History uses `125 × k` ms, and
+long tasks must stay below `125 × k` ms. Each re-measure uses its own fresh
+probe and ratio. Non-timing checks, the reference-device budget, the existing
+one-time timing-only re-measure, and JOED-180's quiet wait/shared 300 s
+allowance remain unchanged.
+
+The strict `scripts/browser/probe-calibration.json` record ships as
+`"uncalibrated"` with cap 3.0: absolute guards and exactly the previous
+decisions. A calibrated ratio is floored at 1; an unavailable probe also uses
+`k = 1` and says so in the evidence. An invalid calibration fails loudly at
+startup. If `k > cap`, that attempt's timing checks fail red with
+`hostTooSlowToJudge` and “host too slow to judge”; a re-measure can pass only
+with its own ratio within the cap and all checks passing. This is not the
+rejected option “(4) inconclusive on overload”: every attempt is judged and
+above-cap attempts fail, never become inconclusive or pass on host load alone.
+Budget and machine-load tables show k and scaled patch/history/task limits;
+failure-line `measurements` keep each attempt's k, `limitMs`, probe and load
+before task attribution. The step summary states calibration provenance or
+“uncalibrated: absolute guards”.
+
+To prepare calibration, retain the Board and Results `index.md` evidence from
+the same quiet CI run (same run ID, attempt, host and Chrome), then run
+`node scripts/probe-calibrate.mjs /path/to/p3/index.md /path/to/p4/index.md`.
+A single combined index or JSON evidence bundle is also accepted. The indices
+include lossless JSON probe evidence with provenance; JSON input is an object
+or array of `{ source, traces }` bundles with the same fields. Every recorded
+attempt must have known load1 < 5 and an available positive probe; all three
+widths and both kinds must be present. For repeated live/Results samples,
+the tool takes the median of each recorded median within its width and kind.
+It prints a candidate record without writing any file. The coordinator shows
+LEAD the numbers before committing an approved record; no calibration is
+silently learned from loaded runs. Historical phase-1 indices without lossless
+probe evidence are refused rather than reconstructed from rounded table cells.
 
 Chrome installation runs hosted-only. Self-hosted jobs first use a non-empty,
 executable `BROWSER_PATH`; otherwise they resolve `chromium`, `chromium-browser`,
@@ -689,7 +725,8 @@ The budget trace keeps timestamped long-task attribution, overlapping render
 and worker-reply events, and long-animation-frame script/layout attribution
 where supported. Desk and History live-push windows begin after their setup
 settles; setup tasks remain in the trace separately, and tasks crossing into
-an update window still count. The CI guard remains 125 ms (2.5 × reference).
+an update window still count. The base CI task guard is 125 ms (2.5 × reference),
+scaled per attempt only after JOED-187 calibration.
 The Board and Results CI guards re-measure once per viewport (the Board:
 per viewport and phase), only when every failed condition is a render-time
 or long-task limit. Before that CI-only second attempt, poll load1 every 5 s
@@ -706,7 +743,8 @@ wait never reached a quiet host”; a corrupt budget resets to 300 s and is reco
 The second measurement is final; a reproduced breach or
 any functional failure still fails. Both
 attempts appear in the trace, table and failure detail. Results keeps its
-40 ms switch-render guard and rejects tasks reaching 125 ms; worker/main-thread
+40 ms base switch-render guard and rejects tasks reaching its 125 ms base
+limit (both scale with the calibrated ratio); worker/main-thread
 and render-count failures never trigger a re-measure. The reference budget
 never re-measures and its limits stay unchanged.
 When no long task was observed, concise attempt diagnostics report

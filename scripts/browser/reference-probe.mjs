@@ -1,11 +1,11 @@
 // JOED-186: fixed work, independent of JoeDesk modules, data and page styles.
-// Seven 256 × 8 layouts plus seven fixed CPU loops target ~50–150 ms total
-// on a quiet laptop (~1 s on a slow host). No calibration or adaptive work.
+// Seven timed 256 × 8 layouts and CPU loops target ~110–180 ms total
+// on a quiet laptop, plus one untimed warm-up (~16–26 ms). Fixed work.
 // Keep this function self-contained: CDP evaluates it in the page, once.
 export function referenceProbeWorkload() {
   const durations = [], layouts = [], scripts = [];
-  for (let rep = 0; rep < 7; rep++) {
-    const start = performance.now();
+  for (let rep = -1; rep < 7; rep++) {
+    const start = rep >= 0 ? performance.now() : 0;
     const host = document.createElement('div');
     host.style.cssText = 'all:initial!important;position:fixed!important;left:-10000px!important;top:0!important;width:1024px!important;height:8192px!important;contain:strict!important;pointer-events:none!important;';
     try {
@@ -27,13 +27,14 @@ export function referenceProbeWorkload() {
       document.documentElement.append(host);
       table.getBoundingClientRect(); // Force style and layout while connected.
     } finally { host.remove(); }
-    const layoutEnd = performance.now();
+    const layoutEnd = rep >= 0 ? performance.now() : 0;
     let checksum = 0;
     const imul = Math.imul;
     // ~10 ms of JS per rep on a quiet laptop, comparable to DOM/layout.
     for (let i = 0; i < 10000000; i++) checksum = imul(checksum ^ i, 16777619) >>> 0;
     // Consume the CPU result without retaining state in the page.
     if (!Number.isFinite(checksum)) throw new Error('Invalid reference probe checksum');
+    if (rep < 0) continue; // Discard warm-up work before taking any timestamps.
     const end = performance.now();
     layouts.push(layoutEnd - start);
     scripts.push(end - layoutEnd);
@@ -59,6 +60,9 @@ export async function captureReferenceProbe(page, probe, waitFor) {
     await page.s('Page.navigate', { url: 'about:blank' });
     await waitFor(page, `location.href === 'about:blank' && document.readyState === 'complete'`);
     const result = await probe(page);
+    if (!result || !['layoutMedianMs', 'jsMedianMs', 'medianMs', 'minMs', 'maxMs', 'reps'].every(field => Number.isFinite(result[field]))) {
+      throw new Error('Invalid reference probe: fields must be finite numbers');
+    }
     return { probe: result, probeMs: result.medianMs };
   } catch (error) {
     const probeReason = String(error?.message ?? error).replace(/[|\r\n]/g, ' ').slice(0, 60);

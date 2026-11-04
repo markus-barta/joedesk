@@ -496,19 +496,57 @@ recorded as a refund reason, without marking the completed wait as skipped.
 The second measurement is final; a reproduced breach or
 any functional failure still fails. Both
 attempts appear in the trace, table and failure detail. Results keeps its
-40 ms switch-render guard and rejects tasks reaching 125 ms; worker/main-thread
+40 ms base switch-render guard and rejects tasks reaching its 125 ms base
+limit (both scale with the calibrated ratio); worker/main-thread
 and render-count failures never trigger a re-measure. The reference budget
 never re-measures and its limits stay unchanged.
-JOED-186 adds a fixed, JoeDesk-independent synthetic table/layout and JavaScript
-probe (seven repetitions in a fresh `about:blank` document, separate layout/JS
-medians and total median/min/max ms) before every attempt's measured navigation,
-including the reference command, so neither JoeDesk layout nor probe tasks enter
-the other workload. The attempt trace retains all timings, budget/load tables
-show layout / JS and concise failure measurements keep the total as `probeMs`;
-probe errors record null values and a short `unavailable` reason while the run
-continues, changing no limit, quiet wait or re-measure.
-Phase 2 will scale the CI guard by a calibrated `probeNow / probeQuiet` ratio,
-capped, and fail when the slowdown exceeds the cap.
+JOED-186 records a fixed synthetic table/layout and JavaScript probe before
+every Board and Results attempt, including re-measurements and the shared
+reference-device run. JOED-187 adds one untimed warm-up before seven timed
+repetitions in a fresh `about:blank` document; a fresh navigation then opens
+the budget windows. Separate layout and JS medians plus total median/min/max
+milliseconds stay in the trace. Non-finite or unavailable probe results are
+caught and recorded as null with a short reason, so the attempt still runs.
+
+JOED-187 scales only CI timing guards by
+`k = max(1, probeNow.medianMs / quiet[width][kind].medianMs)`, using exactly the
+same width (1440, 1024 or 390) and kind (`board-live` or `results`). Board cold
+History and live measurements use that width's `board-live` baseline; cold
+probes are retained as evidence but excluded when building the live calibration.
+Patch and Results renders use `40 × k` ms, History uses `125 × k` ms, and
+long tasks must stay below `125 × k` ms. Each re-measure uses its own fresh
+probe and ratio. Non-timing checks, the reference-device budget, the existing
+one-time timing-only re-measure, and JOED-180's quiet wait/shared 300 s
+allowance remain unchanged.
+
+The strict `scripts/browser/probe-calibration.json` record ships as
+`"uncalibrated"` with cap 3.0: absolute guards and exactly the previous
+decisions. A calibrated ratio is floored at 1; an unavailable probe also uses
+`k = 1` and says so in the evidence. An invalid calibration fails loudly at
+startup. If `k > cap`, that attempt's timing checks fail red with
+`hostTooSlowToJudge` and “host too slow to judge”; a re-measure can pass only
+with its own ratio within the cap and all checks passing. This is not the
+rejected option “(4) inconclusive on overload”: every attempt is judged and
+above-cap attempts fail, never become inconclusive or pass on host load alone.
+Budget and machine-load tables show k and scaled patch/history/task limits;
+failure-line `measurements` keep each attempt's k, `limitMs`, probe and load
+before task attribution. The step summary states calibration provenance or
+“uncalibrated: absolute guards”.
+
+To prepare calibration, retain the Board and Results `index.md` evidence from
+the same quiet CI run (same run ID, attempt, host and Chrome), then run
+`node scripts/probe-calibrate.mjs /path/to/p3/index.md /path/to/p4/index.md`.
+A single combined index or JSON evidence bundle is also accepted. The indices
+include lossless JSON probe evidence with provenance; JSON input is an object
+or array of `{ source, traces }` bundles with the same fields. Every recorded
+attempt must have known load1 < 5 and an available positive probe; all three
+widths and both kinds must be present. For repeated live/Results samples,
+the tool takes the median of each recorded median within its width and kind.
+It prints a candidate record without writing any file. The coordinator shows
+LEAD the numbers before committing an approved record; no calibration is
+silently learned from loaded runs. Historical phase-1 indices without lossless
+probe evidence are refused rather than reconstructed from rounded table cells.
+
 Recorded reference:
 mbp2607 (Apple M5 Max, 18 cores, HeadlessChrome 153.0.8010.12, Node
 v26.11.1) on 2026-10-15: Desk patch worst 7.7 ms, History draw worst

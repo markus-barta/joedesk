@@ -1,0 +1,101 @@
+{
+  "source": {
+    "runId": "quiet-fixture-187",
+    "attempt": 2,
+    "capturedAt": "2026-11-04T10:00:00.000Z",
+    "host": "quiet-fixture",
+    "chrome": "HeadlessChrome fixture"
+  },
+  "traces": [
+    {
+      "viewport": "1440",
+      "phase": "live",
+      "kind": "board-live",
+      "attempt": 1,
+      "load1": 1,
+      "probe": {
+        "layoutMedianMs": 4.0,
+        "jsMedianMs": 6.0,
+        "medianMs": 10,
+        "minMs": 9,
+        "maxMs": 11,
+        "reps": 7
+      }
+    },
+    {
+      "viewport": "1440",
+      "phase": "results",
+      "kind": "results",
+      "attempt": 1,
+      "load1": 1,
+      "probe": {
+        "layoutMedianMs": 8.0,
+        "jsMedianMs": 12.0,
+        "medianMs": 20,
+        "minMs": 19,
+        "maxMs": 21,
+        "reps": 7
+      }
+    },
+    {
+      "viewport": "1024",
+      "phase": "live",
+      "kind": "board-live",
+      "attempt": 1,
+      "load1": 1,
+      "probe": {
+        "layoutMedianMs": 8.0,
+        "jsMedianMs": 12.0,
+        "medianMs": 20,
+        "minMs": 19,
+        "maxMs": 21,
+        "reps": 7
+      }
+    },
+    {
+      "viewport": "1024",
+      "phase": "results",
+      "kind": "results",
+      "attempt": 1,
+      "load1": 1,
+      "probe": {
+        "layoutMedianMs": 16.0,
+        "jsMedianMs": 24.0,
+        "medianMs": 40,
+        "minMs": 39,
+        "maxMs": 41,
+        "reps": 7
+      }
+    },
+    {
+      "viewport": "390",
+      "phase": "live",
+      "kind": "board-live",
+      "attempt": 1,
+      "load1": 1,
+      "probe": {
+        "layoutMedianMs": 16.0,
+        "jsMedianMs": 24.0,
+        "medianMs": 40,
+        "minMs": 39,
+        "maxMs": 41,
+        "reps": 7
+      }
+    },
+    {
+      "viewport": "390",
+      "phase": "results",
+      "kind": "results",
+      "attempt": 1,
+      "load1": 1,
+      "probe": {
+        "layoutMedianMs": 32.0,
+        "jsMedianMs": 48.0,
+        "medianMs": 80,
+        "minMs": 79,
+        "maxMs": 81,
+        "reps": 7
+      }
+    }
+  ]
+}

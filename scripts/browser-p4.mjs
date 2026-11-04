@@ -11,7 +11,7 @@
 // One headless browser, one page, run sequentially; screenshots go to the QA folder.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import assert from 'node:assert/strict';
-import { homedir, cpus } from 'node:os';
+import { homedir, cpus, hostname } from 'node:os';
 import { join } from 'node:path';
 import * as nodeModule from 'node:module';
 import { launch, openPage } from './browser/cdp.mjs';
@@ -667,6 +667,8 @@ async function assertNarrowSentence(page, viewport, theme, tag, want) {
 const browser = await launch({ hostRules: 'MAP joedesk.example.test 127.0.0.1' });
 const engine = await browser.send('Browser.getVersion');
 const reference = `${engine.product} (headless, ${process.platform} ${process.arch}), ${cpus()[0]?.model ?? 'unknown CPU'}, ${cpus().length} cores, Node ${process.version}`;
+const probeSource = { runId: process.env.GITHUB_RUN_ID ?? `local-${Date.now()}`, attempt: Number(process.env.GITHUB_RUN_ATTEMPT ?? 1),
+  capturedAt: new Date().toISOString(), host: hostname(), chrome: engine.product };
 const page = await openPage(browser, { headers: { 'x-auth-request-user': ACTOR } });
 const hostTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const expectedTimeZone = new Intl.DateTimeFormat('en', { timeZone: process.env.TZ ?? hostTimeZone }).resolvedOptions().timeZone;
@@ -3131,12 +3133,12 @@ ${failed.length ? `### Failures\n\n${failed.map(f => `- ${f.ac} ${f.name}: \`${J
 ${phoneWidthReport}
 ## Render budget (ADR §9)
 
-This run: ${reference}. Held here: the ${CI_GUARD.name} (a Results render at
+This run: ${reference}. Base limits before per-attempt ratio scaling: the ${CI_GUARD.name} (a Results render at
 most ${CI_GUARD.patchMs} ms, no task reaching ${CI_GUARD.taskMs} ms). The ${REFERENCE_BUDGET.name}
 itself (under ${REFERENCE_BUDGET.patchMs} ms, no task reaching ${REFERENCE_BUDGET.taskMs} ms) is measured on a
 reference device by \`node scripts/budget-reference.mjs\`.
 
-${budgetTrace ? resultsBudgetTable(budgetTrace, CI_GUARD) : 'Not run.\n'}
+${budgetTrace ? resultsBudgetTable(budgetTrace, CI_GUARD, probeSource) : 'Not run.\n'}
 ## Screenshots (\`<viewport>-<theme>-<surface>.png\`)
 
 ${shots.map(s => `- \`${s.file}\` — ${s.what}`).join('\n')}

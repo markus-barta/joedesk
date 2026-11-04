@@ -15,6 +15,7 @@ import { observeBudgetTasks, attributeBudgetTasks } from '../scripts/browser/bud
 import { CI_GUARD, REFERENCE_BUDGET, TIMING_GUARDS, decideTaskGuard, runBudget, budgetTable } from '../scripts/browser/budget.mjs';
 import { runResultsBudget, resultsBudgetTable } from '../scripts/browser/results-budget.mjs';
 import { waitForQuietHost } from '../scripts/browser/machine-load.mjs';
+import * as ratioGuard from '../scripts/browser/ratio-guard.mjs';
 import { captureReferenceProbe } from '../scripts/browser/reference-probe.mjs';
 import { createQuietWaitBudget } from '../scripts/browser/quiet-wait-budget.mjs';
 import { scratch, discard } from '../scripts/browser/scratch.mjs';
@@ -24,6 +25,7 @@ import './browser-settled.mjs';
 import './browser-group-timing.mjs';
 import './browser-machine-load.mjs';
 import './browser-reference-probe.mjs';
+import './browser-ratio-guard.mjs';
 import './budget-quiet-host.mjs';
 import './theme-geometry.mjs';
 import './theme-copy.mjs';
@@ -2482,7 +2484,7 @@ test('browser budget: reference limits stay strict with no re-measure', () => {
 
 // Exercise the exact runner with synthetic CDP replies, without a browser,
 // servers or real time. Each load consumes one phase's scripted measurement.
-async function simulatedBudget({ cold = [{}], live = [{}], viewports = ['390'], limits = CI_GUARD, probe, useDefaultWait = false, sampleLoad, waitForQuiet = async () => ({ waitedSeconds: 0, quiet: true, threshold: 13, startLoad1: 2 }) } = {}) {
+async function simulatedBudget({ cold = [{}], live = [{}], viewports = ['390'], limits = CI_GUARD, probe, calibration, useDefaultWait = false, sampleLoad, waitForQuiet = async () => ({ waitedSeconds: 0, quiet: true, threshold: 13, startLoad1: 2 }) } = {}) {
   let phase, sample, reads, neutralReady = false;
   const loads = { cold: 0, live: 0 }, boards = [], checks = [], events = [];
   const timings = (reason, count, ms) => Array.from({ length: count }, (_, i) => ({ reason, at: 200 + i * 20, ms }));
@@ -2513,7 +2515,7 @@ async function simulatedBudget({ cold = [{}], live = [{}], viewports = ['390'], 
       assert.ok(source.includes('.click()') || source === 'window.__joedesk.refresh()' || source === 'window.__joedesk.refresh(); window.__joedesk.refreshAccount?.()', source);
     },
   };
-  const context = { runReferenceProbe: async receivedPage => {
+  const context = { ...ratioGuard, CI_GUARD, runReferenceProbe: async receivedPage => {
     assert.equal(receivedPage, page);
     assert.equal(neutralReady, true, 'probe sees a ready neutral document');
     events.push('probe');
@@ -2545,7 +2547,7 @@ async function simulatedBudget({ cold = [{}], live = [{}], viewports = ['390'], 
     fetch: async () => ({ json: async () => ({ points: Array(7209), sizeBytes: 6 * 1048576 }) }),
   };
   const execute = runInNewContext(`(${runBudget.toString()})`, context);
-  const traces = await execute({ page, limits, ...(probe ? { probe } : {}),
+  const traces = await execute({ page, limits, ...(probe ? { probe } : {}), ...(calibration ? { calibration } : {}),
     ...(!useDefaultWait ? { waitForQuiet: async () => {
       events.push('wait-start');
       const result = await waitForQuiet();
@@ -2689,7 +2691,7 @@ test('JOED-186 (b): every Board and Results width/phase attempt, including re-me
   assert.match(runResultsBudget.toString(), /probe = runReferenceProbe/);
 });
 
-test('JOED-186 (d): probe speed never changes baseline guard decisions, limits, quiet waits or attempt counts', async () => {
+test('JOED-187 (a), JOED-186 (d): uncalibrated probe speed never changes baseline guard decisions, limits, quiet waits or attempt counts', async () => {
   // Fingerprint of the unchanged 890c1e6 decision function; exhaustive timing
   // combinations and strict/inclusive boundaries are exercised above/below.
   assert.equal(createHash('sha256').update(decideTaskGuard.toString()).digest('hex'),
@@ -2719,7 +2721,7 @@ test('JOED-186 (d): probe speed never changes baseline guard decisions, limits, 
           const run = runner === 'Board'
             ? await simulatedBudget({ ...options, cold: [{ taskMs: 130 }, second], live: [{ patchMs: 41 }, second] })
             : await simulatedResultsBudget({ ...options, samples: { 390: [{ switchMs: 41 }, second] } });
-          assert.ok(run.traces.every(r => r.probe.medianMs === medianMs));
+          assert.ok(run.traces.every(r => r.probe.medianMs === medianMs && r.k === 1));
           assert.deepEqual(Array.from(run.checks, c => c.ok), expected[scenario][runner], `${limits.name}, ${runner}, ${JSON.stringify(second)}`);
           runs.push({ waits, loads: run.loads, checks: run.checks.map(c => ({ name: c.name, ok: c.ok, conditions: c.detail.conditions })) });
         }
@@ -2806,17 +2808,17 @@ test('browser budget: 124.9 ms tasks pass and 125 ms tasks breach despite CI atM
 test('browser budget: runBudget statically allows at most one re-measure per viewport and phase', () => {
   const source = runBudget.toString();
   const runner = source.slice(source.indexOf('const runViewport ='), source.indexOf('const full ='));
-  assert.equal(runner.match(/await measure\(viewport\)/g).length, 2);
-  assert.match(runner, /const second = decision\.remeasure \? await measure\(viewport\) : null/);
+  assert.equal(runner.match(/await measure\(viewport, (?:first|second)Guard\.limitMs\)/g).length, 2);
+  assert.match(runner, /const second = decision\.remeasure \? await measure\(viewport, (?:first|second)Guard\.limitMs\) : null/);
   assert.doesNotMatch(runner, /\bwhile\s*\(|runViewport\(/);
   assert.equal(source.match(/for \(const viewport of VIEWPORTS\) await runViewport\(viewport, measure(?:Cold|Live)\)/g).length, 2);
-  assert.match(source, /const measureCold = async viewport => \{\s*const cold = await newBoard/);
-  assert.match(source, /const measureLive = async viewport => \{\s*const b = await newBoard/);
+  assert.match(source, /const measureCold = async \(viewport, timing\) => \{\s*const cold = await newBoard/);
+  assert.match(source, /const measureLive = async \(viewport, timing\) => \{\s*const b = await newBoard/);
 });
 
 // Run the Results orchestration against scripted page replies. Navigation
 // consumes a sample, so an unexpected third measurement fails immediately.
-async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUARD, probe, useDefaultWait = false, sampleLoad, waitForQuiet = async () => ({ waitedSeconds: 0, quiet: true, threshold: 13, startLoad1: 2 }) } = {}) {
+async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUARD, probe, calibration, useDefaultWait = false, sampleLoad, waitForQuiet = async () => ({ waitedSeconds: 0, quiet: true, threshold: 13, startLoad1: 2 }) } = {}) {
   let viewport, sample, unserved = false, neutralReady = false;
   const loads = Object.fromEntries(Object.keys(samples).map(width => [width, 0])), checks = [], observers = [], events = [];
   const page = {
@@ -2840,7 +2842,7 @@ async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUA
       assert.ok(source === 'window.__joedesk.timings.length = 0' || source.includes('.click()'), source);
     },
   };
-  const context = { runReferenceProbe: async receivedPage => {
+  const context = { ...ratioGuard, CI_GUARD, runReferenceProbe: async receivedPage => {
     assert.equal(receivedPage, page);
     assert.equal(neutralReady, true, 'probe sees a ready neutral document');
     events.push('probe');
@@ -2868,7 +2870,7 @@ async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUA
   };
   const execute = runInNewContext(`(${runResultsBudget.toString()})`, context);
   let loadSamples = 0;
-  const traces = await execute({ page, limits, ...(probe ? { probe } : {}),
+  const traces = await execute({ page, limits, ...(probe ? { probe } : {}), ...(calibration ? { calibration } : {}),
     ...(!useDefaultWait ? { waitForQuiet: async () => {
       events.push('wait-start');
       const result = await waitForQuiet();
@@ -3340,4 +3342,149 @@ test('JOED-158 typography observer: each delivery samples the current viewport o
     assert.equal(split.nodeValue, `5\u00a0units${space}`, 'inline separators follow the same viewport');
     assert.equal(nested.nodeValue, `6\u00a0units${space}· nested`, 'text appended inside an existing descendant follows the new viewport');
   }
+});
+
+// JOED-187 uses the actual runners and their existing CDP fixtures, so ratio
+// tests also exercise timing comparisons, retry selection and final evidence.
+function ratioCalibration() {
+  return { status: 'calibrated', cap: 3,
+    quiet: Object.fromEntries(['1440', '1024', '390'].map(width => [width,
+      Object.fromEntries(['board-live', 'results'].map(kind => [kind, { layoutMedianMs: 4, jsMedianMs: 6, medianMs: 10 }]))])),
+    source: { runId: 'quiet-fixture-187', attempt: 1, capturedAt: '2026-11-04T10:00:00.000Z', host: 'quiet-fixture', chrome: 'HeadlessChrome fixture' } };
+}
+const ratioProbe = medianMs => async () => ({ layoutMedianMs: medianMs * 0.4, jsMedianMs: medianMs * 0.6, medianMs, minMs: medianMs, maxMs: medianMs, reps: 7 });
+async function ratioRun(runner, sample, options = {}) {
+  const samples = [sample, sample];
+  const settings = { calibration: ratioCalibration(), probe: ratioProbe(16), ...options };
+  return runner === 'Board' ? simulatedBudget({ ...settings, cold: samples, live: samples })
+    : simulatedResultsBudget({ ...settings, samples: { 390: samples } });
+}
+
+test('JOED-187 (b): k = 1.6 scales patch, history, cold render, Results render and long-task limits', async () => {
+  for (const runner of ['Board', 'Results']) {
+    for (const [factor, pass] of [[1.5, true], [1.7, false]]) {
+      const run = await ratioRun(runner, runner === 'Board' ? { patchMs: factor * 40 } : { switchMs: factor * 40 });
+      assert.equal(run.checks.every(c => c.ok), pass);
+      assert.ok(run.traces.every(row => row.k === 1.6 && row.limitMs.patchMs === 64 && row.limitMs.historyMs === 200 && row.limitMs.taskMs === 200));
+      assert.equal(runner === 'Board' ? run.loads.live : run.loads['390'], pass ? 1 : 2);
+    }
+    for (const [taskMs, pass] of [[199.9, true], [200, false], [210, false]]) {
+      const run = await ratioRun(runner, { taskMs });
+      assert.equal(run.checks.every(c => c.ok), pass);
+      assert.equal(runner === 'Board' ? run.loads.live : run.loads['390'], pass ? 1 : 2);
+    }
+  }
+  for (const [historyMs, pass] of [[190, true], [200, true], [210, false]]) {
+    const run = await ratioRun('Board', { historyMs });
+    assert.equal(run.checks.every(c => c.ok), pass);
+    assert.deepEqual(run.loads, { cold: pass ? 1 : 2, live: pass ? 1 : 2 });
+    assert.ok(run.checks.filter(c => 'historyBudget' in c.detail.conditions || 'renderBudget' in c.detail.conditions).every(c => c.ok === pass));
+  }
+});
+
+test('JOED-187 (c): k = 3.5 fails red with hostTooSlowToJudge despite tiny times; the cap is inclusive', async () => {
+  for (const runner of ['Board', 'Results']) {
+    const over = await ratioRun(runner, { patchMs: 1, historyMs: 1, switchMs: 1, taskMs: null }, { probe: ratioProbe(35) });
+    const failed = over.checks.filter(c => !c.ok);
+    assert.equal(failed.length, runner === 'Board' ? 4 : 2);
+    assert.ok(failed.every(c => c.detail.failed.includes('hostTooSlowToJudge') && c.detail.conditions.hostTooSlowToJudge === false));
+    assert.ok(failed.every(c => /host too slow to judge \(k = 3\.50× the quiet probe, cap 3\)/.test(c.name)));
+    assert.ok(over.traces.every(r => r.k === 3.5 && r.hostTooSlowToJudge && r.attempts === 2));
+    const atCap = await ratioRun(runner, {}, { probe: ratioProbe(30) });
+    assert.ok(atCap.checks.every(c => c.ok));
+    assert.ok(atCap.traces.every(r => r.k === 3 && !r.hostTooSlowToJudge && r.attempts === 1));
+  }
+});
+
+test('JOED-187: each re-measure uses its own probe and ratio, and functional failures still close the retry path', async () => {
+  for (const runner of ['Board', 'Results']) {
+    let calls = 0;
+    const probe = async () => ratioProbe(++calls % 2 ? 35 : 16)();
+    const cleared = await ratioRun(runner, { patchMs: 60, switchMs: 60, historyMs: 180, taskMs: 190 }, { probe });
+    assert.ok(cleared.checks.every(c => c.ok));
+    assert.deepEqual(Array.from(cleared.traces, r => r.k), runner === 'Board' ? [3.5, 1.6, 3.5, 1.6] : [3.5, 1.6]);
+    assert.ok(cleared.traces.every(r => r.attempts === 2));
+    const functional = await ratioRun(runner, { worker: false }, { probe: ratioProbe(35) });
+    assert.ok(functional.traces.every(r => r.attempts === 1));
+    assert.ok(functional.checks.some(c => !c.ok && c.detail.conditions.worker === false));
+    // A slower second host can independently exceed the cap after an ordinary
+    // scaled timing breach; it remains a red final measurement.
+    calls = 0;
+    const final = await ratioRun(runner, { patchMs: 70, switchMs: 70, historyMs: 210 }, { probe: async () => ratioProbe(++calls % 2 ? 16 : 35)() });
+    assert.ok(final.checks.some(c => c.detail.failed.includes('hostTooSlowToJudge')));
+  }
+});
+
+test('JOED-187 (a/d): calibrated k = 1 and faster-than-quiet probes preserve all 12 baseline decisions and waits', async () => {
+  for (const limits of [CI_GUARD, REFERENCE_BUDGET]) {
+    for (const second of [{}, { worker: false }, { taskMs: 130 }]) {
+      for (const runner of ['Board', 'Results']) {
+        const run = async (calibration, medianMs) => {
+          const options = { limits, calibration, probe: ratioProbe(medianMs) };
+          return runner === 'Board' ? simulatedBudget({ ...options, cold: [{ taskMs: 130 }, second], live: [{ patchMs: 41 }, second] })
+            : simulatedResultsBudget({ ...options, samples: { 390: [{ switchMs: 41 }, second] } });
+        };
+        const baseline = await run({ status: 'uncalibrated', cap: 3 }, 10);
+        for (const medianMs of [5, 10]) {
+          const actual = await run(ratioCalibration(), medianMs);
+          assert.deepEqual(actual.loads, baseline.loads);
+          assert.deepEqual(actual.events, baseline.events);
+          assert.deepEqual(Array.from(actual.checks, c => [c.name, c.ok, JSON.stringify(c.detail.conditions)]), Array.from(baseline.checks, c => [c.name, c.ok, JSON.stringify(c.detail.conditions)]));
+          assert.ok(actual.traces.every(r => r.k === 1));
+        }
+      }
+    }
+  }
+});
+
+test('JOED-187 (e): a missing or malformed probe falls back to k = 1 with visible evidence on every attempt', async () => {
+  for (const runner of ['Board', 'Results']) {
+    for (const probe of [async () => { throw new Error('probe missing'); }, async () => ({ medianMs: 16 })]) {
+      const run = await ratioRun(runner, { patchMs: 60, switchMs: 60 }, { probe });
+      assert.ok(run.checks.some(c => !c.ok));
+      assert.ok(run.traces.every(r => r.k === 1 && r.limitMs.patchMs === 40 && r.probe === null && /probe unavailable: k = 1/.test(r.ratioReason)));
+      assert.ok(run.checks.every(c => c.detail.measurements.every(m => m.k === 1 && /probe unavailable/.test(m.ratioReason))));
+      const table = runner === 'Board' ? budgetTable(run.traces, CI_GUARD) : resultsBudgetTable(run.traces, CI_GUARD);
+      assert.match(table, /probe unavailable: k = 1, absolute guards/);
+      assert.match(table, /calibrated: run quiet-fixture-187/);
+    }
+  }
+});
+
+test('JOED-187 (i): single and repeated failure lines retain per-attempt k and limitMs before offendingTasks within 2400 characters', async () => {
+  for (const runner of ['Board', 'Results']) {
+    for (const functional of [false, true]) {
+      const run = await ratioRun(runner, { patchMs: 80, switchMs: 80, taskMs: 210, ...(functional ? { worker: false } : {}) });
+      const messages = [], original = console.error;
+      try {
+        console.error = line => messages.push(line);
+        const gate = createGate('unused');
+        for (const c of run.checks.filter(c => !c.ok)) gate.check('budget', c.name, c.ok, { ...c.detail, offendingTasks: [{ attribution: 'x'.repeat(5000) }] });
+      } finally { console.error = original; }
+      assert.ok(messages.length > 0);
+      for (const message of messages) {
+        assert.ok(message.indexOf('"measurements"') < message.indexOf('"offendingTasks"'));
+        assert.ok(message.indexOf('calibrated: run quiet-fixture-187') < message.indexOf('"offendingTasks"'));
+        assert.ok(message.includes('calibrated: run quiet-fixture-187'));
+        const measurements = JSON.parse(message.match(/"measurements":(\[.*?\])/)[1]);
+        assert.equal(measurements.length, functional ? 1 : 2);
+        for (const m of measurements) { assert.equal(m.k, 1.6); assert.deepEqual(m.limitMs, { patchMs: 64, historyMs: 200, taskMs: 200 }); }
+        const detail = message.slice(message.indexOf(': {') + 2);
+        assert.ok(detail.length <= 2400);
+      }
+    }
+  }
+});
+
+test('JOED-187 (f): Board and Results runners select their exact width and kind calibration', async () => {
+  const calibration = ratioCalibration();
+  calibration.quiet['390']['board-live'].medianMs = 100;
+  calibration.quiet['1440'].results.medianMs = 20;
+  const options = { calibration, probe: ratioProbe(16) };
+  const board = await simulatedBudget({ ...options, viewports: ['1440'], cold: [{ historyMs: 190 }], live: [{ patchMs: 60 }] });
+  assert.ok(board.checks.every(c => c.ok));
+  assert.ok(board.traces.every(row => row.viewport === '1440' && row.k === 1.6));
+  const results = await simulatedResultsBudget({ ...options, samples: { 1440: [{ switchMs: 60 }, { switchMs: 60 }] } });
+  assert.ok(results.checks.some(c => !c.ok));
+  assert.ok(results.traces.every(row => row.viewport === '1440' && row.k === 1));
 });
