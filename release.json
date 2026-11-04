@@ -1,9 +1,9 @@
 {
   "product": "JoeDesk",
   "version_scheme": "inspr-calver-3",
-  "version": "261101023838.0.0",
+  "version": "261104111323.0.0",
   "release_channel": "stable",
-  "release_sequence": 43,
+  "release_sequence": 44,
   "status": "candidate",
-  "note": "When your sign-in expires, keep clearly frozen figures, including after returning with Back or Forward, and reload to sign in again."
+  "note": "The account chart shows gaps only for real outages and unavailable values, keeping history thinned for space connected."
 }

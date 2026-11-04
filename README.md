@@ -2,17 +2,21 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261101023838.0.0` (`inspr-calver-3`, stable sequence 43), reserved once at `2026-11-01T02:38:38Z` for clearly frozen signed-out figures, including after returning with Back or Forward (JOED-173, JOED-175; release [JOED-177](https://aeon.barta.cm/p/JOED/JOED-177)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
+**Candidate version:** `261104111323.0.0` (`inspr-calver-3`, stable sequence 44), reserved once at `2026-11-04T11:13:23Z` for honest account chart gaps (JOED-185; release [JOED-183](https://aeon.barta.cm/p/JOED/JOED-183)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
 
-**Last deployed release:** `inspr-calver-3` / `261030154842.0.0` / sequence 41,
-published on `main` at `daa49125c26af7fd4e19855327fd01f5eabf23d5` under JOED-172,
-live on csb0 since `2026-10-31T05:04:23Z` and adopted at `2026-10-31T05:06:11Z`
-(`adoption/261030154842.0.0.json`). `last_deployed_release` records sequence 41.
-`previous_release` records published sequence 42 (`261031052151.0.0`, JOED-174),
-verified in run `41215247109` but never live: its only csb0 switch at
-`2026-10-31T16:55Z` rolled back on `feeds_not_ready` (upstream gateway).
-Its disposition is `superseded-before-deployment`, with no `deployed` field
-or adoption record; release 43 supersedes it directly. Sequence 40 (`261030085000.0.0`) was previously deployed at
+**Last deployed release:** `inspr-calver-3` / `261101023838.0.0` / sequence 43,
+published on `main` at `36fecfeb7e56400db3076304d150e9eeb2beb05b` under JOED-177,
+live on csb0 since `2026-11-01T11:14:45Z` and adopted at `2026-11-01T11:18:26Z`
+(`adoption/261101023838.0.0.json`). Both `previous_release` and
+`last_deployed_release` record sequence 43, with disposition `deployed` and
+`deployed: true` on `previous_release`.
+Sequence 42 (`261031052151.0.0`, JOED-174) was verified in run `41215247109`
+but never live: its only csb0 switch at `2026-10-31T16:55Z` rolled back on
+`feeds_not_ready` (upstream gateway). It retains its historical
+`superseded-before-deployment` disposition, without an adoption record;
+release 43 superseded it directly. Sequence 41 (`261030154842.0.0`, JOED-172)
+was previously deployed at `2026-10-31T05:04:23Z` and adopted at `2026-10-31T05:06:11Z`.
+Sequence 40 (`261030085000.0.0`) was previously deployed at
 `2026-10-30T11:34:29Z` and adopted at `2026-10-30T11:35:36Z` (JOED-171).
 Sequence 39 (`261029192345.0.0`) was previously deployed at
 `2026-10-30T08:44:03Z` and adopted at `2026-10-30T08:46:01Z` (JOED-159).
@@ -44,14 +48,14 @@ published on `main` at `dafe7909af04ba5ded3c4b55504ea10970e07e4d`; JOED-41
 records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
-`previous_release` from `last_deployed_release`. About lists the current build, superseded published sequence 42, deployed and adopted sequences 41, 40 and 39, published sequence 38,
+`previous_release` from `last_deployed_release`. About lists the current build, deployed and adopted sequence 43, superseded published sequence 42, deployed and adopted sequences 41, 40 and 39, published sequence 38,
 deployed sequences 37, 36, 35, 34, 33, 32, 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
 ## P6a release preparation (JOED-26)
 
 This branch carries paper-only preparation from `rebuild/v2`. It is **not ready for
-cutover**. The sequence-41 candidate has not been published. The candidate
+cutover**. The sequence-44 candidate has not been published. The candidate
 reservation and unchanged legacy anchor live in `release/preparation.json`;
 published artifacts, historical tags and legacy history are preserved. The old CalVer2 proposal JOED-13 is
 superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
@@ -101,7 +105,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261101023838.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261104111323.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -3116,3 +3120,34 @@ The approved presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`
 and saved global config/templates are retained; the offline bundle is active
 in footer/About. This local candidate grants no publication or deployment
 approval. The coordinator owns the cross-family gate, publication and live verification.
+
+## Release 44 candidate (JOED-183)
+
+Reserve `261104111323.0.0` at `2026-11-04T11:13:23Z` as `inspr-calver-3`, stable sequence 44,
+for honest account chart gaps (JOED-185), alongside the Signal Tuesday 3 CI
+work (JOED-178, JOED-184, JOED-186).
+
+Previous and last deployed release are sequence 43 (`261101023838.0.0`), main
+`36fecfeb7e56400db3076304d150e9eeb2beb05b` (JOED-177), live on csb0 since
+`2026-11-01T11:14:45Z`, adopted at `2026-11-01T11:18:26Z` as recorded in
+`adoption/261101023838.0.0.json`. The previous release has disposition
+`deployed` and `deployed: true`. The supplied adoption record is preserved
+byte for byte. About orders 44, 43, 42, 41, 40, 39, 38, 37 through 26, then
+legacy; all previous entries retain their original content. Earlier
+preparation sections record their reservation-time state.
+
+- The account chart shows gaps only for real outages and unavailable values, keeping history thinned for space connected.
+- History thinned before this release keeps its old gaps until it ages out within 14 days.
+
+Contract revision 11 remains accepted beside revision 10 under the same schema
+ID. The pusher switch (JOED-149) belongs to DEVOPS and is separate; this
+candidate makes no claim of dollar-desk exchange-rate proof. The contract set
+remains `c266b39e33e6e15be491263b0ca3575598dd264da3e1a9f6d5a147fc9f1bd49b`.
+Reseal the integrated runtime closure once; preserve historical artifacts and
+the legacy anchor.
+
+The approved presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`
+is retained: the config, templates and renderer are unchanged in the available
+INSPR checkout, and the complete offline bundle remains active in footer/About.
+This local candidate grants no publication or deployment approval. The
+coordinator owns the cross-family gate, publication and live verification.
