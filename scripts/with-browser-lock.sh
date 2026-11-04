@@ -19,13 +19,14 @@ case "$runner_kind" in
     # Host-local, independent of the runner's per-job RUNNER_TEMP. Infrastructure
     # failures degrade visibly; actual contention still has a hard wait bound.
     # The setgid directory supplies the shared runner group on first creation.
-    umask 007
     if ! command -v flock >/dev/null; then
       lock_unavailable 'flock not found'
     # Keep the same open file description through every phase and teardown.
-    elif ! { exec 9>> "$lock_path"; }; then
-      lock_unavailable "cannot open $lock_path; shared directory may be missing"
+    elif ! { previous_umask=$(umask); umask 007; exec 9>> "$lock_path"; }; then
+      umask "$previous_umask"
+      lock_unavailable "cannot open $lock_path; shared directory or group access may be missing"
     else
+      umask "$previous_umask"
       JOED_BROWSER_LOCK_WAIT_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
       SECONDS=0
       waiting="Browser host lock: waiting since $JOED_BROWSER_LOCK_WAIT_STARTED_AT (limit 3600 seconds)."

@@ -167,7 +167,7 @@ for (const code of ['EEXIST', 'EACCES', 'ENOSPC', 'EISDIR']) {
       };
       const h = host([43, 2]);
       const result = await waitForQuietHost({ ...h.options, budget });
-      assert.equal(result.budgetState, `unavailable (${code})`);
+      assert.equal(result.budgetState, failingTransaction === 1 ? `unavailable (${code})` : 'created');
       assert.equal(result.budgetAfterSeconds, null, 'failed persistence leaves the allowance unknown');
       assert.ok(quietWaitCells(result).includes(`unavailable (${code})`));
       if (failingTransaction === 1) {
@@ -207,8 +207,12 @@ test('JOED-180 budget stale lock: abandoned reservation and refund locks skip sa
     };
     const h = host([43, 2]);
     const result = await waitForQuietHost({ ...h.options, budget });
-    assert.equal(result.budgetState, 'unavailable (EEXIST)');
-    assert.match(result.skipReason, /abandoned quiet-wait budget lock \(>10 s\)/);
+    assert.equal(result.budgetState, failingTransaction === 1 ? 'unavailable (EEXIST)' : 'created');
+    if (failingTransaction === 1) assert.match(result.skipReason, /abandoned quiet-wait budget lock \(>10 s\)/);
+    else {
+      assert.equal(result.skipReason, null);
+      assert.match(result.refundReason, /abandoned quiet-wait budget lock \(>10 s\) during refund/);
+    }
     assert.equal(result.waitedSeconds, failingTransaction === 1 ? 0 : 5);
     assert.equal(result.skipped, failingTransaction === 1);
     if (failingTransaction === 2) assert.equal(result.refundBudgetState, 'unavailable (EEXIST)');

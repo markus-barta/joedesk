@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as nodeModule from 'node:module';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
@@ -2478,7 +2479,7 @@ test('browser budget: reference limits stay strict with no re-measure', () => {
 
 // Exercise the exact runner with synthetic CDP replies, without a browser,
 // servers or real time. Each load consumes one phase's scripted measurement.
-async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD, useDefaultWait = false, waitForQuiet = async () => ({ waitedSeconds: 0, quiet: true, threshold: 13, startLoad1: 2 }) } = {}) {
+async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD, useDefaultWait = false, sampleLoad, waitForQuiet = async () => ({ waitedSeconds: 0, quiet: true, threshold: 13, startLoad1: 2 }) } = {}) {
   let phase, sample, reads;
   const loads = { cold: 0, live: 0 }, boards = [], checks = [], events = [];
   const timings = (reason, count, ms) => Array.from({ length: count }, (_, i) => ({ reason, at: 200 + i * 20, ms }));
@@ -2527,7 +2528,7 @@ async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD, us
       events.push('wait-end');
       return result;
     } } : {}),
-    sampleLoad: () => { events.push('sample-load'); return { sampledAt: `sample-${boards.length}`, loadavg: [1, 2, 3], cpuCount: 8, browserProcesses: 4 }; },
+    sampleLoad: () => { events.push('sample-load'); return sampleLoad ? sampleLoad() : { sampledAt: `sample-${boards.length}`, loadavg: [1, 2, 3], cpuCount: 8, browserProcesses: 4 }; },
     newBoard: async ({ history, accountHistory }) => {
       const board = { history, accountHistory, url: `http://fixture/${boards.length}/`, pushes: [], setNow() {},
         async push(payload) { this.pushes.push(payload); return { status: 200 }; } };
@@ -2627,7 +2628,9 @@ test('browser budget: reproduced patch/task breaches print both measurements bef
   } finally { console.error = original; }
   assert.equal(messages.length, 2);
   for (const message of messages) {
-    assert.match(message, /"measurements":\[\{"attempt":1,"patchMs":44\.5,"historyMs":10,"taskMs":155\},\{"attempt":2,"patchMs":42,"historyMs":10,"taskMs":140\}\]/);
+    const measurements = JSON.parse(message.match(/"measurements":(\[.*?\])/)[1]);
+    assert.deepEqual(measurements.map(({ attempt, patchMs, historyMs, taskMs }) => ({ attempt, patchMs, historyMs, taskMs })),
+      [{ attempt: 1, patchMs: 44.5, historyMs: 10, taskMs: 155 }, { attempt: 2, patchMs: 42, historyMs: 10, taskMs: 140 }]);
   }
 });
 
@@ -2659,7 +2662,7 @@ test('browser budget: runBudget statically allows at most one re-measure per vie
 
 // Run the Results orchestration against scripted page replies. Navigation
 // consumes a sample, so an unexpected third measurement fails immediately.
-async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUARD, useDefaultWait = false, waitForQuiet = async () => ({ waitedSeconds: 0, quiet: true, threshold: 13, startLoad1: 2 }) } = {}) {
+async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUARD, useDefaultWait = false, sampleLoad, waitForQuiet = async () => ({ waitedSeconds: 0, quiet: true, threshold: 13, startLoad1: 2 }) } = {}) {
   let viewport, sample, unserved = false;
   const loads = Object.fromEntries(Object.keys(samples).map(width => [width, 0])), checks = [], observers = [], events = [];
   const page = {
@@ -2700,15 +2703,17 @@ async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUA
       events.push('wait-end');
       return result;
     } } : {}),
-    sampleLoad: () => { events.push('sample-load'); return { sampledAt: `sample-${++loadSamples}`, loadavg: [4, 5, 6], cpuCount: 16, browserProcesses: 7 }; },
+    sampleLoad: () => { events.push('sample-load'); loadSamples++; return sampleLoad ? sampleLoad() : { sampledAt: `sample-${loadSamples}`, loadavg: [4, 5, 6], cpuCount: 16, browserProcesses: 7 }; },
     newBoard: async () => ({ url: 'http://fixture/', setNow() {}, async push() { return { status: 200 }; } }),
     serve: async () => async () => { unserved = true; },
     check: (ac, name, ok, detail) => checks.push({ name, ok, detail }),
   });
   assert.equal(unserved, true, 'the Results interceptor is removed');
   assert.equal(loadSamples, traces.length, 'one host-load sample per attempt, including re-measurements');
-  assert.equal(new Set(traces.map(r => r.machineLoad.sampledAt)).size, traces.length);
-  assert.match(resultsBudgetTable(traces, limits), /sample-1.*4\.00 \/ 5\.00 \/ 6\.00.*16.*7/);
+  if (!sampleLoad) {
+    assert.equal(new Set(traces.map(r => r.machineLoad.sampledAt)).size, traces.length);
+    assert.match(resultsBudgetTable(traces, limits), /sample-1.*4\.00 \/ 5\.00 \/ 6\.00.*16.*7/);
+  }
   assert.equal(observers.filter(o => o.method === 'Page.addScriptToEvaluateOnNewDocument').length,
     Object.values(loads).reduce((sum, count) => sum + count, 0), 'each attempt installs a fresh observer');
   assert.equal(observers.filter(o => o.method === 'Page.removeScriptToEvaluateOnNewDocument').length,
@@ -2790,8 +2795,39 @@ test('Results budget: attempts are independent per viewport and both measurement
     }
   } finally { console.error = original; }
   assert.equal(messages.length, 2);
-  for (const message of messages) assert.match(message,
-    /"measurements":\[\{"attempt":1,"switchMs":42\.5,"taskMs":155\},\{"attempt":2,"switchMs":41\.2,"taskMs":140\}\]/);
+  for (const message of messages) {
+    const measurements = JSON.parse(message.match(/"measurements":(\[.*?\])/)[1]);
+    assert.deepEqual(measurements.map(({ attempt, switchMs, taskMs }) => ({ attempt, switchMs, taskMs })),
+      [{ attempt: 1, switchMs: 42.5, taskMs: 155 }, { attempt: 2, switchMs: 41.2, taskMs: 140 }]);
+  }
+});
+
+for (const runner of ['Board', 'Results']) test(`${runner} browser budget failure detail keeps load1 and quietWait in measurements before task attribution`, async () => {
+  const quietWait = { waitedSeconds: 0, quiet: false, threshold: 13, skipped: true, skipReason: 'budget exhausted' };
+  for (const missingLoad of [false, true]) {
+    const options = { waitForQuiet: async () => ({ ...quietWait, sampledAt: 'omit', browserProcesses: 99 }),
+      sampleLoad: missingLoad ? () => null : undefined };
+    const { checks } = runner === 'Board'
+      ? await simulatedBudget({ ...options, live: [{ patchMs: 44.5 }, { patchMs: 42 }] })
+      : await simulatedResultsBudget({ ...options, samples: { 1024: [{ switchMs: 42.5 }, { switchMs: 41.2 }] } });
+    const failures = checks.filter(c => !c.ok);
+    assert.ok(failures.length > 0);
+    for (const c of failures) {
+      const { measurements, attemptRows } = c.detail;
+      assert.deepEqual(Array.from(measurements, ({ load1 }) => load1), Array.from(attemptRows, r => r.machineLoad?.loadavg?.[0] ?? null));
+      assert.deepEqual(JSON.parse(JSON.stringify(measurements[1].quietWait)), quietWait);
+      assert.equal(Object.hasOwn(measurements[0], 'quietWait'), false);
+      assert.ok(measurements.every(m => !Object.hasOwn(m, 'sampledAt') && !Object.hasOwn(m, 'browserProcesses')));
+      const keys = Object.keys(c.detail);
+      assert.ok(keys.indexOf('measurements') < keys.indexOf('offendingTasks'));
+      const messages = [], original = console.error;
+      console.error = message => messages.push(message);
+      try { createGate('unused').check('budget', c.name, false, { ...c.detail, offendingTasks: [{ attribution: 'x'.repeat(4000) }] }); }
+      finally { console.error = original; }
+      assert.ok(messages[0].includes(JSON.stringify(measurements)), 'the entire concise block survives the real log limit');
+      assert.ok(messages[0].indexOf('"measurements"') < messages[0].indexOf('"offendingTasks"'));
+    }
+  }
 });
 
 test('browser budgets: absent long-task duration is null in both attempts and a dash in tables', async () => {
@@ -2960,7 +2996,7 @@ test('JOED-180 (j): reference runners with the real default wait leave the job b
   // Start an independent test runner, not another child of the parent's
   // internal reporter protocol (which can otherwise exit with no tests).
   delete childEnv.NODE_TEST_CONTEXT;
-  const child = spawnSync(process.execPath, ['--test', '--test-reporter=tap', '--test-name-pattern=JOED-180 \\(j\\)', new URL(import.meta.url).pathname], {
+  const child = spawnSync(process.execPath, ['--test', '--test-reporter=tap', '--test-name-pattern=JOED-180 \\(j\\)', fileURLToPath(import.meta.url)], {
     encoding: 'utf8', timeout: 15_000, env: childEnv,
   });
   assert.equal(child.status, 0, `${child.stdout}\n${child.stderr}`);
@@ -2986,7 +3022,12 @@ test('JOED-180 budget I/O: both runners still re-measure and let the second resu
             : await simulatedResultsBudget({ samples: { 390: [{ switchMs: 41 }, second] }, waitForQuiet });
           assert.equal(run.loads[runner === 'board' ? 'live' : '390'], 2);
           assert.equal(run.checks.every(c => c.ok), second.worker !== false);
-          assert.equal(run.traces.at(-1).quietWait.budgetState, `unavailable (${code})`);
+          const wait = run.traces.at(-1).quietWait;
+          assert.equal(wait.budgetState, failingTransaction === 1 ? `unavailable (${code})` : 'per-process');
+          if (failingTransaction === 2) {
+            assert.equal(wait.refundBudgetState, `unavailable (${code})`);
+            assert.equal(wait.skipReason, null);
+          }
         }
       }
     }

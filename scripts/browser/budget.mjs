@@ -44,7 +44,9 @@ export async function runBudget({ page, newBoard, check, limits, sampleLoad = ca
       // attribution so the failure log's detail limit cannot hide either one.
       ...(row.attemptRows ? { measurements: row.attemptRows.map(r => ({ attempt: r.attempt,
         patchMs: r.deskWorst ?? null, historyMs: r.historyWorst ?? r.renderWorst,
-        taskMs: r.longTasks.length ? max(r.longTasks) : null })) } : {}),
+        taskMs: r.longTasks.length ? max(r.longTasks) : null, load1: r.machineLoad?.loadavg?.[0] ?? null,
+        ...(r.quietWait ? { quietWait: { waitedSeconds: r.quietWait.waitedSeconds, quiet: r.quietWait.quiet,
+          threshold: r.quietWait.threshold, skipped: r.quietWait.skipped, skipReason: r.quietWait.skipReason } } : {}) })) } : {}),
       offendingTasks: row.longTaskDetails?.filter(t => t.duration >= limits.taskMs), ...row });
   };
   const traces = [];

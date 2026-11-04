@@ -88,7 +88,11 @@ export async function runResultsBudget({ page, newBoard, check, limits, serve, s
         check('budget', label, !failed.length, { failed, conditions,
           // Keep both concise samples ahead of potentially large task lists.
           ...(decision.remeasured ? { measurements: rows.map(r => ({ attempt: r.attempt,
-            switchMs: r.switchWorst, taskMs: r.longTasks.length ? max(r.longTasks) : null })) } : {}),
+            switchMs: r.switchWorst, taskMs: r.longTasks.length ? max(r.longTasks) : null,
+            load1: r.machineLoad?.loadavg?.[0] ?? null,
+            ...(r.quietWait ? { quietWait: { waitedSeconds: r.quietWait.waitedSeconds, quiet: r.quietWait.quiet,
+              threshold: r.quietWait.threshold, skipped: r.quietWait.skipped, skipReason: r.quietWait.skipReason } } : {}) })) } : {}),
+          offendingTasks: rows.at(-1).longTasks.filter(ms => ms >= limits.taskMs),
           ...rows.at(-1), ...(decision.remeasured ? { attemptRows: rows } : {}) });
       }
     }

@@ -1,6 +1,24 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { captureMachineLoad, machineLoadTable } from '../scripts/browser/machine-load.mjs';
+import { captureMachineLoad, machineLoadTable, waitForQuietHost, quietWaitCells } from '../scripts/browser/machine-load.mjs';
+
+test('JOED-180 budget refund failure preserves reservation state and never claims the completed wait was skipped', async () => {
+  for (const staleLock of [false, true]) {
+    let transactions = 0;
+    const result = await waitForQuietHost({ load: () => [1], parallelism: () => 8, now: () => 0,
+      budget: async change => {
+        if (++transactions === 2) throw Object.assign(new Error('refund failed'), { code: 'EEXIST', staleLock });
+        return change({ remainingSeconds: 300, failed: false }, 'corrupt (reset to 300 s)');
+      } });
+    assert.equal(result.budgetState, 'corrupt (reset to 300 s)');
+    assert.equal(result.refundBudgetState, 'unavailable (EEXIST)');
+    assert.equal(result.budgetAfterSeconds, null);
+    assert.equal(result.skipped, false);
+    assert.equal(result.skipReason, null);
+    assert.equal(result.refundReason ?? null, staleLock ? 'abandoned quiet-wait budget lock (>10 s) during refund' : null);
+    if (staleLock) assert.ok(quietWaitCells(result).includes(result.refundReason));
+  }
+});
 
 test('budget host evidence counts browser executable names without requesting process arguments', () => {
   const sample = captureMachineLoad({
@@ -44,7 +62,7 @@ test('QA machine-load tables retain the job lock wait evidence and distinguish h
 });
 
 test('QA machine-load tables show unavailable host lock state and the infrastructure failure reason', () => {
-  for (const reason of ['flock not found', 'cannot open /run/joedesk-browser/browser.lock; shared directory may be missing', 'flock failed (exit 69)']) {
+  for (const reason of ['flock not found', 'cannot open /run/joedesk-browser/browser.lock; shared directory or group access may be missing', 'flock failed (exit 69)']) {
     const table = machineLoadTable([], {
       JOED_BROWSER_LOCK_STATE: 'unavailable', JOED_BROWSER_LOCK_REASON: reason,
       JOED_BROWSER_LOCK_ACQUIRED_AT: 'unavailable', JOED_BROWSER_LOCK_WAIT_SECONDS: '0',

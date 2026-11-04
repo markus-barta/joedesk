@@ -44,6 +44,9 @@ export function planSignedOutMatrix({ mode = 'full', widths, shapes, reasons, sc
       invariant: mode === 'subset' ? shapes.flatMap(shape => screens.map(screen => ({ shape, screen }))) : [] };
   });
   const matrixCases = views.reduce((n, view) => n + view.matrix.reduce((m, entry) => m + entry.reasons.length * screens.length, 0), 0);
+  if (mode === 'subset' && new Set(views.map(view => nativeAuthPaths[view.fullShape])).size < 2) {
+    throw new Error('Signed-out subset requires at least two distinct auth paths across widths');
+  }
   const opaqueCases = views.reduce((n, view) => n + view.opaque.length, 0);
   const invariantCases = views.reduce((n, view) => n + view.invariant.length, 0);
   return { mode, shapes: [...shapes], screens: [...screens], views, matrixCases, opaqueCases, invariantCases,

@@ -82,6 +82,33 @@ test('JOED-179 sampled reasons use distinct real health wording for transport an
   assert.equal(new Set(sampled.map(cellReason)).size, 2);
 });
 
+test('JOED-179 signed-out planner rejects subsets with only one auth path across widths', () => {
+  const inputs = { mode: 'subset', widths, shapes: nativeAuthShapes, reasons, screens, endpoints: ['state.json'] };
+  for (const changes of [{ shapes: ['302 to SSO', '303 to SSO'] }, { widths: [390] }]) {
+    assert.throws(() => planSignedOutMatrix({ ...inputs, ...changes }), /at least two distinct auth paths across widths/);
+  }
+});
+
+test('JOED-179 signed-out fixture branches follow nativeAuthPaths and reject a mislabelled shape', async () => {
+  const response = browser.slice(browser.indexOf('        // Manual 302/303'), browser.indexOf('\n        return;', browser.indexOf('        // Manual 302/303')));
+  const reply = async (shape, paths = nativeAuthPaths) => {
+    const sent = [];
+    await runInNewContext(`(async () => { ${response} })()`, { assert, shape, nativeAuthPaths: paths,
+      send: async (...args) => sent.push(args) });
+    assert.equal(sent.length, 1);
+    return JSON.parse(JSON.stringify(sent[0]));
+  };
+  for (const shape of nativeAuthShapes) {
+    const [status] = await reply(shape);
+    assert.equal(status, shape === '303 to SSO' ? 303 : nativeAuthPaths[shape] === 'redirect' ? 302
+      : nativeAuthPaths[shape] === 'status' ? Number(shape) : 200);
+  }
+  // With the classification changed, the fixture must stop sending HTML.
+  // A duplicate shape list silently ignores this mislabel and fails this test.
+  await assert.rejects(reply('HTML body', { ...nativeAuthPaths, 'HTML body': 'status' }), /Invalid status auth shape/);
+  await assert.rejects(reply('unknown'), /Unclassified native auth shape/);
+});
+
 test('JOED-179 (e) transport: only status and redirected vary across native auth shapes', async () => {
   const subset = plan('subset');
   assert.deepEqual(subset.shapes, authShapes.filter(shape => shape !== 'followed cross-origin redirect'));

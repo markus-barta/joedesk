@@ -179,21 +179,21 @@ export function resetPreview() {
     async recover() { refused = failed503 = false; await feed.refresh(); await refreshBoardSettings(); }, f };
 }
 
-test('JOED-181: signed-out page cases let the event loop report progress', async t => {
-  // Two cases on the same path as the exhaustive matrix. Resolved fetch/body
-  // promises alone only drain microtasks, starving the runner's TAP pipe.
-  for (const screen of ['desk', 'settings']) {
-    let reported = false;
-    const report = setImmediate(() => { reported = true; });
-    t.after(() => clearImmediate(report));
-    const p = await preview(t, 390);
-    p.render(p.context(null), screen);
-    const before = p.capture();
-    await p.signOut();
-    assertSignedOutPage(p.capture(), before, screen);
-    p.close();
-    assert.equal(reported, true, `${screen}: page cases must yield to the event loop, not just to promises`);
-  }
+test('JOED-181: signed-out matrix loop gives progress callbacks a turn for every case', async t => {
+  // Execute a small slice of the actual exhaustive loop, including all of its
+  // retained-document assertions. Check between cases, not just in preview().
+  let turns = 0, previous = 0, cases = 0, report;
+  const progress = () => { turns++; report = setImmediate(progress); };
+  report = setImmediate(progress);
+  t.after(() => clearImmediate(report));
+  const afterCase = () => {
+    cases++;
+    assert.ok(turns > previous, `matrix case ${cases}: matrix must yield to the event loop, not just to promises`);
+    previous = turns;
+  };
+  await runPageMatrix(t, 390, '401', [null], ['desk', 'settings'], afterCase);
+  await runPageMatrix(t, 1440, 'followed cross-origin redirect', [null], ['desk', 'settings'], afterCase);
+  assert.equal(cases, 4, 'both matrix branches must execute their two-case slice');
 });
 
 // Every earlier reproducer now exercises the same structural invariant; these
@@ -243,12 +243,12 @@ for (const [name, screen] of reproducers) test(`JOED-173 fix4 reproducer: ${name
   assert.equal(p.renders(), count, 'no renderer runs on auth failure or subsequent 503');
 });
 
-for (const width of widths) for (const shape of authShapes) test(`JOED-173 fix4 entire document: ${width}px / ${shape} / every reason and page`, async t => {
+async function runPageMatrix(t, width, shape, reasonCases = [null, ...reasons], pageScreens = screens, afterCase = () => {}) {
   let p; t.after(() => p?.close());
   if (shape === 'followed cross-origin redirect') {
     // A followed response is outside the requested origin. Fix14 requires
     // NO_EVIDENCE: it neither expires a signed-in board nor proves re-sign-in.
-    for (const reason of [null, ...reasons]) for (const screen of screens) {
+    for (const reason of reasonCases) for (const screen of pageScreens) {
       p = await preview(t, width, shape, true, { cleanup: false });
       p.render(p.context(reason), screen);
       const before = p.capture(), tag = `${width}/${shape}/${reason}/${screen}`;
@@ -263,10 +263,11 @@ for (const width of widths) for (const shape of authShapes) test(`JOED-173 fix4 
       await p.recover();
       assertSignedOutPage(p.capture(), before, `${tag}: even valid responses cannot reopen this document`);
       p.close();
+      afterCase();
     }
     return;
   }
-  for (const reason of [null, ...reasons]) for (const screen of screens) {
+  for (const reason of reasonCases) for (const screen of pageScreens) {
     p = await preview(t, width, shape, true, { cleanup: false });
     p.render(p.context(reason), screen);
     const before = p.capture(), count = p.renders(), tag = `${width}/${shape}/${reason}/${screen}`;
@@ -284,7 +285,11 @@ for (const width of widths) for (const shape of authShapes) test(`JOED-173 fix4 
     assertSignedOutPage(p.capture(), before, `${tag}: all-200 never unfreezes`);
     assert.equal(p.renders(), count, `${tag}: successful responses cannot render in place`);
     p.close();
+    afterCase();
   }
+}
+for (const width of widths) for (const shape of authShapes) test(`JOED-173 fix4 entire document: ${width}px / ${shape} / every reason and page`, async t => {
+  await runPageMatrix(t, width, shape);
 });
 
 test('JOED-173 fix4 pending account-start save cannot change the frozen draft or comparison', async t => {

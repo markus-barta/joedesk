@@ -31,6 +31,10 @@ test('browser lock defines only the group-shared host path once and never uses /
   assert.doesNotMatch(source, /\/dev\/shm/);
 });
 
+test('browser lock cannot-open hint names group access', () => {
+  assert.ok(readFileSync(wrapper, 'utf8').includes('shared directory or group access may be missing'));
+});
+
 test('browser lock opens under umask 007 and creates a group-readable and group-writable file', t => {
   const source = readFileSync(wrapper, 'utf8');
   assert.match(source, /umask 007[\s\S]*exec 9>> "\$lock_path"/);
@@ -39,7 +43,7 @@ test('browser lock opens under umask 007 and creates a group-readable and group-
   const local = hostWrapper(dir), lock = join(dir, 'lock');
   writeFileSync(join(dir, 'flock'), '#!/bin/sh\nexit 0\n', { mode: 0o700 });
   const result = spawnSync(bash, ['-c', 'umask 077; exec "$@"', 'permissions-test', bash, local,
-    '-c', 'test "$JOED_BROWSER_LOCK_STATE" = held'], {
+    '-c', 'test "$JOED_BROWSER_LOCK_STATE" = held; test "$(umask)" = 0077'], {
     encoding: 'utf8', env: { ...process.env, PATH: dir, RUNNER_ENVIRONMENT: 'self-hosted',
       GITHUB_STEP_SUMMARY: join(dir, 'summary'), JOED_TEST_LOCK: lock },
   });
@@ -65,7 +69,7 @@ test('browser shell retains strict failures, arguments and exit status; unknown 
   }).status, 1);
 });
 
-test('browser lock infrastructure failures warn; cannot-open reasons name the shared path and missing-directory hint', t => {
+test('browser lock infrastructure failures warn; cannot-open reasons name the shared path and group access', t => {
   for (const failure of ['missing', 'open-denied', 'open-directory', 'open-missing-directory', 'acquisition-error']) {
     const dir = scratch(`joed-browser-lock-${failure}-`);
     t.after(() => discard(dir, 'browser lock unavailable test'));
@@ -74,9 +78,9 @@ test('browser lock infrastructure failures warn; cannot-open reasons name the sh
     if (failure === 'open-denied') writeFileSync(lock, '', { mode: 0o400 });
     if (failure !== 'missing') writeFileSync(join(dir, 'flock'), '#!/bin/sh\necho FLOCK_CALLED >&2\nexit 69\n', { mode: 0o700 });
     const reason = failure === 'missing' ? 'flock not found' : failure.startsWith('open-')
-      ? 'cannot open /run/joedesk-browser/browser.lock; shared directory may be missing' : 'flock failed (exit 69)';
-    const result = spawnSync(bash, [local, '-c',
-      'printf "PHASE_STARTED state=%s reason=%s acquired=%s\\n" "$JOED_BROWSER_LOCK_STATE" "$JOED_BROWSER_LOCK_REASON" "$JOED_BROWSER_LOCK_ACQUIRED_AT"; exit 7'], {
+      ? 'cannot open /run/joedesk-browser/browser.lock; shared directory or group access may be missing' : 'flock failed (exit 69)';
+    const result = spawnSync(bash, ['-c', 'umask 077; exec "$@"', 'unavailable-test', bash, local, '-c',
+      'test "$(umask)" = 0077; printf "PHASE_STARTED state=%s reason=%s acquired=%s\\n" "$JOED_BROWSER_LOCK_STATE" "$JOED_BROWSER_LOCK_REASON" "$JOED_BROWSER_LOCK_ACQUIRED_AT"; exit 7'], {
       encoding: 'utf8', env: { ...process.env, PATH: dir, RUNNER_ENVIRONMENT: 'self-hosted',
         GITHUB_STEP_SUMMARY: summary, JOED_TEST_LOCK: failure === 'open-directory' ? dir
           : failure === 'open-missing-directory' ? join(dir, 'missing', 'lock') : lock,

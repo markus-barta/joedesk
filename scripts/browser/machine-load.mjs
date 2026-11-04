@@ -37,7 +37,7 @@ export async function waitForQuietHost({ load = os.loadavg, parallelism = os.ava
   }
   const waitedSeconds = reservation.skipped ? 0 : (now() - started) / 1000;
   const quiet = load1 <= threshold;
-  let budgetAfterSeconds = reservation.budgetBeforeSeconds, refundBudgetState;
+  let budgetAfterSeconds = reservation.budgetBeforeSeconds, refundBudgetState, refundReason;
   if (!reservation.skipped) {
     try {
       budgetAfterSeconds = await budget((state, source) => {
@@ -50,18 +50,18 @@ export async function waitForQuietHost({ load = os.loadavg, parallelism = os.ava
         return state.remainingSeconds;
       });
     } catch (error) {
-      refundBudgetState = reservation.budgetState = `unavailable (${error.code ?? 'unknown'})`;
+      refundBudgetState = `unavailable (${error.code ?? 'unknown'})`;
       budgetAfterSeconds = null;
-      if (error.staleLock) reservation.skipReason = 'abandoned quiet-wait budget lock (>10 s) during refund';
+      if (error.staleLock) refundReason = 'abandoned quiet-wait budget lock (>10 s) during refund';
     }
   }
   return { waitedSeconds, quiet, threshold, startLoad1, ...reservation, budgetAfterSeconds,
-    ...(!reservation.skipped ? { refundBudgetState } : {}) };
+    ...(!reservation.skipped ? { refundBudgetState } : {}), ...(refundReason ? { refundReason } : {}) };
 }
 
 const loadCell = n => Number.isFinite(n) ? n.toFixed(2) : 'unavailable';
 export function quietWaitCells(wait) {
-  return wait ? ` ${wait.waitedSeconds.toFixed(1)} | ${wait.quiet ? 'yes' : 'no'} | ${wait.threshold} | ${loadCell(wait.startLoad1)} | ${wait.budgetBeforeSeconds?.toFixed(1) ?? 'unavailable'} | ${wait.budgetAfterSeconds?.toFixed(1) ?? 'unavailable'} | ${wait.skipped ? 'yes' : 'no'} | ${wait.skipReason ?? '—'} | ${wait.budgetState ?? 'unavailable'}${wait.refundBudgetState ? `; refund: ${wait.refundBudgetState}` : ''} |`
+  return wait ? ` ${wait.waitedSeconds.toFixed(1)} | ${wait.quiet ? 'yes' : 'no'} | ${wait.threshold} | ${loadCell(wait.startLoad1)} | ${wait.budgetBeforeSeconds?.toFixed(1) ?? 'unavailable'} | ${wait.budgetAfterSeconds?.toFixed(1) ?? 'unavailable'} | ${wait.skipped ? 'yes' : 'no'} | ${wait.skipReason ?? '—'} | ${wait.budgetState ?? 'unavailable'}${wait.refundBudgetState ? `; refund: ${wait.refundBudgetState}${wait.refundReason ? ` (${wait.refundReason})` : ''}` : ''} |`
     : ' — | — | — | — | — | — | — | — | — |';
 }
 

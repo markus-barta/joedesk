@@ -133,6 +133,15 @@ test('combined browser step preserves all phase arguments, Results zone plans an
   }
 });
 
+test('JOED-179 signed-out: empty and unknown events default to --full', t => {
+  for (const event of ['', 'unknown_event']) {
+    const { result, commands } = simulateBrowserPhases(t, { event });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(commands[0][0], 'scripts/browser-p3.mjs --full');
+    assert.equal(commands[1][0], 'scripts/browser/signed-out-pages.mjs --full');
+  }
+});
+
 test('combined step retains failures, runs Results/Settings after earlier failures and gates previews/carry-overs', t => {
   for (const [fail, count] of [['browser-p3.mjs', 4], ['browser/signed-out-pages.mjs', 4], ['run test:results', 4], ['browser-p5.mjs', 4],
     ['preview-capture.mjs', 5], ['preview-capture-ci.mjs', 6], ['browser-p6.mjs', 7]]) {

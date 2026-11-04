@@ -487,6 +487,12 @@ attempts skip waiting and measure immediately. Each second attempt records
 waited seconds, quiet yes/no, the threshold, starting load1, budget before/after,
 and whether waiting was skipped with reason “budget exhausted” or “an earlier
 wait never reached a quiet host”; a corrupt budget resets to 300 s and is recorded.
+Budget I/O failures are recorded as `unavailable (<code>)` and skip waiting so
+the second attempt still runs. A budget lock older than 10 seconds is treated
+as abandoned, recorded, and skipped without deleting it. Refunds record their
+own budget source; failures leave the remaining allowance marked unavailable
+while preserving the reservation's budget state. An abandoned refund lock is
+recorded as a refund reason, without marking the completed wait as skipped.
 The second measurement is final; a reproduced breach or
 any functional failure still fails. Both
 attempts appear in the trace, table and failure detail. Results keeps its

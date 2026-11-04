@@ -494,7 +494,8 @@ or reacquisition. Setup and artifact uploads stay outside the lock. Results
 and Settings still execute after an earlier gate failure; preview checks and
 carry-overs require the preceding gates to pass. The three runner users belong
 to the `joedesk-browser` group and share the setgid `/run/joedesk-browser`
-directory (mode 2770); `umask 007` creates the lock with mode 0660.
+directory (mode 2770); `umask 007` creates the lock with mode 0660, then the
+wrapper immediately restores the caller's umask for the phases.
 This avoids `fs.protected_regular` refusing another runner user's create/open
 in the sticky, world-writable `/dev/shm` directory. Missing
 `flock`, denied lock-file access, or a non-timeout acquisition error emits a
@@ -510,14 +511,14 @@ without the lock; fork PRs retain the hosted-only runner guard.
 Jobs can overlap while their browser phases wait for the lock. This preserves
 queued runs without a concurrency-group cap. The job timeout is 150 minutes:
 up to 60 minutes waiting for the lock, up to 70 minutes for its own browser
-work, at most 5 minutes of quiet-host waits shared across the job, and 15
+work at typical load, at most 5 minutes of quiet-host waits shared across the job, and 15
 minutes for setup/uploads. The 60-minute lock bound covers one PR-sized run
 ahead (about 45 minutes plus its quiet waits). A push-sized run ahead can hold
 the lock for up to 75 minutes, which exceeds the bound: the waiting job then
-fails with exit 75 before any browser phase starts. PR work is about 45 minutes
+fails with exit 75 before any browser phase starts. At typical load, PR work is about 45 minutes
 ([41272183028](https://github.com/markus-barta/joedesk/actions/runs/41272183028),
 [41211304715](https://github.com/markus-barta/joedesk/actions/runs/41211304715));
-push and dispatch work is 55–70 minutes
+push and dispatch work is 55–70 minutes at typical load
 ([41276169961](https://github.com/markus-barta/joedesk/actions/runs/41276169961),
 [41215247109](https://github.com/markus-barta/joedesk/actions/runs/41215247109),
 [41602540403](https://github.com/markus-barta/joedesk/actions/runs/41602540403),
@@ -543,7 +544,11 @@ is spent; it changes no limit or decision. Budget I/O failures are recorded as
 `unavailable (<code>)` and skip waiting so the second attempt still runs. A budget
 lock older than 10 seconds is treated as abandoned, recorded, and skipped without
 deleting it. Refunds record their own budget source; failures leave the remaining
-allowance marked unavailable.
+allowance marked unavailable while preserving the reservation's budget state.
+An abandoned lock found during refund is recorded as a refund reason, without
+claiming that the completed wait was skipped. The concise failure-log
+`measurements` block keeps each attempt's `load1` and the second attempt's
+quiet-wait result ahead of task attribution, so log truncation cannot hide them.
 
 Chrome installation runs hosted-only. Self-hosted jobs first use a non-empty,
 executable `BROWSER_PATH`; otherwise they resolve `chromium`, `chromium-browser`,
@@ -2519,9 +2524,12 @@ new wording, changed inputs and vanished values. The historical non-auth page
 hashes from `a941776` and builder hashes from `fa6db1d` remain unchanged.
 The Node fixture yields an event-loop turn between page cases (JOED-181).
 Without that turn, its in-memory reads chain microtasks across thousands of
-cases and delay TAP output, making the combined UI run appear stuck after
-the cold account-expiry test. A two-case regression checks that queued
-progress callbacks run; the matrix and its exact oracles stay intact.
+cases and delay test-runner progress output, making the combined UI run appear
+stuck after the cold account-expiry test. This starvation shows on macOS because
+stdout pipes are written asynchronously there, so flushing needs an event-loop
+turn; Linux writes stdout pipes synchronously. A regression counts progress
+callbacks across a small slice of the real matrix loop; the exhaustive matrix
+and its exact oracles stay intact.
 `test/signed-out-fix5.mjs` and `test/signed-out-fix6.mjs` retain inert/modal,
 hover/focus/key, pre-expiry timer, version clipboard, collapsed-section,
 abandoned-write, board-settings GET and frozen account-history regressions.

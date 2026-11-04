@@ -1,7 +1,7 @@
 // The actual app, native page/worker transports, one owned headless browser.
 import assert from 'node:assert/strict';
 import { nativeAuthShapes, reasons, widths, screens, pageFixture, dirtyPreview, retainedDocument, assertSignedOutPage, blame } from '../../test/fixtures/signed-out-cases.mjs';
-import { parseSignedOutArgs, planSignedOutMatrix } from '../signed-out-plan.mjs';
+import { nativeAuthPaths, parseSignedOutArgs, planSignedOutMatrix } from '../signed-out-plan.mjs';
 import { history as accountHistory } from '../../test/fixtures/account-fixtures.mjs';
 import { launch, openPage } from './cdp.mjs';
 import { configure, waitFor } from './shots.mjs';
@@ -50,11 +50,17 @@ try {
         visited.add(`${shape}/${path}`);
         // Manual 302/303 redirects are native opaqueredirect responses on
         // both page and worker fetches, independently for each endpoint.
-        if (['302 to SSO', '303 to SSO', 'opaqueredirect'].includes(shape))
+        const authPath = nativeAuthPaths[shape];
+        if (authPath === 'redirect')
           await send(shape === '303 to SSO' ? 303 : 302, '', [{ name: 'Location', value: 'https://sso.example.invalid/sign_in' }]);
-        else if (shape.startsWith('HTML')) await send(200, shape === 'HTML fragment' ? '<form>Sign in</form>' : '<!doctype html><html><body>Sign in</body></html>',
-          shape === 'HTML content type' ? [{ name: 'Content-Type', value: 'text/html' }] : []);
-        else await send(Number(shape), '{}');
+        else if (authPath === 'html-content-type' || authPath === 'html-body')
+          await send(200, shape === 'HTML fragment' ? '<form>Sign in</form>' : '<!doctype html><html><body>Sign in</body></html>',
+            authPath === 'html-content-type' ? [{ name: 'Content-Type', value: 'text/html' }] : []);
+        else if (authPath === 'status') {
+          const status = Number(shape);
+          assert.ok([401, 403].includes(status), `Invalid status auth shape: ${shape}`);
+          await send(status, '{}');
+        } else throw new Error(`Unclassified native auth shape: ${shape}`);
         return;
       }
       const value = path === 'state.json' ? { serverNow: f.data.receivedAt, feeds: { data: { value: f.data, reason } }, panels: reason ? panels() : {} }
