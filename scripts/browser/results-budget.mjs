@@ -9,7 +9,7 @@ import { largeResults } from './results.mjs';
 import { VIEWPORTS, configure, load, settle, waitFor } from './shots.mjs';
 import { decideTaskGuard, TIMING_GUARDS } from './budget.mjs';
 import { captureMachineLoad, machineLoadTable, waitForQuietHost, quietWaitCells } from './machine-load.mjs';
-import { runReferenceProbe } from './reference-probe.mjs';
+import { runReferenceProbe, captureReferenceProbe, probeCell } from './reference-probe.mjs';
 
 const max = list => (list.length ? Math.max(...list) : NaN);
 
@@ -69,17 +69,17 @@ export async function runResultsBudget({ page, newBoard, check, limits, serve, s
       await configure(page, viewport, 'light');
       const conditions = result => Object.assign({}, ...result.checks.map(c => c.conditions));
       const firstLoad = sampleLoad();
-      const firstProbe = await probe(page);
+      const firstProbe = await captureReferenceProbe(page, probe, waitFor);
       const first = await measure(viewport);
       let decision = decideTaskGuard(conditions(first), null, limits);
       // Two explicit calls: only a CI timing-only breach gets a second sample.
       const quietWait = decision.remeasure ? await waitForQuiet() : null;
       const secondLoad = decision.remeasure ? sampleLoad() : null;
-      const secondProbe = decision.remeasure ? await probe(page) : null;
+      const secondProbe = decision.remeasure ? await captureReferenceProbe(page, probe, waitFor) : null;
       const second = decision.remeasure ? await measure(viewport) : null;
       if (second) decision = decideTaskGuard(conditions(first), conditions(second), limits);
       const rows = (decision.remeasured ? [first, second] : [first]).map((result, i) => ({ ...result.row,
-        machineLoad: i === 0 ? firstLoad : secondLoad, probe: i === 0 ? firstProbe : secondProbe,
+        machineLoad: i === 0 ? firstLoad : secondLoad, ...(i === 0 ? firstProbe : secondProbe),
         ...(i === 1 ? { quietWait } : {}),
         attempt: i + 1, attempts: decision.attempts, remeasured: decision.remeasured }));
       traces.push(...rows);
@@ -92,7 +92,7 @@ export async function runResultsBudget({ page, newBoard, check, limits, serve, s
           // Keep both concise samples ahead of potentially large task lists.
           ...(decision.remeasured ? { measurements: rows.map(r => ({ attempt: r.attempt,
             switchMs: r.switchWorst, taskMs: r.longTasks.length ? max(r.longTasks) : null,
-            load1: r.machineLoad?.loadavg?.[0] ?? null, probeMs: r.probe.medianMs,
+            load1: r.machineLoad?.loadavg?.[0] ?? null, probeMs: r.probeMs,
             ...(r.quietWait ? { quietWait: { waitedSeconds: r.quietWait.waitedSeconds, quiet: r.quietWait.quiet,
               threshold: r.quietWait.threshold, skipped: r.quietWait.skipped, skipReason: r.quietWait.skipReason } } : {}) })) } : {}),
           offendingTasks: rows.at(-1).longTasks.filter(ms => ms >= limits.taskMs),
@@ -105,9 +105,9 @@ export async function runResultsBudget({ page, newBoard, check, limits, serve, s
 
 export function resultsBudgetTable(traces, limits) {
   const remeasured = traces.some(r => r.remeasured);
-  return `| Width | Record | Probe median (ms) |${remeasured ? ' Attempt | Quiet wait seconds | Quiet reached | Quiet threshold (load1) | Wait start load1 | Job wait budget before (s) | Job wait budget after (s) | Wait skipped | Skip reason | Budget state |' : ''} Results render worst (ms) | Renders | Long task worst (ms) | Long tasks (≥ 50 ms) | Tasks ≥ ${limits.taskMs} ms |
+  return `| Width | Record | Probe layout / JS (ms) |${remeasured ? ' Attempt | Quiet wait seconds | Quiet reached | Quiet threshold (load1) | Wait start load1 | Job wait budget before (s) | Job wait budget after (s) | Wait skipped | Skip reason | Budget state |' : ''} Results render worst (ms) | Renders | Long task worst (ms) | Long tasks (≥ 50 ms) | Tasks ≥ ${limits.taskMs} ms |
 | --- | --- | --- |${remeasured ? ' --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |' : ''} --- | --- | --- | --- | --- |
-${traces.map(r => `| ${r.viewport} | ${r.phase} | ${r.probe?.medianMs?.toFixed(1) ?? 'unavailable'} |${remeasured ? ` ${r.attempt}/${r.attempts}${r.remeasured ? ' (re-measured)' : ''} |${quietWaitCells(r.quietWait)}` : ''} ${r.switchWorst.toFixed(1)} | ${r.switches} | ${r.longTasks.length ? max(r.longTasks).toFixed(1) : '—'} | ${r.longTasks.length} | ${r.longTasks.filter(ms => ms >= limits.taskMs).length} |`).join('\n')}
+${traces.map(r => `| ${r.viewport} | ${r.phase} | ${probeCell(r)} |${remeasured ? ` ${r.attempt}/${r.attempts}${r.remeasured ? ' (re-measured)' : ''} |${quietWaitCells(r.quietWait)}` : ''} ${r.switchWorst.toFixed(1)} | ${r.switches} | ${r.longTasks.length ? max(r.longTasks).toFixed(1) : '—'} | ${r.longTasks.length} | ${r.longTasks.filter(ms => ms >= limits.taskMs).length} |`).join('\n')}
 
 ${machineLoadTable(traces)}
 `;

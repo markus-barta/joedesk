@@ -552,11 +552,14 @@ quiet-wait result ahead of task attribution, so log truncation cannot hide them.
 
 JOED-186 records a fixed synthetic table/layout and JavaScript probe before
 every Board and Results attempt, including re-measurements and the shared
-reference-device run; seven repetitions report median/min/max milliseconds.
-It gates nothing yet: the probe runs before navigation opens the budget windows,
-and its median appears beside each attempt in the budget/load tables and concise
-failure measurements. Phase 2 will scale the CI guard by `probeNow / probeQuiet`,
-capped using calibration data; a slowdown above the cap will fail.
+reference-device run; seven repetitions in a fresh `about:blank` document report
+separate layout and JS medians plus total median/min/max milliseconds.
+It gates nothing yet: a fresh navigation opens the budget windows afterward,
+the budget/load tables show layout / JS, concise failure measurements keep the
+total median as `probeMs`, and a probe error records null values with a short
+`unavailable` reason while the budget run continues. Phase 2 will scale the CI
+guard by `probeNow / probeQuiet`, capped using calibration data; a slowdown above
+the cap will fail.
 
 Chrome installation runs hosted-only. Self-hosted jobs first use a non-empty,
 executable `BROWSER_PATH`; otherwise they resolve `chromium`, `chromium-browser`,

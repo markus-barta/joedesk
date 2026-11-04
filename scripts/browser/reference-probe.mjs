@@ -3,7 +3,7 @@
 // on a quiet laptop (~1 s on a slow host). No calibration or adaptive work.
 // Keep this function self-contained: CDP evaluates it in the page, once.
 export function referenceProbeWorkload() {
-  const durations = [];
+  const durations = [], layouts = [], scripts = [];
   for (let rep = 0; rep < 7; rep++) {
     const start = performance.now();
     const host = document.createElement('div');
@@ -27,18 +27,46 @@ export function referenceProbeWorkload() {
       document.documentElement.append(host);
       table.getBoundingClientRect(); // Force style and layout while connected.
     } finally { host.remove(); }
+    const layoutEnd = performance.now();
     let checksum = 0;
-    for (let i = 0; i < 1000000; i++) checksum = Math.imul(checksum ^ i, 16777619) >>> 0;
+    const imul = Math.imul;
+    // ~10 ms of JS per rep on a quiet laptop, comparable to DOM/layout.
+    for (let i = 0; i < 10000000; i++) checksum = imul(checksum ^ i, 16777619) >>> 0;
     // Consume the CPU result without retaining state in the page.
     if (!Number.isFinite(checksum)) throw new Error('Invalid reference probe checksum');
-    durations.push(performance.now() - start);
+    const end = performance.now();
+    layouts.push(layoutEnd - start);
+    scripts.push(end - layoutEnd);
+    durations.push(end - start);
   }
   durations.sort((a, b) => a - b);
-  return { medianMs: durations[3], minMs: durations[0], maxMs: durations[6], reps: durations.length };
+  layouts.sort((a, b) => a - b);
+  scripts.sort((a, b) => a - b);
+  return { layoutMedianMs: layouts[3], jsMedianMs: scripts[3], medianMs: durations[3], minMs: durations[0], maxMs: durations[6], reps: durations.length };
 }
 
 // Call before navigation installs the attempt's observer / timing windows.
 // The new document also discards buffered tasks from this evaluate call.
 export async function runReferenceProbe(page) {
   return page.evaluate(`(${referenceProbeWorkload.toString()})()`);
+}
+
+// Discard the previous JoeDesk document (including pending layout) before
+// probing. The attempt's existing load() still opens a fresh measured page.
+// Evidence failures must never prevent that attempt or change its decisions.
+export async function captureReferenceProbe(page, probe, waitFor) {
+  try {
+    await page.s('Page.navigate', { url: 'about:blank' });
+    await waitFor(page, `location.href === 'about:blank' && document.readyState === 'complete'`);
+    const result = await probe(page);
+    return { probe: result, probeMs: result.medianMs };
+  } catch (error) {
+    const probeReason = String(error?.message ?? error).replace(/[|\r\n]/g, ' ').slice(0, 60);
+    return { probe: null, probeMs: null, probeReason };
+  }
+}
+
+export function probeCell(row) {
+  return row.probe ? `${row.probe.layoutMedianMs.toFixed(1)} / ${row.probe.jsMedianMs.toFixed(1)}`
+    : `unavailable${row.probeReason ? ` (${row.probeReason})` : ''}`;
 }
