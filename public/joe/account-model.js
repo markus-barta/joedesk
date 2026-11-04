@@ -23,8 +23,9 @@ export const RANGE_TITLE = Object.freeze({ '1D': 'The last day', '5D': 'The last
 export const RANGE_WORD = Object.freeze({ '1D': 'over the last day', '5D': 'over the last 5 days', '1M': 'over the last month', '6M': 'over the last 6 months',
   YTD: 'since 1 January', '1Y': 'over the last year', All: 'everything recorded' });
 export const sourceOf = range => (range === '1D' || range === '5D' ? 'short' : 'daily');
-// Snapshots arrive every few seconds in the session and every 15 minutes
-// overnight: a longer interval between two of them is a gap, never joined.
+// Snapshots arrive about every 30 seconds; compaction keeps at least one
+// point per 15 minutes wherever snapshots were recorded. Over 20 minutes
+// between two points is a gap, never joined.
 // Closes are joined only from one calendar day to the next.
 export const SHORT_GAP_MS = 20 * MIN;
 // How far a change may reach for its starting value: an observation this
