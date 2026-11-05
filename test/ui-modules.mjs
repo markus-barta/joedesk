@@ -3358,7 +3358,7 @@ function ratioCalibration() {
   return { status: 'calibrated', cap: 3,
     quiet: Object.fromEntries(['1440', '1024', '390'].map(width => [width,
       Object.fromEntries(['board-live', 'results'].map(kind => [kind, { layoutMedianMs: 4, jsMedianMs: 6, medianMs: 10 }]))])),
-    source: { runId: 'quiet-fixture-187', attempt: 1, capturedAt: '2026-11-04T10:00:00.000Z', host: 'quiet-fixture', chrome: 'HeadlessChrome fixture' } };
+    source: { runId: '41276169961', attempt: 1, capturedAt: '2026-11-04T10:00:00.000Z', host: 'quiet-fixture', chrome: 'HeadlessChrome fixture' } };
 }
 const ratioProbe = medianMs => async () => ({ layoutMedianMs: medianMs * 0.4, jsMedianMs: medianMs * 0.6, medianMs, minMs: medianMs, maxMs: medianMs, reps: 7 });
 async function ratioRun(runner, sample, options = {}) {
@@ -3630,7 +3630,7 @@ test('JOED-187 (e): a missing or malformed probe falls back to k = 1 with visibl
       assert.ok(run.checks.every(c => c.detail.measurements.every(m => m.k === 1 && /probe unavailable/.test(m.ratioReason))));
       const table = runner === 'Board' ? budgetTable(run.traces, CI_GUARD) : resultsBudgetTable(run.traces, CI_GUARD);
       assert.match(table, /probe unavailable: k = 1, absolute guards/);
-      assert.match(table, /calibrated: run quiet-fixture-187/);
+      assert.match(table, /calibrated: run 41276169961/);
     }
   }
 });
@@ -3648,8 +3648,8 @@ test('JOED-187 (i): single and repeated failure lines retain per-attempt k and l
       assert.ok(messages.length > 0);
       for (const message of messages) {
         assert.ok(message.indexOf('"measurements"') < message.indexOf('"offendingTasks"'));
-        assert.ok(message.indexOf('calibrated: run quiet-fixture-187') < message.indexOf('"offendingTasks"'));
-        assert.ok(message.includes('calibrated: run quiet-fixture-187'));
+        assert.ok(message.indexOf('calibrated: run 41276169961') < message.indexOf('"offendingTasks"'));
+        assert.ok(message.includes('calibrated: run 41276169961'));
         const measurements = JSON.parse(message.match(/"measurements":(\[.*?\])/)[1]);
         assert.equal(measurements.length, functional ? 1 : 2);
         for (const m of measurements) { assert.equal(m.k, 1.6); assert.equal(m.hostTooSlowToJudge, false); assert.deepEqual(m.limitMs, { patchMs: 64, historyMs: 200, taskMs: 200 }); }

@@ -606,7 +606,9 @@ runs on the same host and Chrome, then pass their evidence files to
 `node scripts/probe-calibrate.mjs /path/to/p3/index.md /path/to/p4/index.md`.
 A combined index or JSON evidence bundle can include several runs. The indices
 include lossless JSON probe evidence with provenance; JSON input is an object
-or array of `{ source, traces }` bundles. `local-…` run IDs are refused. Probe
+or array of `{ source, traces }` bundles. Calibration evidence and records require
+GitHub Actions run IDs: strings of 1–20 ASCII digits with no leading zero
+(`/^[1-9][0-9]{0,19}$/`); `local-…` and other run IDs are refused. Probe
 capture records its own timestamp just before the workload; `source.capturedAt`
 is the latest actual probe time, rather than the browser launch time. Every
 recorded attempt must have known load1 < 5 and an available positive probe;
@@ -614,8 +616,11 @@ each run (ID and attempt) must include all three widths and both kinds across
 its evidence files (a P3 index plus each P4 zone index is accepted). Duplicate
 probe evidence, identified by run, attempt, viewport, cold/live bucket, kind and
 probe capture instant in integer milliseconds, is refused even if timestamp
-spelling or the phase name within its bucket changes. Unparseable timestamps
-are refused. The five-run cap counts distinct runs, not files.
+spelling or the phase name within its bucket changes. Any timestamp that is not
+strict UTC `YYYY-MM-DDTHH:mm:ssZ` with optional three-digit milliseconds
+(`YYYY-MM-DDTHH:mm:ss.sssZ`) is refused, including parseable timezone offsets;
+invalid calendar dates are also refused. The five-run cap counts distinct runs,
+not files.
 The tool takes the median of recorded live/Results medians within each width
 and kind across the quiet runs. It prints per-cell min/max
 spread across those samples and per-width cold/live total-median ratios to stderr (or an explicit unavailable

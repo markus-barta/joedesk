@@ -39,10 +39,10 @@ export function validateCalibration(record) {
 }
 export function validateCalibrationSource(source) {
   keys(source, ['runId', 'attempt', 'capturedAt', 'host', 'chrome'], 'source fields');
-  for (const field of ['runId', 'host', 'chrome']) {
+  if (typeof source.runId !== 'string' || !/^[1-9][0-9]{0,19}$/.test(source.runId)) fail('source.runId must be a GitHub Actions run id');
+  for (const field of ['host', 'chrome']) {
     if (typeof source[field] !== 'string' || !source[field].trim() || /[\x00-\x1f|`]/.test(source[field])) fail(`source.${field}`);
   }
-  if (source.runId.startsWith('local-')) fail('source.runId must be a CI run, not local-…');
   if (!Number.isInteger(source.attempt) || source.attempt < 1) fail('source.attempt');
   if (typeof source.capturedAt !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z$/.test(source.capturedAt) ||
     !Number.isFinite(Date.parse(source.capturedAt)) ||

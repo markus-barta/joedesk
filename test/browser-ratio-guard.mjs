@@ -72,9 +72,38 @@ test('JOED-187 (g): strict calibration validator rejects malformed records and a
   }
 });
 
+test('JOED-187 L1: calibration evidence and records require GitHub run ids', () => {
+  const record = calibrated();
+  for (const runId of ['123 ', '12\u00a03', '12\u200b3', 'abc', 'local-42', '0', '012', '123456789012345678901', '', 41276169961, null]) {
+    const invalid = evidence(); invalid.source.runId = runId;
+    assert.throws(() => calibrateProbe([invalid]), /source.runId/);
+    assert.throws(() => validateCalibration({ ...record, source: { ...record.source, runId } }), /source.runId/);
+    assert.throws(() => validateCalibration({ ...record, sources: [{ ...record.source, runId }, record.source] }), /source.runId/);
+  }
+  for (const runId of ['41276169961', '1', '12345678901234567890']) {
+    const valid = evidence(); valid.source.runId = runId;
+    assert.equal(calibrateProbe([valid]).source.runId, runId);
+    assert.equal(validateCalibration({ ...record, source: { ...record.source, runId } }).source.runId, runId);
+  }
+});
+
+test('JOED-187 L1: local run sources keep absolute guards and lossless evidence without calibration validation', () => {
+  const local = evidence(); local.source.runId = 'local-42';
+  const runSource = local.source;
+  const uncalibrated = validateCalibration({ status: 'uncalibrated', cap: 3 });
+  const guard = attemptGuard(CI_GUARD, true, uncalibrated, '1440', 'board-live', captured(16), runSource);
+  assert.equal(guard.k, 1);
+  assert.deepEqual(guard.limitMs, { patchMs: 40, historyMs: 125, taskMs: 125 });
+  assert.equal(guard.ratioReason, 'uncalibrated: absolute guards');
+  assert.equal(attemptGuard(CI_GUARD, true, calibrated(), '1440', 'board-live', captured(16), runSource).k, 1.6);
+  const [written] = readProbeEvidence(calibrationEvidence(local.traces, runSource));
+  assert.deepEqual(written.source, runSource);
+  assert.throws(() => calibrateProbe([written]), /source.runId/);
+});
+
 test('JOED-187 L2/L6/L7: several quiet runs use median per cell, retain provenance, and print spread and cold/live ratios', async () => {
   const records = [1, 2, 4].map((scale, i) => {
-    const r = evidence(); r.source.runId = `quiet-ci-${i}`;
+    const r = evidence(); r.source.runId = `4127616996${i}`;
     // A launch timestamp deliberately later than the probe must be ignored.
     r.source.capturedAt = '2026-11-04T12:00:00.000Z';
     for (const row of r.traces) {
@@ -93,9 +122,9 @@ test('JOED-187 L2/L6/L7: several quiet runs use median per cell, retain provenan
   assert.deepEqual(spread['1440']['board-live'].medianMs, { min: 10, max: 40 });
   assert.deepEqual(coldLiveRatio, { 1440: 1.5, 1024: 1.5, 390: 1.5 });
   assert.equal(record.sources.length, 3);
-  assert.deepEqual(record.sources.map(s => s.runId), ['quiet-ci-0', 'quiet-ci-1', 'quiet-ci-2']);
+  assert.deepEqual(record.sources.map(s => s.runId), ['41276169960', '41276169961', '41276169962']);
   assert.equal(record.source.capturedAt, '2026-11-04T10:02:00.000Z');
-  assert.ok(calibrationSummary(record).includes('quiet-ci-0/2 at 2026-11-04T10:00:00.000Z'));
+  assert.ok(calibrationSummary(record).includes('41276169960/2 at 2026-11-04T10:00:00.000Z'));
   assert.equal(calibrateProbe(records.slice(0, 2)).quiet['1440']['board-live'].medianMs, 15, 'even run counts use the middle pair');
   const repeated = structuredClone(records);
   repeated[0].traces.push({ ...repeated[0].traces[0], probe: { layoutMedianMs: 400, jsMedianMs: 600, medianMs: 1000 } });
@@ -130,7 +159,7 @@ test('JOED-187 L2/L6/L7: several quiet runs use median per cell, retain provenan
     assert.equal(split.status, 0, split.stderr);
     assert.deepEqual(JSON.parse(split.stdout), calibrateProbe(records.slice(0, 2)));
   } finally { await discard(dir, 'multi-run calibration fixtures'); }
-  assert.throws(() => calibrateProbe(Array.from({ length: 6 }, (_, i) => ({ ...evidence(), source: { ...evidence().source, runId: `ci-${i}` } }))), /1–5/);
+  assert.throws(() => calibrateProbe(Array.from({ length: 6 }, (_, i) => ({ ...evidence(), source: { ...evidence().source, runId: `4127616996${i}` } }))), /1–5/);
   for (const mutate of [r => { r.source.runId = 'local-42'; }, r => { delete r.traces[0].probeCapturedAt; }]) {
     const invalid = evidence(); mutate(invalid); assert.throws(() => calibrateProbe([invalid]));
   }
@@ -172,9 +201,11 @@ test('JOED-187 L1: calibration refuses unparseable probe timestamps', () => {
   }
 });
 
-test('JOED-187 L1: calibration accepts matching probe instants from genuinely different runs', () => {
+test('JOED-187 L1: calibration accepts genuinely different runs with distinct probe instants', () => {
   const first = evidence(), second = evidence();
-  second.source.runId = 'quiet-fixture-188';
+  second.source.runId = '41276169962';
+  second.source.capturedAt = '2026-11-04T11:00:00.000Z';
+  for (const row of second.traces) row.probeCapturedAt = second.source.capturedAt;
   const result = calibrateProbe([first, second]);
   assert.deepEqual(result.quiet, calibrated().quiet);
   assert.deepEqual(result.sources.map(source => source.runId), [first.source.runId, second.source.runId]);
