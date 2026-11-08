@@ -2,10 +2,20 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "261101023838.0.0",
+    APP_VERSION: "261104111323.0.0",
     VERSION_SCHEME: "inspr-calver-3",
-    RELEASE_SEQUENCE: 43,
+    RELEASE_SEQUENCE: 44,
     VERSION_HISTORY: [
+      {
+        version: "261104111323.0.0",
+        versionScheme: "inspr-calver-3",
+        date: "2026-11-04",
+        title: "Honest account chart gaps",
+        changes: [
+          "History thinned to save space now stays connected; only real outages and unavailable values show as gaps.",
+          "History thinned before this release keeps its old gaps until it ages out within 14 days.",
+        ],
+      },
       {
         version: "261101023838.0.0",
         versionScheme: "inspr-calver-3",

@@ -1,0 +1,50 @@
+{
+  "schema": "joedesk.adoption.v1",
+  "version": "261101023838.0.0",
+  "version_scheme": "inspr-calver-3",
+  "release_channel": "stable",
+  "release_sequence": 43,
+  "source": {
+    "commit": "36fecfeb7e56400db3076304d150e9eeb2beb05b",
+    "tree": "e2dccfe0e162fd6d04c58e03923e9e326e10605c"
+  },
+  "release_set_sha256": "4ede991c4a3cd228d5cb3cb35a6f03f9f4c2a5656b1d847315a33edb287f34f3",
+  "image_digest": "sha256:8b79c4c881f4052993f89b356fb2e7d22064f735cbbdeccc698613f9218064a9",
+  "contract_set_sha256": "c266b39e33e6e15be491263b0ca3575598dd264da3e1a9f6d5a147fc9f1bd49b",
+  "validation_run_id": "41276169961",
+  "decisions": [
+    "d460fa43-0d9d-4831-8897-9248321cf9a0",
+    "dcd81341-18c4-42d8-a543-b0d70ef6fa00",
+    "6b7ec808-4fca-4971-9fd1-d092aef8f582"
+  ],
+  "deployment": {
+    "deployed_at": "2026-11-01T11:14:45Z",
+    "operator_ticket": "JOED-177",
+    "rollback_reference": "JOED-177: revert the csb0 re-pins (nixcfg #1205, merge ca98671d9b2327938d0294741fade9f2b2bc69e2, and never-live #1200) and switch csb0 to the previous generation c8z42klcq7r46f6zdp1p2nbbmn5xvawb-nixos-system-csb0 with the retained sequence-41 image csb0-joe-board:source-daa49125c26af7fd4e19855327fd01f5eabf23d5 (sha256:956c977f8d9eba3b1f2948578f8888455a33492875fae1833084de5b04f7b26c, pull_policy never); hsb0 untouched; backup board-pre-43-20261101T111411Z.tar"
+  },
+  "live_checks": {
+    "joed_live_check": {
+      "status": "pass",
+      "checked_at": "2026-11-01T11:16:59Z"
+    },
+    "ops_t76_live": {
+      "status": "pass",
+      "checked_at": "2026-11-01T11:16:14Z"
+    },
+    "smoke_release": {
+      "status": "pass",
+      "checked_at": "2026-11-01T11:16:14Z"
+    },
+    "spoof_check": {
+      "status": "pass",
+      "checked_at": "2026-11-01T11:16:59Z"
+    }
+  },
+  "markus_ui_look": {
+    "status": "delegated",
+    "checked_at": "2026-11-01T11:17:00Z",
+    "performed_by": "JOED",
+    "delegation": "JOED-42 comment 2026-10-20: Markus delegated the post-switch look to JOED; GET-only served shell/app look with the QA actor on loopback: release 43 (About 43 > 42, 62 version references, none stale, JOED-173 and JOED-175 served); all feeds fresh, gateway confirmed, data seq advanced after the switch; J/Joe/Joel equity and OPEN exact; Today sod_missing, KEEP position_stale, cash source_unavailable, all before the switch too; same-build agm2 CI screenshots (main run 41276169961)"
+  },
+  "adopted_at": "2026-11-01T11:18:26Z"
+}

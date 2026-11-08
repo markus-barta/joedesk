@@ -1,17 +1,21 @@
 // The actual app, native page/worker transports, one owned headless browser.
 import assert from 'node:assert/strict';
-import { authShapes, reasons, widths, screens, pageFixture, dirtyPreview, retainedDocument, assertSignedOutPage, blame } from '../../test/fixtures/signed-out-cases.mjs';
+import { nativeAuthShapes, reasons, widths, screens, pageFixture, dirtyPreview, retainedDocument, assertSignedOutPage, blame } from '../../test/fixtures/signed-out-cases.mjs';
+import { nativeAuthPaths, parseSignedOutArgs, planSignedOutMatrix } from '../signed-out-plan.mjs';
 import { history as accountHistory } from '../../test/fixtures/account-fixtures.mjs';
 import { launch, openPage } from './cdp.mjs';
 import { configure, waitFor } from './shots.mjs';
 import { startBoard, ACTOR } from './board.mjs';
 
+const nativeShapes = nativeAuthShapes;
+const endpoints = ['state.json', 'history.json', 'history-continuity.json', 'results.json', 'fleet-config.json', 'fleet-config/actions.json', 'board-settings.json', 'account-history.json'];
+const plan = planSignedOutMatrix({ mode: parseSignedOutArgs(process.argv.slice(2)), widths, shapes: nativeShapes, reasons, screens, endpoints });
+console.log(`Signed-out matrix: ${plan.mode}; ${plan.caseCount} planned cases (${plan.matrixCases} matrix, ${plan.opaqueCases} opaque-only, ${plan.invariantCases} cross-shape DOM); full shapes: ${plan.views.map(view => `${view.width}px=${view.fullShape ?? 'all'}`).join(', ')}`);
 const f = pageFixture(), account = accountHistory();
 const board = await startBoard({ fleetConfig: f['fleet-config'], history: f.history });
 board.setNow(f.data.receivedAt);
 let browser, checked = 0, stage = 'launch';
 const failures = [], visited = new Set();
-const endpoints = ['state.json', 'history.json', 'history-continuity.json', 'results.json', 'fleet-config.json', 'fleet-config/actions.json', 'board-settings.json', 'account-history.json'];
 try {
   browser = await launch({ commandTimeout: 30000 });
   const page = await openPage(browser, { headers: { 'x-auth-request-user': ACTOR } });
@@ -46,11 +50,17 @@ try {
         visited.add(`${shape}/${path}`);
         // Manual 302/303 redirects are native opaqueredirect responses on
         // both page and worker fetches, independently for each endpoint.
-        if (['302 to SSO', '303 to SSO', 'opaqueredirect'].includes(shape))
+        const authPath = nativeAuthPaths[shape];
+        if (authPath === 'redirect')
           await send(shape === '303 to SSO' ? 303 : 302, '', [{ name: 'Location', value: 'https://sso.example.invalid/sign_in' }]);
-        else if (shape.startsWith('HTML')) await send(200, shape === 'HTML fragment' ? '<form>Sign in</form>' : '<!doctype html><html><body>Sign in</body></html>',
-          shape === 'HTML content type' ? [{ name: 'Content-Type', value: 'text/html' }] : []);
-        else await send(Number(shape), '{}');
+        else if (authPath === 'html-content-type' || authPath === 'html-body')
+          await send(200, shape === 'HTML fragment' ? '<form>Sign in</form>' : '<!doctype html><html><body>Sign in</body></html>',
+            authPath === 'html-content-type' ? [{ name: 'Content-Type', value: 'text/html' }] : []);
+        else if (authPath === 'status') {
+          const status = Number(shape);
+          assert.ok([401, 403].includes(status), `Invalid status auth shape: ${shape}`);
+          await send(status, '{}');
+        } else throw new Error(`Unclassified native auth shape: ${shape}`);
         return;
       }
       const value = path === 'state.json' ? { serverNow: f.data.receivedAt, feeds: { data: { value: f.data, reason } }, panels: reason ? panels() : {} }
@@ -130,7 +140,7 @@ try {
     await page.evaluate(`window.__boardTime += ${ms}; for (const tick of window.__boardIntervals.values()) tick();`);
     await refresh(); await settle();
   };
-  const check = async (screen, tag) => {
+  const check = async (screen, tag, compareFrozen = () => {}) => {
     await go(screen);
     // Clock time is stable until advance() invokes the real page timers.
     const before = await capture();
@@ -143,7 +153,9 @@ try {
     else if (endpoint === 'account-history.json') await page.evaluate('window.__joedesk.refreshAccount()');
     else await page.evaluate(`import('/joe/board-settings.js').then(m => m.refreshBoardSettings())`);
     await refresh();
-    assertSignedOutPage(await capture(), before, tag);
+    const frozen = await capture();
+    assertSignedOutPage(frozen, before, tag);
+    compareFrozen(frozen);
     await frozenVisuals(tag);
     await interact();
     assertSignedOutPage(await capture(), before, `${tag}/interactions`);
@@ -163,10 +175,12 @@ try {
     checked++;
     if (checked % 100 === 0) console.log(`${checked} complete DOM comparisons passed`);
   };
-  // A followed cross-origin redirect is a defensive transport-only shape:
-  // native fetch with redirect:manual cannot produce it. Unit tests cover it.
-  const nativeShapes = authShapes.filter(s => s !== 'followed cross-origin redirect');
-  for (const width of widths) {
+  for (const view of plan.views) {
+    const { width } = view;
+    // The preceding width's invariant leaves its sampled reason/auth shape
+    // behind. Start each width with neutral responses, including no reason
+    // header that could override fix13's cold feed_not_received body.
+    expired = fail503 = false; shape = '401'; reason = only = nonAuthOnly = null;
     await configure(page, { name: String(width), width, height: 1000, mobile: width === 390 }, 'light');
     stage = `${width}: initial navigation`;
     await page.s('Page.navigate', { url: board.url });
@@ -197,6 +211,8 @@ try {
     assert.equal((await capture()).marked, true, 'state 401 freezes the populated board');
     const priorEquity = f.data.brokerAccount.equity.amount;
     f.data.seq++; f.data.brokerAccount.equity.amount = '29001';
+    // recover() asserts exactly one new page generation. Install this before
+    // its reload so Results fails from that generation's very first fetch.
     nonAuthOnly = 'results.json';
     await recover();
     assert.deepEqual(await page.evaluate(`({
@@ -315,19 +331,35 @@ try {
     await page.evaluate(`setTimeout(() => document.querySelector('[data-sign-in-reload]').click(), 0)`);
     await waitFor(page, `window.__pageGeneration > ${manualGeneration} && document.documentElement.dataset.ready === '1' && document.getElementById('app').hasAttribute('data-last-known')`);
     await recover();
-    for (const auth of nativeShapes) {
+    for (const { shape: auth, reasons: plannedReasons } of view.matrix) {
       shape = auth; only = null;
-      for (const failureReason of [null, ...reasons]) {
+      for (const failureReason of plannedReasons) {
         reason = failureReason; await refresh(); await settle();
-        for (const screen of screens) await check(screen, `${width}/${auth}/${failureReason}/${screen}`);
+        for (const screen of plan.screens) await check(screen, `${width}/${auth}/${failureReason}/${screen}`);
       }
-      console.log(`signed-out DOM: ${width}px / ${auth}: all ${reasons.length} reasons + warm values, all pages, 503, timer freeze, minute-boundary checks and recovery`);
+      console.log(`signed-out DOM: ${width}px / ${auth}: ${plannedReasons.length} reason/warm variants, all pages, 503, timer freeze, minute-boundary checks and recovery`);
     }
     // Opaque redirects in isolation on every transport (including real
     // history/results/account workers and the continuity sidecar).
     shape = 'opaqueredirect'; reason = null;
-    for (const endpoint of endpoints) { only = endpoint; for (const screen of screens) await check(screen, `${width}/opaque-only/${endpoint}/${screen}`); }
+    for (const { endpoint, screen } of view.opaque) { only = endpoint; await check(screen, `${width}/opaque-only/${endpoint}/${screen}`); }
+    const reference = new Map();
+    for (const sample of view.invariant) {
+      shape = sample.shape; reason = view.sampledReason; only = null;
+      stage = `${width}/${shape}/${reason}/${sample.screen}: cross-shape DOM invariant`;
+      await go('desk');
+      const generation = await page.evaluate('window.__pageGeneration');
+      await page.s('Page.reload');
+      await waitFor(page, `window.__pageGeneration > ${generation} && document.documentElement.dataset.ready === '1'`);
+      await refresh(); await settle();
+      await page.evaluate('document.fonts.ready.then(() => true)');
+      await check(sample.screen, stage, frozen => {
+        if (reference.has(sample.screen)) assert.deepEqual(frozen, reference.get(sample.screen), `${width}/${reason}/${sample.screen}: signed-out DOM must be identical across native auth shapes (${shape})`);
+        else reference.set(sample.screen, frozen);
+      });
+    }
   }
+  assert.equal(checked, plan.caseCount, `${plan.mode}: executed every planned signed-out case`);
   for (const auth of nativeShapes) for (const endpoint of endpoints) assert.ok(visited.has(`${auth}/${endpoint}`), `${auth}/${endpoint}: actual auth response exercised`);
   console.log(`${checked} signed-out browser cases passed; all native auth shapes exercised on every transport`);
 } catch (error) {

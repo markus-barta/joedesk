@@ -71,7 +71,7 @@ test('runner expression stays hosted by default and for fork PRs even when opted
 });
 
 const ci = parse(workflows.get('ci.yml'));
-test('CI retains every run and locks all seven browser phases once with room for three typical queued jobs', () => {
+test('JOED-180 budget: CI retains every run and sizes all seven locked phases for push and dispatch work', () => {
   assert.equal(ci.concurrency, undefined, 'workflow concurrency must not replace pending PR runs');
   for (const job of Object.values(ci.jobs)) assert.equal(job.concurrency, undefined);
   const steps = ci.jobs.browser.steps.filter(step => /scripts\/(?:browser-p[3456]|browser\/signed-out-pages|preview-capture(?:-ci)?)\.mjs|npm run test:results/.test(step.run ?? ''));
@@ -81,7 +81,7 @@ test('CI retains every run and locks all seven browser phases once with room for
   for (const script of ['browser-p3', 'browser/signed-out-pages', 'browser-p5', 'browser-p6', 'preview-capture', 'preview-capture-ci']) {
     assert.ok(steps[0].run.includes(`scripts/${script}.mjs`));
   }
-  assert.equal(ci.jobs.browser['timeout-minutes'], 60 + 45 + 15);
+  assert.equal(ci.jobs.browser['timeout-minutes'], 60 + 70 + 5 + 15);
 });
 
 function simulateBrowserPhases(t, { event = 'push', fail = '' } = {}) {
@@ -120,7 +120,7 @@ test('combined browser step preserves all phase arguments, Results zone plans an
     assert.equal(commands.length, 7, 'all browser phases execute inside the one shell');
     assert.equal(commands[0][0], `scripts/browser-p3.mjs ${event === 'pull_request' ? '--subset' : '--full'}`);
     assert.equal(commands[0][1], join(dir, 'qa/p3'));
-    assert.deepEqual(commands[1], ['scripts/browser/signed-out-pages.mjs', '', 'UTC']);
+    assert.deepEqual(commands[1], [`scripts/browser/signed-out-pages.mjs ${event === 'pull_request' ? '--subset' : '--full'}`, '', 'UTC']);
     assert.equal(commands[2][1], join(dir, 'qa/p4'));
     assert.ok(commands[2][0].startsWith('run test:results -- '));
     assert.deepEqual(parseResultsGateArgs(commands[2][0].split(' ').slice(3)), event === 'push'
@@ -130,6 +130,15 @@ test('combined browser step preserves all phase arguments, Results zone plans an
     assert.match(commands[4][0], /^scripts\/preview-capture.mjs --base-url http:\/\/127.0.0.1:1\/joe\/ --out /);
     assert.deepEqual(commands[5], [`scripts/preview-capture-ci.mjs ${dir}/joedesk-preview-capture/proxy ${dir}/joedesk-preview-capture/actor`, '', 'UTC']);
     assert.deepEqual(commands[6], ['scripts/browser-p6.mjs', join(dir, 'qa/p6a'), 'UTC']);
+  }
+});
+
+test('JOED-179 signed-out: empty and unknown events default to --full', t => {
+  for (const event of ['', 'unknown_event']) {
+    const { result, commands } = simulateBrowserPhases(t, { event });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(commands[0][0], 'scripts/browser-p3.mjs --full');
+    assert.equal(commands[1][0], 'scripts/browser/signed-out-pages.mjs --full');
   }
 });
 

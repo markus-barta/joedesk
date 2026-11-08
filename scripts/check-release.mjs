@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { reserveVersion, compareReleases } from '../release/versioning.mjs';
 
-export const CLOSURE_SHA256 = '0febbb0cfcaa9daa7a828e5a7686ce941bcf56d09a48dd26b14614ba0899cb55';
+export const CLOSURE_SHA256 = '2b96778bf3c39d8ce3851525259a0b1c6976765da99d1541b8f47f5ca893574f';
 export const PRESENTATION_PIN = Object.freeze({
   source_commit: '01b3080948c21899cbbacbfa3447da6799af1b56',
   config_sha256: 'bf6aa144cd73dc97dc941f0f0914138b04ae0a28fbead5123465b15b1f2a2fd9',
@@ -55,6 +55,7 @@ export function checkRelease({ root = repoRoot } = {}) {
     execFileSync('git', ['ls-files', '--error-unmatch', '--', 'release/closure.json', 'scripts/check-release.mjs', ...names], { cwd: root, stdio: 'pipe' });
   }
   const active = json('release.json'), prep = json('release/preparation.json'), pkg = json('package.json');
+  if (closure.candidate_version !== active.version) throw new Error('closure_candidate_mismatch');
   const reserved = reserveVersion(prep.previous_release, prep.reservation.reserved_at);
   for (const key of Object.keys(reserved)) if (reserved[key] !== prep.reservation[key]) throw new Error('reservation_mismatch');
   if (compareReleases(prep.previous_release, prep.reservation, prep.anchor) !== -1) throw new Error('anchor_order');

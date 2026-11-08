@@ -130,31 +130,33 @@ test('P6 reservation: one UTC second, no collisions, continued sequence, mixed-e
   const later = reserveVersion({ ...next, version_scheme: 'inspr-calendar-v2' }, laterUTC);
   assert.equal(later.version_scheme, 'inspr-calver-3'); assert.equal(later.release_sequence, next.release_sequence + 1);
 });
-test('JOED-177: sequence 43 supersedes undeployed 42, retains deployed 41 and preserves About history', () => {
-  assert.equal(prep.ticket, 'JOED-177');
-  assert.equal(next.release_sequence, 43);
+test('JOED-183: closure names the active candidate version', () => {
+  assert.equal(read('release/closure.json').candidate_version, active.version);
+});
+test('JOED-183: sequence 44 follows adopted 43 and preserves About history', () => {
+  assert.equal(prep.ticket, 'JOED-183');
+  assert.equal(next.release_sequence, 44);
   assert.equal(active.status, 'candidate');
-  assert.equal(active.note, 'When your sign-in expires, keep clearly frozen figures, including after returning with Back or Forward, and reload to sign in again.');
-  const adoption = read('adoption/261030154842.0.0.json');
+  assert.equal(active.note, 'History thinned to save space now stays connected; only real outages and unavailable values show as gaps.');
+  const adoption = read('adoption/261101023838.0.0.json');
   assert.deepEqual(oldRelease, {
-    product: 'JoeDesk', version_scheme: 'inspr-calver-3', version: '261031052151.0.0',
-    release_channel: 'stable', release_sequence: 42, status: 'published-candidate',
-    source_branch: 'main', source_commit: 'a76621e4c36a3ddaa106bfb48f2085333d9fddcd',
-    release_set_ticket: 'JOED-174', disposition: 'superseded-before-deployment',
-    note: 'Published to main; release set verified in run 41215247109 (JOED-174), never live. The only csb0 switch (2026-10-31T16:55Z) rolled back on feeds_not_ready (upstream gateway). Superseded directly by release 43 (JOED-177) per Markus’s 2026-10-29 instruction to skip superseded intermediates.',
+    product: 'JoeDesk', version_scheme: 'inspr-calver-3', version: '261101023838.0.0',
+    release_channel: 'stable', release_sequence: 43, status: 'published-candidate',
+    source_branch: 'main', source_commit: '36fecfeb7e56400db3076304d150e9eeb2beb05b',
+    release_set_ticket: 'JOED-177', disposition: 'deployed', deployed: true,
+    note: 'live on csb0 since 2026-11-01T11:14:45Z (JOED-177); adopted 2026-11-01T11:18:26Z (adoption/261101023838.0.0.json)',
   });
-  assert.equal(Object.hasOwn(oldRelease, 'deployed'), false);
   assert.equal(fs.existsSync(new URL('../adoption/261031052151.0.0.json', import.meta.url)), false);
   assert.equal(adoption.version, lastDeployed.version);
   assert.equal(adoption.release_sequence, lastDeployed.release_sequence);
-  assert.equal(adoption.source.commit, 'daa49125c26af7fd4e19855327fd01f5eabf23d5');
-  assert.equal(adoption.deployment.deployed_at, '2026-10-31T05:04:23Z');
-  assert.equal(adoption.adopted_at, '2026-10-31T05:06:11Z');
+  assert.equal(adoption.source.commit, oldRelease.source_commit);
+  assert.equal(adoption.deployment.deployed_at, '2026-11-01T11:14:45Z');
+  assert.equal(adoption.adopted_at, '2026-11-01T11:18:26Z');
   assert.deepEqual(prep.anchor, { legacy_scheme: 'calendar', last_legacy_version: '26.09.21.12.00',
     last_legacy_sequence: 23, first_calendar_version: '261016151218.0.0', first_calendar_sequence: 24 });
-  assert.equal(lastDeployed.version, '261030154842.0.0');
-  assert.equal(lastDeployed.release_sequence, 41);
-  assert.equal(lastDeployed.note, 'live on csb0 since 2026-10-31T05:04:23Z (JOED-172)');
+  assert.equal(lastDeployed.version, '261101023838.0.0');
+  assert.equal(lastDeployed.release_sequence, 43);
+  assert.equal(lastDeployed.note, 'live on csb0 since 2026-11-01T11:14:45Z (JOED-177)');
   const versionSource = fs.readFileSync(new URL('../public/joe/joe-version.js', import.meta.url), 'utf8');
   const ui = new Function('window', `${versionSource}; return window.JoeVersion;`)({});
   assert.equal(ui.APP_VERSION, active.version);
@@ -163,19 +165,25 @@ test('JOED-177: sequence 43 supersedes undeployed 42, retains deployed 41 and pr
   assert.equal(ui.VERSION_HISTORY[0].date, next.reserved_at.slice(0, 10));
   assert.deepEqual(ui.VERSION_HISTORY[0].changes, [
     active.note,
+    'History thinned before this release keeps its old gaps until it ages out within 14 days.',
   ]);
   assert.deepEqual(ui.VERSION_HISTORY[1], {
-    version: oldRelease.version, versionScheme: 'inspr-calver-3', date: '2026-10-31',
+    version: oldRelease.version, versionScheme: 'inspr-calver-3', date: '2026-11-01',
+    title: 'Clear signed-out figures after returning',
+    changes: ['When your sign-in expires, keep clearly frozen figures, including after returning with Back or Forward, and reload to sign in again.'],
+  });
+  assert.deepEqual(ui.VERSION_HISTORY[2], {
+    version: '261031052151.0.0', versionScheme: 'inspr-calver-3', date: '2026-10-31',
     title: 'Clear signed-out notice',
     changes: ['When your sign-in expires, keep clearly frozen figures and reload to sign in again.'],
   });
-  assert.equal(ui.VERSION_HISTORY[2].version, lastDeployed.version);
-  assert.deepEqual(ui.VERSION_HISTORY[2], {
+  assert.equal(ui.VERSION_HISTORY[1].version, lastDeployed.version);
+  assert.deepEqual(ui.VERSION_HISTORY[3], {
     version: '261030154842.0.0', versionScheme: 'inspr-calver-3', date: '2026-10-30',
     title: 'Faster Results switching',
     changes: ['Switch Results views faster while keeping rows readable.'],
   });
-  assert.deepEqual(ui.VERSION_HISTORY[3], {
+  assert.deepEqual(ui.VERSION_HISTORY[4], {
     version: '261030085000.0.0', versionScheme: 'inspr-calver-3', date: '2026-10-30',
     title: 'Exact Results dates and clearer missing values',
     changes: [
@@ -184,27 +192,27 @@ test('JOED-177: sequence 43 supersedes undeployed 42, retains deployed 41 and pr
       'Get steadier release speed checks by running browser checks one job at a time and recording machine load.',
     ],
   });
-  assert.equal(ui.VERSION_HISTORY[4].version, '261029192345.0.0');
-  assert.equal(ui.VERSION_HISTORY[5].version, '261029075623.0.0');
-  assert.equal(ui.VERSION_HISTORY[6].version, '261028202622.0.0');
-  assert.equal(ui.VERSION_HISTORY[7].version, '261028081016.0.0');
-  assert.equal(ui.VERSION_HISTORY[8].version, '261027124551.0.0');
-  assert.equal(ui.VERSION_HISTORY[9].version, '261026232616.0.0');
-  assert.equal(ui.VERSION_HISTORY[10].version, '261026070713.0.0');
-  assert.equal(ui.VERSION_HISTORY[11].version, '261025221940.0.0');
-  assert.equal(ui.VERSION_HISTORY[12].version, '261025144826.0.0');
-  assert.equal(ui.VERSION_HISTORY[13].version, '261023155418.0.0');
-  assert.equal(ui.VERSION_HISTORY[14].version, '261023100632.0.0');
-  assert.equal(ui.VERSION_HISTORY[15].version, '261021113113.0.0');
-  assert.equal(ui.VERSION_HISTORY[16].version, '261021083537.0.0');
-  assert.equal(ui.VERSION_HISTORY[17].version, '261021015923.0.0');
-  assert.equal(ui.VERSION_HISTORY[18].version, prep.anchor.last_legacy_version);
+  assert.equal(ui.VERSION_HISTORY[5].version, '261029192345.0.0');
+  assert.equal(ui.VERSION_HISTORY[6].version, '261029075623.0.0');
+  assert.equal(ui.VERSION_HISTORY[7].version, '261028202622.0.0');
+  assert.equal(ui.VERSION_HISTORY[8].version, '261028081016.0.0');
+  assert.equal(ui.VERSION_HISTORY[9].version, '261027124551.0.0');
+  assert.equal(ui.VERSION_HISTORY[10].version, '261026232616.0.0');
+  assert.equal(ui.VERSION_HISTORY[11].version, '261026070713.0.0');
+  assert.equal(ui.VERSION_HISTORY[12].version, '261025221940.0.0');
+  assert.equal(ui.VERSION_HISTORY[13].version, '261025144826.0.0');
+  assert.equal(ui.VERSION_HISTORY[14].version, '261023155418.0.0');
+  assert.equal(ui.VERSION_HISTORY[15].version, '261023100632.0.0');
+  assert.equal(ui.VERSION_HISTORY[16].version, '261021113113.0.0');
+  assert.equal(ui.VERSION_HISTORY[17].version, '261021083537.0.0');
+  assert.equal(ui.VERSION_HISTORY[18].version, '261021015923.0.0');
+  assert.equal(ui.VERSION_HISTORY[19].version, prep.anchor.last_legacy_version);
   for (const version of ['261019102825.0.0', prep.anchor.first_calendar_version]) {
     assert.equal(ui.VERSION_HISTORY.some(r => r.version === version), false,
       'About must not imply either superseded candidate was deployed');
   }
 });
-test('JOED-177 check-release: accepts the superseding signed-out board reservation and rejects equal or earlier reservations after integrity verification', t => {
+test('JOED-183 check-release: accepts the honest account chart reservation and rejects equal or earlier reservations after integrity verification', t => {
   const root = temporary(t), closure = read('release/closure.json');
   for (const name of [...closure.files.map(f => f.path), 'release/closure.json', 'scripts/check-release.mjs']) {
     const target = join(root, name); fs.mkdirSync(join(target, '..'), { recursive: true });
@@ -793,6 +801,21 @@ test('P6 normal build verifies pinned offline bundle/closure; corruption, extra,
   }
   const run = () => spawnSync(process.execPath, [join(root, 'scripts/check-release.mjs')], { encoding: 'utf8' });
   assert.equal(run().status, 0);
+  const closurePath = join(root, 'release/closure.json'), closureBytes = fs.readFileSync(closurePath);
+  const checkerPath = join(root, 'scripts/check-release.mjs'), checkerSource = fs.readFileSync(checkerPath, 'utf8');
+  for (const candidate_version of [oldRelease.version, undefined]) {
+    const closure = { ...JSON.parse(closureBytes), candidate_version };
+    const bytes = JSON.stringify(closure, null, 2) + '\n';
+    fs.writeFileSync(closurePath, bytes);
+    // Reseal only this fixture so the checker reaches candidate validation.
+    const pin = createHash('sha256').update(bytes).digest('hex');
+    fs.writeFileSync(checkerPath, checkerSource.replace(/export const CLOSURE_SHA256 = '[a-f0-9]{64}';/, `export const CLOSURE_SHA256 = '${pin}';`));
+    const rejected = run();
+    assert.equal(rejected.status, 1);
+    assert.match(rejected.stderr, /release-check: closure_candidate_mismatch/);
+  }
+  fs.writeFileSync(closurePath, closureBytes);
+  fs.writeFileSync(checkerPath, checkerSource);
   const target = join(root, 'public/joe/app.js'), original = fs.readFileSync(target);
   fs.appendFileSync(target, '\n'); assert.equal(run().status, 1); fs.writeFileSync(target, original);
   const extra = join(root, 'public/joe/extra.js'); fs.writeFileSync(extra, ''); assert.equal(run().status, 1); fs.renameSync(extra, join(root, 'extra.js'));
