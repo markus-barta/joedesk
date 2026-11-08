@@ -177,6 +177,10 @@ try {
   };
   for (const view of plan.views) {
     const { width } = view;
+    // The preceding width's invariant leaves its sampled reason/auth shape
+    // behind. Start each width with neutral responses, including no reason
+    // header that could override fix13's cold feed_not_received body.
+    expired = fail503 = false; shape = '401'; reason = only = nonAuthOnly = null;
     await configure(page, { name: String(width), width, height: 1000, mobile: width === 390 }, 'light');
     stage = `${width}: initial navigation`;
     await page.s('Page.navigate', { url: board.url });
@@ -207,6 +211,8 @@ try {
     assert.equal((await capture()).marked, true, 'state 401 freezes the populated board');
     const priorEquity = f.data.brokerAccount.equity.amount;
     f.data.seq++; f.data.brokerAccount.equity.amount = '29001';
+    // recover() asserts exactly one new page generation. Install this before
+    // its reload so Results fails from that generation's very first fetch.
     nonAuthOnly = 'results.json';
     await recover();
     assert.deepEqual(await page.evaluate(`({

@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
-import { authShapes, nativeAuthShapes, authResponse, reasons, widths, screens } from './fixtures/signed-out-cases.mjs';
+import { authShapes, nativeAuthShapes, authResponse, reasons, widths, screens, pageFixture } from './fixtures/signed-out-cases.mjs';
 import { nativeAuthPaths, parseSignedOutArgs, planSignedOutMatrix } from '../scripts/signed-out-plan.mjs';
+import { acceptRead } from '../contracts/read.mjs';
 import { freshPageSession } from './fixtures/board-session.mjs';
 const { readJSON, classifyResponse, createBoardSession, boardSession, readFailure, AUTH_FAILURE } = await import('../public/joe/transport.js');
 const { createFeed } = await import('../public/joe/feed.js');
@@ -80,6 +81,58 @@ test('JOED-179 sampled reasons use distinct real health wording for transport an
   assert.deepEqual(sampled, ['refresh_failed', 'feed_not_received']);
   assert.deepEqual(sampled.map(cellReason), ['update failed', 'no data received yet']);
   assert.equal(new Set(sampled.map(cellReason)).size, 2);
+});
+
+test('JOED-188: each width clears leaked fixture state and fix13 fails Results from the first read of its fresh generation', async () => {
+  const setup = browser.slice(browser.indexOf('    const { width } = view;'), browser.indexOf('    stage = `${width}: every feed gates recovery`;'));
+  const interceptor = browser.slice(browser.indexOf('  browser.on(async m => {'), browser.indexOf('  await page.setFetch('));
+  const recover = browser.slice(browser.indexOf('  const recover = async () => {'), browser.indexOf('  const go = async screen => {'));
+  const cold = browser.slice(browser.indexOf("    nonAuthOnly = 'results.json';"), browser.indexOf('    assert.deepEqual(await page.evaluate(`({'));
+  for (const width of widths) {
+    let generation = 0, frozen = false, handler;
+    const replies = [], failures = [];
+    const request = () => handler({ method: 'Fetch.requestPaused', sessionId: 'owned', params: {
+      requestId: 'results', request: { method: 'GET', url: 'https://board.example/joe/results.json' } } });
+    const context = { assert, URL, Buffer, view: { width }, board: { url: 'https://board.example/joe/' }, f: pageFixture(),
+      endpoints: ['results.json'], failures, nativeAuthPaths, visited: new Set(),
+      // Reproduce the preceding invariant's reason and leave other overrides
+      // dirty too: each width must establish its own baseline before loading.
+      reason: 'refresh_failed', shape: 'HTML fragment', expired: true, fail503: true, only: 'state.json', nonAuthOnly: 'account-history.json',
+      fleetPaused: null, settingsPaused: null,
+      configure: async () => {}, settle: async () => {}, waitFor: async () => {},
+      refresh: request, capture: async () => ({ marked: frozen }),
+      page: { owns: id => id === 'owned',
+        async s(method) { assert.equal(method, 'Page.navigate'); generation++; await request(); },
+        async evaluate(source) {
+          if (source === 'window.__pageGeneration') return generation;
+          if (source.includes('window.__probeTimers.values()')) { generation++; frozen = false; await request(); }
+        } },
+      browser: { on: callback => { handler = callback; },
+        async send(method, response) {
+          assert.equal(method, 'Fetch.fulfillRequest');
+          replies.push({ generation, ...response });
+        } },
+    };
+    await runInNewContext(`(async () => { ${interceptor}\n${setup} })()`, context);
+    assert.ok(replies.length > 0 && replies.every(r => r.responseCode === 200), 'a new width starts with successful baseline reads');
+    replies.length = 0;
+    frozen = true; context.expired = true; context.only = 'state.json';
+    const before = generation;
+    await runInNewContext(`(async () => { ${recover}\n${cold} })()`, context);
+    assert.equal(generation, before + 1);
+    const fresh = replies.filter(r => r.generation === generation);
+    assert.ok(fresh.length > 0, 'the probe reload performs its initial Results read');
+    for (const reply of fresh) {
+      assert.equal(reply.responseCode, 503, 'no successful Results response in the fresh generation');
+      const headerReason = reply.responseHeaders.find(h => h.name === 'X-Joe-Feed-Reason')?.value;
+      assert.equal(headerReason, undefined, 'the preceding width cannot override the cold reason with a header');
+      const accepted = acceptRead('results', { status: reply.responseCode, reason: headerReason,
+        payload: JSON.parse(Buffer.from(reply.body, 'base64').toString()) });
+      assert.equal(accepted.value, null);
+      assert.equal(cellReason(accepted.reason), 'no data received yet');
+    }
+    assert.deepEqual(failures, []);
+  }
 });
 
 test('JOED-179 signed-out planner rejects subsets with only one auth path across widths', () => {
