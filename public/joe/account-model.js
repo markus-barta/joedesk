@@ -1,7 +1,7 @@
 // The whole IB paper account over time (pure, display only). The board server
 // records the account's exact EUR value, kept holdings included, in two
-// stores (GET /joe/account-history.json): every accepted snapshot of the last
-// 14 days, and the last exact value of each Vienna calendar day for years.
+// stores (GET /joe/account-history.json): the last 14 days, thinned with the
+// spacing floor below, and the last exact value of each Vienna calendar day for years.
 // 1D and 5D read the first, the longer ranges the second. Only recorded
 // values are drawn: nothing before the first or after the last observation,
 // a gap breaks the line, and no value is ever interpolated, carried or
@@ -23,8 +23,9 @@ export const RANGE_TITLE = Object.freeze({ '1D': 'The last day', '5D': 'The last
 export const RANGE_WORD = Object.freeze({ '1D': 'over the last day', '5D': 'over the last 5 days', '1M': 'over the last month', '6M': 'over the last 6 months',
   YTD: 'since 1 January', '1Y': 'over the last year', All: 'everything recorded' });
 export const sourceOf = range => (range === '1D' || range === '5D' ? 'short' : 'daily');
-// Snapshots arrive every few seconds in the session and every 15 minutes
-// overnight: a longer interval between two of them is a gap, never joined.
+// Snapshots arrive about every 30 seconds; compaction ensures
+// kept points are at most 15 minutes apart wherever snapshots were recorded. Over 20 minutes
+// between two points is a gap, never joined.
 // Closes are joined only from one calendar day to the next.
 export const SHORT_GAP_MS = 20 * MIN;
 // How far a change may reach for its starting value: an observation this

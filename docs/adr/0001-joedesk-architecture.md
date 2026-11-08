@@ -476,12 +476,39 @@ workload (`scripts/browser/budget.mjs`): a normal patch at most 40 ms, a
 History draw at most 125 ms, no task reaching 125 ms.
 The Board and Results CI guards re-measure once per viewport (the Board:
 per viewport and phase), only when every failed condition is a render-time
-or long-task limit. The second measurement is final; a reproduced breach or
+or long-task limit. Before that CI-only second attempt, poll load1 every 5 s
+until it is at most half the affinity-aware available CPU count (falling back
+to the logical CPU count), bounded by one 300 s wait budget shared by every
+Board and Results runner process in the CI job, then measure anyway. The budget
+is kept in an atomically updated file under `JOED_QA_ROOT`, or `RUNNER_TEMP`
+when no QA root is set; the directory is created as needed. Without either,
+the allowance is per process. After any wait ends without quiet, later second
+attempts skip waiting and measure immediately. Each second attempt records
+waited seconds, quiet yes/no, the threshold, starting load1, budget before/after,
+and whether waiting was skipped with reason “budget exhausted” or “an earlier
+wait never reached a quiet host”; a corrupt budget resets to 300 s and is recorded.
+Budget I/O failures are recorded as `unavailable (<code>)` and skip waiting so
+the second attempt still runs. A budget lock older than 10 seconds is treated
+as abandoned, recorded, and skipped without deleting it. Refunds record their
+own budget source; failures leave the remaining allowance marked unavailable
+while preserving the reservation's budget state. An abandoned refund lock is
+recorded as a refund reason, without marking the completed wait as skipped.
+The second measurement is final; a reproduced breach or
 any functional failure still fails. Both
 attempts appear in the trace, table and failure detail. Results keeps its
 40 ms switch-render guard and rejects tasks reaching 125 ms; worker/main-thread
 and render-count failures never trigger a re-measure. The reference budget
 never re-measures and its limits stay unchanged.
+JOED-186 adds a fixed, JoeDesk-independent synthetic table/layout and JavaScript
+probe (seven repetitions in a fresh `about:blank` document, separate layout/JS
+medians and total median/min/max ms) before every attempt's measured navigation,
+including the reference command, so neither JoeDesk layout nor probe tasks enter
+the other workload. The attempt trace retains all timings, budget/load tables
+show layout / JS and concise failure measurements keep the total as `probeMs`;
+probe errors record null values and a short `unavailable` reason while the run
+continues, changing no limit, quiet wait or re-measure.
+Phase 2 will scale the CI guard by a calibrated `probeNow / probeQuiet` ratio,
+capped, and fail when the slowdown exceeds the cap.
 Recorded reference:
 mbp2607 (Apple M5 Max, 18 cores, HeadlessChrome 153.0.8010.12, Node
 v26.11.1) on 2026-10-15: Desk patch worst 7.7 ms, History draw worst
@@ -1733,3 +1760,34 @@ The approved presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`
 and saved global config/templates are retained; the offline bundle is active
 in footer/About. This local candidate grants no publication or deployment
 approval. The coordinator owns the cross-family gate, publication and live verification.
+
+## Release 44 candidate (JOED-183)
+
+Reserve `261104111323.0.0` at `2026-11-04T11:13:23Z` as `inspr-calver-3`, stable sequence 44,
+for honest account chart gaps (JOED-185), alongside the Signal Tuesday 3 CI
+work (JOED-178, JOED-184, JOED-186).
+
+Previous and last deployed release are sequence 43 (`261101023838.0.0`), main
+`36fecfeb7e56400db3076304d150e9eeb2beb05b` (JOED-177), live on csb0 since
+`2026-11-01T11:14:45Z`, adopted at `2026-11-01T11:18:26Z` as recorded in
+`adoption/261101023838.0.0.json`. The previous release has disposition
+`deployed` and `deployed: true`. The supplied adoption record is preserved
+byte for byte. About orders 44, 43, 42, 41, 40, 39, 38, 37 through 26, then
+legacy; all previous entries retain their original content. Earlier
+preparation sections record their reservation-time state.
+
+- History thinned to save space now stays connected; only real outages and unavailable values show as gaps.
+- History thinned before this release keeps its old gaps until it ages out within 14 days.
+
+Contract revision 11 remains accepted beside revision 10 under the same schema
+ID. The pusher switch (JOED-149) belongs to DEVOPS and is separate; this
+candidate makes no claim of dollar-desk exchange-rate proof. The contract set
+remains `c266b39e33e6e15be491263b0ca3575598dd264da3e1a9f6d5a147fc9f1bd49b`.
+Reseal the integrated runtime closure once; preserve historical artifacts and
+the legacy anchor.
+
+The approved presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`
+is retained: the config, templates and renderer are unchanged in the available
+INSPR checkout, and the complete offline bundle remains active in footer/About.
+This local candidate grants no publication or deployment approval. The
+coordinator owns the cross-family gate, publication and live verification.

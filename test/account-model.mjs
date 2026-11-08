@@ -4,9 +4,44 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { MIN, HOUR, DAY, iso, valid, words, point, close, body, SNAP, NOW, history, ctxFor } from './fixtures/account-fixtures.mjs';
+import { compactAccountPoints } from '../server/account-history.mjs';
 
 const M = await import('../public/joe/account-model.js');
 const { decimalUnits } = await import('../contracts/decimal.mjs');
+
+const flatNight = start => Array.from({ length: 2401 }, (_, i) => point(start + i * 30e3, '985100.10'));
+function compactedChart(points) {
+  const series = M.acceptAccountHistory(body(compactAccountPoints(points), [])).short;
+  return M.chartPoints(series, [series.t[0], series.t.at(-1)], series.t.at(-1));
+}
+
+test('JOED-185 (a): a compacted flat 30-second night draws no gap band', () => {
+  const { pts, bands } = compactedChart(flatNight(SNAP - 20 * HOUR));
+  assert.deepEqual(bands, []);
+  assert.ok(pts.every(p => p.v === 985100.10), 'every drawn value is the recorded equity');
+});
+
+test('JOED-185 (b): a real 27-hour hole keeps exactly its original gap band after compaction', () => {
+  const before = flatNight(SNAP - 67 * HOUR), after = flatNight(SNAP - 20 * HOUR);
+  const edges = [Date.parse(before.at(-1).t), Date.parse(after[0].t)];
+  assert.equal(edges[1] - edges[0], 27 * HOUR);
+  const { pts, bands } = compactedChart([...before, ...after]);
+  assert.deepEqual(bands, [edges]);
+  assert.equal(pts.filter(p => p.v === null).length, 1, 'the line breaks once, at the real hole');
+});
+
+test('JOED-185 (c): gateway_unconfirmed runs keep both presence edges and the unavailable band', () => {
+  // Shorter than one 64-point bucket: this regression already passes before
+  // the floor fix, independently of the false long-interval bands in (a).
+  const points = Array.from({ length: 64 }, (_, i) => point(SNAP - (63 - i) * 30e3,
+    i >= 17 && i <= 23 ? null : '985100.10', 'gateway_unconfirmed'));
+  const kept = compactAccountPoints(points);
+  for (const i of [16, 17, 23, 24]) assert.ok(kept.includes(points[i]), `presence edge ${i}`);
+  const series = M.acceptAccountHistory(body(kept, [])).short;
+  assert.equal(M.reasonAt(series, kept.indexOf(points[17])), 'gateway_unconfirmed');
+  assert.equal(M.reasonAt(series, kept.indexOf(points[23])), 'gateway_unconfirmed');
+  assert.deepEqual(compactedChart(points).bands, [[Date.parse(points[16].t), Date.parse(points[24].t)]]);
+});
 
 test('JOED-167 account calendar: repeated draws preserve consecutive closes across leap days, years and DST', () => {
   for (const days of [

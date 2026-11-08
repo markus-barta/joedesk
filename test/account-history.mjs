@@ -221,6 +221,63 @@ test('account compaction is bounded independently and preserves account extrema 
   assert.deepEqual(next.points[0], points[0]);
 });
 
+const ACCOUNT_FLOOR_MS = 15 * 60 * 1000;
+function assertAccountFloor(points) {
+  for (let i = 1; i < points.length; i++) {
+    assert.ok(Date.parse(points[i].t) - Date.parse(points[i - 1].t) <= ACCOUNT_FLOOR_MS,
+      `kept interval ${points[i - 1].t} → ${points[i].t} stays within 15 minutes`);
+  }
+}
+
+test('JOED-185 (a): a flat 20-hour 30-second night keeps the 15-minute floor', () => {
+  const points = Array.from({ length: 2401 }, (_, i) => ({ t: at(i * 30), account: accountAt(at(i * 30), eur('985100.10'), null) }));
+  const kept = compactAccountPoints(points);
+  assert.ok(kept.length < points.length);
+  assertAccountFloor(kept);
+  assert.ok(kept.every(p => points.includes(p)), 'only original observations, with exact values');
+});
+
+test('JOED-185 (d): three refills and recompactions preserve the floor throughout the raw 30-second record', () => {
+  let points = [], rawIndex = 0;
+  for (let refill = 0; refill < 3; refill++) {
+    while (points.length < 10000) {
+      const t = at(rawIndex++ * 30);
+      points.push({ t, account: accountAt(t, eur('985100.10'), eur('4212.77')) });
+    }
+    const t = at(rawIndex++ * 30), value = snapshot(102 + refill, t);
+    value.brokerAccount.equity = eur('985100.10'); value.brokerAccount.cash = eur('4212.77');
+    const previous = { ...emptyAccountHistory(), generatedAt: points.at(-1).t, receivedAt: points.at(-1).t, points };
+    const next = appendAccountHistory(previous, value, panelStates({ data: { value } }, t), t);
+    points = next.points;
+    assert.ok(points.length < 10000, `refill ${refill + 1} compacts`);
+    assert.equal(points[0].t, T0, 'the oldest observations remain through all three refills');
+    assert.equal(points.at(-1).t, t);
+    assertAccountFloor(points);
+  }
+});
+
+test('JOED-185 (e): 14 days at 30 seconds with independent field extrema fit below the 80% trigger', t => {
+  const points = Array.from({ length: 14 * 24 * 120 + 1 }, (_, i) => {
+    const time = at(i * 30), slot = i % 64;
+    // Four distinct extrema, separate from bucket edges; eight-decimal money
+    // strings exercise a larger envelope than the usual two-decimal values.
+    return { t: time, account: accountAt(time,
+      eur(slot === 1 ? '970000.12345678' : slot === 2 ? '990000.87654321' : '985100.12345678'),
+      eur(slot === 3 ? '-12345.12345678' : slot === 4 ? '54321.87654321' : '4212.12345678')) };
+  });
+  const kept = compactAccountPoints(points), now = points.at(-1).t;
+  const value = { ...emptyAccountHistory(), generatedAt: now, receivedAt: now, points: kept };
+  const bytes = Buffer.byteLength(JSON.stringify({ format: ACCOUNT_HISTORY_FORMAT, value }));
+  t.diagnostic(`${points.length} raw points → ${kept.length} kept; persisted envelope ${bytes} bytes; trigger ${ACCOUNT_HISTORY_CAP * 0.8}`);
+  assert.ok(bytes < ACCOUNT_HISTORY_CAP * 0.8, 'persisted envelope leaves room before the next byte trigger');
+  assert.equal(validateAccountHistory(value), value);
+  assertAccountFloor(kept);
+  // The real append path must leave the compacted points alone on the next snapshot.
+  const time = at(points.length * 30), sample = snapshot(103, time);
+  const next = appendAccountHistory(value, sample, panelStates({ data: { value: sample } }, time), time);
+  assert.deepEqual(next.points.slice(0, -1), kept.slice(1), 'only the point aging past 14 days is removed; no recompaction');
+});
+
 test('legacy desk file remains v2 with no account extensions; account series starts independently', t => {
   const { dataDir } = setup(t);
   const legacy = { ...structuredClone(samples.history), sizeBytes: 0 }; measureHistory(legacy);
