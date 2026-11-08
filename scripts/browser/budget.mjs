@@ -9,7 +9,7 @@
 import { largeScenario, wideSnapshot, accountScenario, NOW, at, ACTOR } from './board.mjs';
 import { VIEWPORTS, configure, load, go, settle, waitFor } from './shots.mjs';
 import { observeBudgetTasks, attributeBudgetTasks } from './budget-tasks.mjs';
-import { captureMachineLoad, machineLoadTable, waitForQuietHost, quietWaitCells } from './machine-load.mjs';
+import { captureMachineLoad, machineLoadTable, waitForQuietHost, quietWaitCells, budgetAttemptLine } from './machine-load.mjs';
 import { runReferenceProbe, captureReferenceProbe, probeCell } from './reference-probe.mjs';
 
 export const REFERENCE_DEVICES = Object.freeze(['mbp2606', 'mbp2607']);
@@ -57,13 +57,17 @@ export async function runBudget({ page, newBoard, check, limits, sampleLoad = ca
     const firstLoad = sampleLoad();
     const firstProbe = await captureReferenceProbe(page, probe, waitFor);
     const first = await measure(viewport);
+    console.log(budgetAttemptLine('Board', { ...first.row, machineLoad: firstLoad, ...firstProbe, attempt: 1 }));
     let decision = decideTaskGuard(conditions(first), null, limits);
     // Two explicit calls, never a retry loop: at most once per width/phase.
     const quietWait = decision.remeasure ? await waitForQuiet() : null;
     const secondLoad = decision.remeasure ? sampleLoad() : null;
     const secondProbe = decision.remeasure ? await captureReferenceProbe(page, probe, waitFor) : null;
     const second = decision.remeasure ? await measure(viewport) : null;
-    if (second) decision = decideTaskGuard(conditions(first), conditions(second), limits);
+    if (second) {
+      console.log(budgetAttemptLine('Board', { ...second.row, machineLoad: secondLoad, ...secondProbe, attempt: 2, quietWait }));
+      decision = decideTaskGuard(conditions(first), conditions(second), limits);
+    }
     const rows = (decision.remeasured ? [first, second] : [first]).map((result, i) => ({ ...result.row,
       machineLoad: i === 0 ? firstLoad : secondLoad, ...(i === 0 ? firstProbe : secondProbe),
       ...(i === 1 ? { quietWait } : {}),

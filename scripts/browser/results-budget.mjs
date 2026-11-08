@@ -8,7 +8,7 @@ import { scenario, NOW, at } from './board.mjs';
 import { largeResults } from './results.mjs';
 import { VIEWPORTS, configure, load, settle, waitFor } from './shots.mjs';
 import { decideTaskGuard, TIMING_GUARDS } from './budget.mjs';
-import { captureMachineLoad, machineLoadTable, waitForQuietHost, quietWaitCells } from './machine-load.mjs';
+import { captureMachineLoad, machineLoadTable, waitForQuietHost, quietWaitCells, budgetAttemptLine } from './machine-load.mjs';
 import { runReferenceProbe, captureReferenceProbe, probeCell } from './reference-probe.mjs';
 
 const max = list => (list.length ? Math.max(...list) : NaN);
@@ -71,13 +71,17 @@ export async function runResultsBudget({ page, newBoard, check, limits, serve, s
       const firstLoad = sampleLoad();
       const firstProbe = await captureReferenceProbe(page, probe, waitFor);
       const first = await measure(viewport);
+      console.log(budgetAttemptLine('Results', { ...first.row, machineLoad: firstLoad, ...firstProbe, attempt: 1 }));
       let decision = decideTaskGuard(conditions(first), null, limits);
       // Two explicit calls: only a CI timing-only breach gets a second sample.
       const quietWait = decision.remeasure ? await waitForQuiet() : null;
       const secondLoad = decision.remeasure ? sampleLoad() : null;
       const secondProbe = decision.remeasure ? await captureReferenceProbe(page, probe, waitFor) : null;
       const second = decision.remeasure ? await measure(viewport) : null;
-      if (second) decision = decideTaskGuard(conditions(first), conditions(second), limits);
+      if (second) {
+        console.log(budgetAttemptLine('Results', { ...second.row, machineLoad: secondLoad, ...secondProbe, attempt: 2, quietWait }));
+        decision = decideTaskGuard(conditions(first), conditions(second), limits);
+      }
       const rows = (decision.remeasured ? [first, second] : [first]).map((result, i) => ({ ...result.row,
         machineLoad: i === 0 ? firstLoad : secondLoad, ...(i === 0 ? firstProbe : secondProbe),
         ...(i === 1 ? { quietWait } : {}),

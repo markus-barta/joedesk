@@ -95,6 +95,24 @@ export function captureMachineLoad({ clock = () => new Date(), cpuList = os.cpus
       /^(?:chrome(?:[-_].*)?|chromium(?:[-_].*)?|headless_shell|Google Chrome(?: Helper.*)?|Chromium(?: Helper.*)?)$/i.test(basename(line.trim()))).length : null };
 }
 
+// Print independently of the report tables, including clean first attempts.
+export function budgetAttemptLine(name, row) {
+  const m = row.machineLoad, p = row.probe, w = row.quietWait;
+  const ms = n => Number.isFinite(n) ? n.toFixed(1) : 'unavailable';
+  const quiet = w ? [
+    `waitedSeconds=${ms(w.waitedSeconds)}, quiet=${w.quiet ? 'yes' : 'no'}, threshold=${w.threshold ?? 'unavailable'}, startLoad1=${loadCell(w.startLoad1)}`,
+    `budgetBeforeSeconds=${ms(w.budgetBeforeSeconds)}, budgetAfterSeconds=${ms(w.budgetAfterSeconds)}, skipped=${w.skipped ? 'yes' : 'no'}`,
+    `skipReason=${w.skipReason ?? 'none'}, budgetState=${w.budgetState ?? 'unavailable'}`,
+    `refundBudgetState=${w.refundBudgetState ?? 'unavailable'}, refundReason=${w.refundReason ?? 'none'}`,
+  ].join(', ') : 'not needed';
+  return [
+    `Budget attempt: ${name} ${row.viewport}px`, `phase: ${row.phase}`, `attempt: ${row.attempt}`,
+    `reference probe: layout/JS=${probeCell(row)} ms, median=${ms(row.probeMs)} ms, min=${ms(p?.minMs)} ms, max=${ms(p?.maxMs)} ms, reps=${p?.reps ?? 'unavailable'}`,
+    `CPU: logical=${m?.cpuCount ?? 'unavailable'}, availableParallelism=${m?.availableParallelism ?? 'unavailable'}, cpusAllowed=${m?.cpusAllowed ?? 'unavailable'}, cgroup=${m?.cgroup ?? 'unavailable'}, cpuMax=${m?.cpuMax ?? 'unavailable'}`,
+    `load1=${loadCell(m?.loadavg?.[0])}`, `quietWait: ${quiet}`,
+  ].join('; ').replace(/[\r\n]/g, ' ');
+}
+
 export function machineLoadTable(traces, lock = process.env) {
   return `Browser host lock (one acquisition for all CI browser phases):
 

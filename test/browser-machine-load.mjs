@@ -1,6 +1,24 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { captureMachineLoad, machineLoadTable, waitForQuietHost, quietWaitCells } from '../scripts/browser/machine-load.mjs';
+import { captureMachineLoad, machineLoadTable, waitForQuietHost, quietWaitCells, budgetAttemptLine } from '../scripts/browser/machine-load.mjs';
+
+test('JOED-188: budget log distinguishes skipped waits, unknown allowances and failed refunds on one line', () => {
+  for (const skipped of [true, false]) {
+    const line = budgetAttemptLine('Results', { viewport: '1440', phase: 'record', attempt: 2,
+      probe: null, probeMs: null, probeReason: 'probe\nfailed',
+      quietWait: { waitedSeconds: skipped ? 0 : 5, quiet: false, threshold: 13, startLoad1: 43,
+        budgetBeforeSeconds: skipped ? null : 300, budgetAfterSeconds: null, skipped,
+        skipReason: skipped ? 'quiet-wait budget unavailable' : null,
+        budgetState: skipped ? 'unavailable (EACCES)' : 'existing',
+        ...(!skipped ? { refundBudgetState: 'unavailable (EEXIST)', refundReason: 'abandoned quiet-wait budget lock (>10 s) during refund' } : {}) } });
+    assert.doesNotMatch(line, /[\r\n]/);
+    assert.match(line, /reference probe: layout\/JS=unavailable \(probe failed\)/);
+    assert.match(line, /budgetAfterSeconds=unavailable/);
+    assert.ok(line.includes(`skipped=${skipped ? 'yes' : 'no'}`));
+    if (skipped) assert.match(line, /budgetBeforeSeconds=unavailable.*skipReason=quiet-wait budget unavailable/);
+    else assert.match(line, /refundBudgetState=unavailable \(EEXIST\), refundReason=abandoned quiet-wait budget lock/);
+  }
+});
 
 test('JOED-180 budget refund failure preserves reservation state and never claims the completed wait was skipped', async () => {
   for (const staleLock of [false, true]) {
