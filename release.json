@@ -1,9 +1,9 @@
 {
   "product": "JoeDesk",
   "version_scheme": "inspr-calver-3",
-  "version": "261104111323.0.0",
+  "version": "261109023132.0.0",
   "release_channel": "stable",
-  "release_sequence": 44,
+  "release_sequence": 45,
   "status": "candidate",
-  "note": "History thinned to save space now stays connected; only real outages and unavailable values show as gaps."
+  "note": "Release 45 changes only CI checks; board behaviour is unchanged."
 }

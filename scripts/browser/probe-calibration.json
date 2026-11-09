@@ -1,0 +1,65 @@
+{
+  "status": "calibrated",
+  "quiet": {
+    "390": {
+      "board-live": {
+        "layoutMedianMs": 9.799999952316284,
+        "jsMedianMs": 7.949999988079071,
+        "medianMs": 17.950000047683716
+      },
+      "results": {
+        "layoutMedianMs": 9.699999988079071,
+        "jsMedianMs": 7.949999988079071,
+        "medianMs": 18.100000023841858
+      }
+    },
+    "1024": {
+      "board-live": {
+        "layoutMedianMs": 10.150000035762787,
+        "jsMedianMs": 8.000000059604645,
+        "medianMs": 19.200000047683716
+      },
+      "results": {
+        "layoutMedianMs": 12.299999952316284,
+        "jsMedianMs": 8.100000083446503,
+        "medianMs": 20.400000035762787
+      }
+    },
+    "1440": {
+      "board-live": {
+        "layoutMedianMs": 9.450000047683716,
+        "jsMedianMs": 7.950000047683716,
+        "medianMs": 17.350000023841858
+      },
+      "results": {
+        "layoutMedianMs": 9.5,
+        "jsMedianMs": 7.949999988079071,
+        "medianMs": 17.55000001192093
+      }
+    }
+  },
+  "source": {
+    "runId": "42543351170",
+    "attempt": 1,
+    "host": "agm2",
+    "chrome": "Chrome/151.0.7922.75",
+    "capturedAt": "2026-11-09T01:40:31.326Z"
+  },
+  "cap": 3,
+  "sources": [
+    {
+      "runId": "42538794854",
+      "attempt": 1,
+      "host": "agm2",
+      "chrome": "Chrome/151.0.7922.75",
+      "capturedAt": "2026-11-09T00:49:21.898Z"
+    },
+    {
+      "runId": "42543351170",
+      "attempt": 1,
+      "host": "agm2",
+      "chrome": "Chrome/151.0.7922.75",
+      "capturedAt": "2026-11-09T01:40:31.326Z"
+    }
+  ]
+}

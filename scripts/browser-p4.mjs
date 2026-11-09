@@ -11,7 +11,7 @@
 // One headless browser, one page, run sequentially; screenshots go to the QA folder.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import assert from 'node:assert/strict';
-import { homedir, cpus } from 'node:os';
+import { homedir, cpus, hostname } from 'node:os';
 import { join } from 'node:path';
 import * as nodeModule from 'node:module';
 import { launch, openPage } from './browser/cdp.mjs';
@@ -25,6 +25,7 @@ import { runResultsBudget, resultsBudgetTable } from './browser/results-budget.m
 import { designResults, withTradeSummaries, partialDaysResults, periodHintResults, tradeAmountResults, retainedPartialResults } from './browser/results.mjs';
 import { realResultsFixtures } from './results-fixtures.mjs';
 import { P4_SCENARIOS, createP4Views, createP4ViewRecorder, p4ViewKey, selectP4Views, summarizeP4Views } from './results-gate-plan.mjs';
+import { PROBE_CALIBRATION, reportCalibration } from './browser/ratio-guard.mjs';
 import { TERMS } from '../public/joe/terms.js';
 
 // Fail on missing explicit zoneSensitive metadata before any browser or
@@ -667,6 +668,8 @@ async function assertNarrowSentence(page, viewport, theme, tag, want) {
 const browser = await launch({ hostRules: 'MAP joedesk.example.test 127.0.0.1' });
 const engine = await browser.send('Browser.getVersion');
 const reference = `${engine.product} (headless, ${process.platform} ${process.arch}), ${cpus()[0]?.model ?? 'unknown CPU'}, ${cpus().length} cores, Node ${process.version}`;
+const probeSource = { runId: process.env.GITHUB_RUN_ID ?? `local-${Date.now()}`, attempt: Number(process.env.GITHUB_RUN_ATTEMPT ?? 1),
+  host: hostname(), chrome: engine.product };
 const page = await openPage(browser, { headers: { 'x-auth-request-user': ACTOR } });
 const hostTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const expectedTimeZone = new Intl.DateTimeFormat('en', { timeZone: process.env.TZ ?? hostTimeZone }).resolvedOptions().timeZone;
@@ -2871,7 +2874,12 @@ try {
     // 7 · The Results render budget's CI guard (ADR §9; the reference budget is
     // measured on a reference device by scripts/budget-reference.mjs).
     if (!view('budget', 'render')) throw new Error('Budget view must run in full mode');
-    budgetTrace = await runResultsBudget({ page, newBoard, check, limits: CI_GUARD, serve: async (body, board) => { await serve(served(body, board)); return () => serve(null); } });
+    budgetTrace = [];
+    try {
+      await runResultsBudget({ page, newBoard, check, limits: CI_GUARD, runSource: probeSource, traces: budgetTrace, serve: async (body, board) => { await serve(served(body, board)); return () => serve(null); } });
+    } finally {
+      reportCalibration(PROBE_CALIBRATION, budgetTrace, undefined, { phase: 'P4', zone: expectedTimeZone });
+    }
   }
   timing.enter('host-timezone');
   requireView('host-timezone', 'hosts');
@@ -3131,12 +3139,12 @@ ${failed.length ? `### Failures\n\n${failed.map(f => `- ${f.ac} ${f.name}: \`${J
 ${phoneWidthReport}
 ## Render budget (ADR §9)
 
-This run: ${reference}. Held here: the ${CI_GUARD.name} (a Results render at
+This run: ${reference}. Base limits before per-attempt ratio scaling: the ${CI_GUARD.name} (a Results render at
 most ${CI_GUARD.patchMs} ms, no task reaching ${CI_GUARD.taskMs} ms). The ${REFERENCE_BUDGET.name}
 itself (under ${REFERENCE_BUDGET.patchMs} ms, no task reaching ${REFERENCE_BUDGET.taskMs} ms) is measured on a
 reference device by \`node scripts/budget-reference.mjs\`.
 
-${budgetTrace ? resultsBudgetTable(budgetTrace, CI_GUARD) : 'Not run.\n'}
+${budgetTrace ? resultsBudgetTable(budgetTrace, CI_GUARD, probeSource) : 'Not run.\n'}
 ## Screenshots (\`<viewport>-<theme>-<surface>.png\`)
 
 ${shots.map(s => `- \`${s.file}\` — ${s.what}`).join('\n')}
