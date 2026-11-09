@@ -75,7 +75,7 @@ function cpuEvidence({ platform, parallelism, readFile }) {
   if (platform !== 'linux') return evidence;
   const cell = value => value.trim().replace(/[|\r\n]/g, ' ').slice(0, 80) || 'unavailable';
   try { evidence.availableParallelism = parallelism(); } catch {}
-  try { evidence.cpusAllowed = cell(readFile('/proc/self/status', 'utf8').match(/^Cpus_allowed_list:.*$/m)?.[0] ?? ''); } catch {}
+  try { evidence.cpusAllowed = cell(readFile('/proc/self/status', 'utf8').match(/^Cpus_allowed_list:([^\r\n]*)$/m)?.[1] ?? ''); } catch {}
   try {
     const cgroup = readFile('/proc/self/cgroup', 'utf8').match(/^0::(\/[^\r\n]*)$/m)?.[1];
     if (cgroup && !cgroup.split('/').includes('..')) {

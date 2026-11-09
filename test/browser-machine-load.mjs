@@ -112,7 +112,24 @@ const fakeCPUSample = (files, extra = {}) => captureMachineLoad({
 test('JOED-186 CPU evidence reads the process affinity and its own v2 cgroup quota', () => {
   for (const cgroup of ['/job/worker', '/']) {
     const sample = fakeCPUSample(fakeCPUFiles(cgroup));
-    assert.deepEqual(evidenceKeys.map(key => sample[key]), [4, 'Cpus_allowed_list:\t0-5', cgroup, '800000 100000']);
+    assert.deepEqual(evidenceKeys.map(key => sample[key]), [4, '0-5', cgroup, '800000 100000']);
+  }
+});
+
+test('JOED-189 CPU evidence stores only the trimmed allowed CPU list', () => {
+  for (const [line, expected] of [
+    ['Cpus_allowed_list:\t 0-15  \n', '0-15'],
+    ['Cpus_allowed_list: 0-5,8-15\r\n', '0-5,8-15'],
+    ['Cpus_allowed_list:\t\n', 'unavailable'],
+    ['Name:\tnode\nMems_allowed_list:\t0\n', 'unavailable'],
+  ]) {
+    const files = fakeCPUFiles('/job/worker'); files.set('/proc/self/status', line);
+    const sample = fakeCPUSample(files);
+    assert.equal(sample.cpusAllowed, expected);
+    const row = { viewport: '390', phase: 'live', attempt: 1, machineLoad: sample };
+    assert.ok(machineLoadTable([row]).includes(`| ${expected} |`));
+    assert.ok(budgetAttemptLine('Board', row).includes(`cpusAllowed=${expected},`));
+    assert.doesNotMatch(machineLoadTable([row]) + budgetAttemptLine('Board', row), /Cpus_allowed_list:/);
   }
 });
 
@@ -121,7 +138,7 @@ test('JOED-186 CPU evidence is independently unavailable on read errors or missi
     const files = fakeCPUFiles('/job/worker'); files.delete(file);
     const sample = fakeCPUSample(files);
     assert.equal(sample.availableParallelism, 4);
-    assert.equal(sample.cpusAllowed, file.endsWith('status') ? 'unavailable' : 'Cpus_allowed_list:\t0-5');
+    assert.equal(sample.cpusAllowed, file.endsWith('status') ? 'unavailable' : '0-5');
     assert.equal(sample.cgroup, file.endsWith('cgroup') ? 'unavailable' : '/job/worker');
     assert.equal(sample.cpuMax, file.endsWith('status') ? '800000 100000' : 'unavailable');
   }

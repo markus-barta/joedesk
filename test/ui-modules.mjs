@@ -2697,7 +2697,7 @@ test('JOED-186 (b): every Board and Results width/phase attempt, including re-me
 });
 
 test('JOED-188: Board and Results print one evidence line per attempt, including clean runs and failed re-measures', async () => {
-  const sampleLoad = () => ({ cpuCount: 32, availableParallelism: 26, cpusAllowed: 'Cpus_allowed_list: 0-25',
+  const sampleLoad = () => ({ cpuCount: 32, availableParallelism: 26, cpusAllowed: '0-25',
     cgroup: '/job/worker', cpuMax: '2600000 100000', loadavg: [2, 3, 4] });
   const wait = { waitedSeconds: 10, quiet: true, threshold: 13, startLoad1: 43,
     budgetBeforeSeconds: 300, budgetAfterSeconds: 290, skipped: false, skipReason: null, budgetState: 'existing', refundBudgetState: 'existing' };
@@ -2713,7 +2713,7 @@ test('JOED-188: Board and Results print one evidence line per attempt, including
         const row = run.traces[i];
         assert.ok(line.startsWith(`Budget attempt: ${name} ${row.viewport}px; phase: ${row.phase}; attempt: ${row.attempt};`));
         assert.ok(line.includes(`median=${row.probeMs.toFixed(1)} ms`));
-        assert.match(line, /CPU: logical=32, availableParallelism=26, cpusAllowed=Cpus_allowed_list: 0-25, cgroup=\/job\/worker, cpuMax=2600000 100000/);
+        assert.match(line, /CPU: logical=32, availableParallelism=26, cpusAllowed=0-25, cgroup=\/job\/worker, cpuMax=2600000 100000/);
         assert.match(line, /load1=2\.00/);
         assert.doesNotMatch(line, /[\r\n|]/, 'stdout evidence is one plain line');
         if (row.attempt === 1) assert.match(line, /quietWait: not needed$/);
