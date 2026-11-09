@@ -2,7 +2,7 @@
 // the host gate and desk changes. The browser serves public/joe/time.mjs and
 // public/joe/contracts/* from the repo root; this hook mirrors that mapping.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -15,6 +15,7 @@ import { observeBudgetTasks, attributeBudgetTasks } from '../scripts/browser/bud
 import { CI_GUARD, REFERENCE_BUDGET, TIMING_GUARDS, decideTaskGuard, runBudget, budgetTable } from '../scripts/browser/budget.mjs';
 import { runResultsBudget, resultsBudgetTable } from '../scripts/browser/results-budget.mjs';
 import { waitForQuietHost, budgetAttemptLine } from '../scripts/browser/machine-load.mjs';
+import * as ratioGuard from '../scripts/browser/ratio-guard.mjs';
 import { captureReferenceProbe } from '../scripts/browser/reference-probe.mjs';
 import { createQuietWaitBudget } from '../scripts/browser/quiet-wait-budget.mjs';
 import { scratch, discard } from '../scripts/browser/scratch.mjs';
@@ -24,6 +25,7 @@ import './browser-settled.mjs';
 import './browser-group-timing.mjs';
 import './browser-machine-load.mjs';
 import './browser-reference-probe.mjs';
+import './browser-ratio-guard.mjs';
 import './budget-quiet-host.mjs';
 import './theme-geometry.mjs';
 import './theme-copy.mjs';
@@ -2482,7 +2484,7 @@ test('browser budget: reference limits stay strict with no re-measure', () => {
 
 // Exercise the exact runner with synthetic CDP replies, without a browser,
 // servers or real time. Each load consumes one phase's scripted measurement.
-async function simulatedBudget({ cold = [{}], live = [{}], viewports = ['390'], limits = CI_GUARD, probe, useDefaultWait = false, sampleLoad, waitForQuiet = async () => ({ waitedSeconds: 0, quiet: true, threshold: 13, startLoad1: 2 }) } = {}) {
+async function simulatedBudget({ cold = [{}], live = [{}], viewports = ['390'], limits = CI_GUARD, probe, calibration, runSource = { host: 'quiet-fixture', chrome: 'HeadlessChrome fixture' }, summaryWriter = () => {}, traces = [], useDefaultWait = false, sampleLoad, waitForQuiet = async () => ({ waitedSeconds: 0, quiet: true, threshold: 13, startLoad1: 2 }) } = {}) {
   let phase, sample, reads, neutralReady = false;
   const loads = { cold: 0, live: 0 }, boards = [], checks = [], events = [], logs = [];
   const timings = (reason, count, ms) => Array.from({ length: count }, (_, i) => ({ reason, at: 200 + i * 20, ms }));
@@ -2513,7 +2515,7 @@ async function simulatedBudget({ cold = [{}], live = [{}], viewports = ['390'], 
       assert.ok(source.includes('.click()') || source === 'window.__joedesk.refresh()' || source === 'window.__joedesk.refresh(); window.__joedesk.refreshAccount?.()', source);
     },
   };
-  const context = { runReferenceProbe: async receivedPage => {
+  const context = { ...ratioGuard, CI_GUARD, runReferenceProbe: async receivedPage => {
     assert.equal(receivedPage, page);
     assert.equal(neutralReady, true, 'probe sees a ready neutral document');
     events.push('probe');
@@ -2546,22 +2548,26 @@ async function simulatedBudget({ cold = [{}], live = [{}], viewports = ['390'], 
     fetch: async () => ({ json: async () => ({ points: Array(7209), sizeBytes: 6 * 1048576 }) }),
   };
   const execute = runInNewContext(`(${runBudget.toString()})`, context);
-  const traces = await execute({ page, limits, ...(probe ? { probe } : {}),
-    ...(!useDefaultWait ? { waitForQuiet: async () => {
-      events.push('wait-start');
-      const result = await waitForQuiet();
-      events.push('wait-end');
-      return result;
-    } } : {}),
-    sampleLoad: () => { events.push('sample-load'); return sampleLoad ? sampleLoad() : { sampledAt: `sample-${boards.length}`, loadavg: [1, 2, 3], cpuCount: 8, browserProcesses: 4 }; },
-    newBoard: async ({ history, accountHistory }) => {
-      const board = { history, accountHistory, url: `http://fixture/${boards.length}/`, pushes: [], setNow() {},
-        async push(payload) { this.pushes.push(payload); return { status: 200 }; } };
-      boards.push(board);
-      return board;
-    },
-    check: (ac, name, ok, detail) => checks.push({ name, ok, detail }),
-  });
+  try {
+    await execute({ page, limits, runSource, traces, ...(probe ? { probe } : {}), ...(calibration ? { calibration } : {}),
+      ...(!useDefaultWait ? { waitForQuiet: async () => {
+        events.push('wait-start');
+        const result = await waitForQuiet();
+        events.push('wait-end');
+        return result;
+      } } : {}),
+      sampleLoad: () => { events.push('sample-load'); return sampleLoad ? sampleLoad() : { sampledAt: `sample-${boards.length}`, loadavg: [1, 2, 3], cpuCount: 8, browserProcesses: 4 }; },
+      newBoard: async ({ history, accountHistory }) => {
+        const board = { history, accountHistory, url: `http://fixture/${boards.length}/`, pushes: [], setNow() {},
+          async push(payload) { this.pushes.push(payload); return { status: 200 }; } };
+        boards.push(board);
+        return board;
+      },
+      check: (ac, name, ok, detail) => checks.push({ name, ok, detail }),
+    });
+  } finally {
+    ratioGuard.reportCalibration(calibration ?? ratioGuard.PROBE_CALIBRATION, traces, summaryWriter, { phase: 'P3', zone: process.env.TZ ?? 'UTC' });
+  }
   return { traces, checks, loads, boards, events, logs };
 }
 
@@ -2731,7 +2737,7 @@ test('JOED-188: Board and Results print one evidence line per attempt, including
   }
 });
 
-test('JOED-186 (d): probe speed never changes baseline guard decisions, limits, quiet waits or attempt counts', async () => {
+test('JOED-187 (a), JOED-186 (d): uncalibrated probe speed never changes baseline guard decisions, limits, quiet waits or attempt counts', async () => {
   // Fingerprint of the unchanged 890c1e6 decision function; exhaustive timing
   // combinations and strict/inclusive boundaries are exercised above/below.
   assert.equal(createHash('sha256').update(decideTaskGuard.toString()).digest('hex'),
@@ -2756,12 +2762,13 @@ test('JOED-186 (d): probe speed never changes baseline guard decisions, limits, 
         const runs = [];
         for (const medianMs of [0.001, 1000000]) {
           let waits = 0;
-          const options = { limits, probe: async () => ({ layoutMedianMs: medianMs / 2, jsMedianMs: medianMs / 2, medianMs, minMs: medianMs, maxMs: medianMs, reps: 7 }),
+          const options = { limits, calibration: { status: 'uncalibrated', cap: 3 }, probe: async () => ({ layoutMedianMs: medianMs / 2, jsMedianMs: medianMs / 2, medianMs, minMs: medianMs, maxMs: medianMs, reps: 7 }),
             waitForQuiet: async () => { waits++; return { waitedSeconds: 0, quiet: true }; } };
           const run = runner === 'Board'
             ? await simulatedBudget({ ...options, cold: [{ taskMs: 130 }, second], live: [{ patchMs: 41 }, second] })
             : await simulatedResultsBudget({ ...options, samples: { 390: [{ switchMs: 41 }, second] } });
-          assert.ok(run.traces.every(r => r.probe.medianMs === medianMs));
+          assert.ok(run.traces.every(r => r.probe.medianMs === medianMs && r.k === 1));
+          assert.ok(run.traces.every(r => r.ratioReason === (limits === CI_GUARD ? 'uncalibrated: absolute guards' : 'reference budget: absolute guards')), 'exercises the uncalibrated path, not a calibrated host mismatch');
           assert.deepEqual(Array.from(run.checks, c => c.ok), expected[scenario][runner], `${limits.name}, ${runner}, ${JSON.stringify(second)}`);
           runs.push({ waits, loads: run.loads, checks: run.checks.map(c => ({ name: c.name, ok: c.ok, conditions: c.detail.conditions })) });
         }
@@ -2848,17 +2855,17 @@ test('browser budget: 124.9 ms tasks pass and 125 ms tasks breach despite CI atM
 test('browser budget: runBudget statically allows at most one re-measure per viewport and phase', () => {
   const source = runBudget.toString();
   const runner = source.slice(source.indexOf('const runViewport ='), source.indexOf('const full ='));
-  assert.equal(runner.match(/await measure\(viewport\)/g).length, 2);
-  assert.match(runner, /const second = decision\.remeasure \? await measure\(viewport\) : null/);
+  assert.equal(runner.match(/await measure\(viewport, (?:first|second)Guard\.limitMs\)/g).length, 2);
+  assert.match(runner, /const second = decision\.remeasure \? await measure\(viewport, (?:first|second)Guard\.limitMs\) : null/);
   assert.doesNotMatch(runner, /\bwhile\s*\(|runViewport\(/);
   assert.equal(source.match(/for \(const viewport of VIEWPORTS\) await runViewport\(viewport, measure(?:Cold|Live)\)/g).length, 2);
-  assert.match(source, /const measureCold = async viewport => \{\s*const cold = await newBoard/);
-  assert.match(source, /const measureLive = async viewport => \{\s*const b = await newBoard/);
+  assert.match(source, /const measureCold = async \(viewport, timing\) => \{\s*const cold = await newBoard/);
+  assert.match(source, /const measureLive = async \(viewport, timing\) => \{\s*const b = await newBoard/);
 });
 
 // Run the Results orchestration against scripted page replies. Navigation
 // consumes a sample, so an unexpected third measurement fails immediately.
-async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUARD, probe, useDefaultWait = false, sampleLoad, waitForQuiet = async () => ({ waitedSeconds: 0, quiet: true, threshold: 13, startLoad1: 2 }) } = {}) {
+async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUARD, probe, calibration, runSource = { host: 'quiet-fixture', chrome: 'HeadlessChrome fixture' }, summaryWriter = () => {}, traces = [], useDefaultWait = false, sampleLoad, waitForQuiet = async () => ({ waitedSeconds: 0, quiet: true, threshold: 13, startLoad1: 2 }) } = {}) {
   let viewport, sample, unserved = false, neutralReady = false;
   const loads = Object.fromEntries(Object.keys(samples).map(width => [width, 0])), checks = [], observers = [], events = [], logs = [];
   const page = {
@@ -2882,7 +2889,7 @@ async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUA
       assert.ok(source === 'window.__joedesk.timings.length = 0' || source.includes('.click()'), source);
     },
   };
-  const context = { runReferenceProbe: async receivedPage => {
+  const context = { ...ratioGuard, CI_GUARD, runReferenceProbe: async receivedPage => {
     assert.equal(receivedPage, page);
     assert.equal(neutralReady, true, 'probe sees a ready neutral document');
     events.push('probe');
@@ -2911,18 +2918,22 @@ async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUA
   };
   const execute = runInNewContext(`(${runResultsBudget.toString()})`, context);
   let loadSamples = 0;
-  const traces = await execute({ page, limits, ...(probe ? { probe } : {}),
-    ...(!useDefaultWait ? { waitForQuiet: async () => {
-      events.push('wait-start');
-      const result = await waitForQuiet();
-      events.push('wait-end');
-      return result;
-    } } : {}),
-    sampleLoad: () => { events.push('sample-load'); loadSamples++; return sampleLoad ? sampleLoad() : { sampledAt: `sample-${loadSamples}`, loadavg: [4, 5, 6], cpuCount: 16, browserProcesses: 7 }; },
-    newBoard: async () => ({ url: 'http://fixture/', setNow() {}, async push() { return { status: 200 }; } }),
-    serve: async () => async () => { unserved = true; },
-    check: (ac, name, ok, detail) => checks.push({ name, ok, detail }),
-  });
+  try {
+    await execute({ page, limits, runSource, traces, ...(probe ? { probe } : {}), ...(calibration ? { calibration } : {}),
+      ...(!useDefaultWait ? { waitForQuiet: async () => {
+        events.push('wait-start');
+        const result = await waitForQuiet();
+        events.push('wait-end');
+        return result;
+      } } : {}),
+      sampleLoad: () => { events.push('sample-load'); loadSamples++; return sampleLoad ? sampleLoad() : { sampledAt: `sample-${loadSamples}`, loadavg: [4, 5, 6], cpuCount: 16, browserProcesses: 7 }; },
+      newBoard: async () => ({ url: 'http://fixture/', setNow() {}, async push() { return { status: 200 }; } }),
+      serve: async () => async () => { unserved = true; },
+      check: (ac, name, ok, detail) => checks.push({ name, ok, detail }),
+    });
+  } finally {
+    ratioGuard.reportCalibration(calibration ?? ratioGuard.PROBE_CALIBRATION, traces, summaryWriter, { phase: 'P4', zone: process.env.TZ ?? 'UTC' });
+  }
   assert.equal(unserved, true, 'the Results interceptor is removed');
   assert.equal(loadSamples, traces.length, 'one host-load sample per attempt, including re-measurements');
   if (!sampleLoad) {
@@ -3383,4 +3394,325 @@ test('JOED-158 typography observer: each delivery samples the current viewport o
     assert.equal(split.nodeValue, `5\u00a0units${space}`, 'inline separators follow the same viewport');
     assert.equal(nested.nodeValue, `6\u00a0units${space}· nested`, 'text appended inside an existing descendant follows the new viewport');
   }
+});
+
+// JOED-187 uses the actual runners and their existing CDP fixtures, so ratio
+// tests also exercise timing comparisons, retry selection and final evidence.
+function ratioCalibration() {
+  return { status: 'calibrated', cap: 3,
+    quiet: Object.fromEntries(['1440', '1024', '390'].map(width => [width,
+      Object.fromEntries(['board-live', 'results'].map(kind => [kind, { layoutMedianMs: 4, jsMedianMs: 6, medianMs: 10 }]))])),
+    source: { runId: '41276169961', attempt: 1, capturedAt: '2026-11-04T10:00:00.000Z', host: 'quiet-fixture', chrome: 'HeadlessChrome fixture' } };
+}
+const ratioProbe = medianMs => async () => ({ layoutMedianMs: medianMs * 0.4, jsMedianMs: medianMs * 0.6, medianMs, minMs: medianMs, maxMs: medianMs, reps: 7 });
+async function ratioRun(runner, sample, options = {}) {
+  const samples = [sample, sample];
+  const settings = { runSource: { host: 'quiet-fixture', chrome: 'HeadlessChrome fixture' }, calibration: ratioCalibration(), probe: ratioProbe(16), ...options };
+  return runner === 'Board' ? simulatedBudget({ ...settings, cold: samples, live: samples })
+    : simulatedResultsBudget({ ...settings, samples: { 390: samples } });
+}
+
+test('JOED-187 M1: simulated Board and Results runners never write the CI step summary', async () => {
+  const dir = scratch('joed-187-runner-summary-');
+  const previous = process.env.GITHUB_STEP_SUMMARY;
+  try {
+    const path = join(dir, 'summary.txt'); writeFileSync(path, ''); process.env.GITHUB_STEP_SUMMARY = path;
+    for (const runner of ['Board', 'Results']) {
+      const summaries = [];
+      await ratioRun(runner, { patchMs: 80, switchMs: 80 }, { probe: ratioProbe(35), summaryWriter: text => summaries.push(text) });
+      assert.equal(summaries.length, 1);
+      assert.match(summaries[0], /Host too slow to judge:/);
+      assert.equal(readFileSync(path, 'utf8'), '');
+    }
+  } finally {
+    if (previous === undefined) delete process.env.GITHUB_STEP_SUMMARY; else process.env.GITHUB_STEP_SUMMARY = previous;
+    await discard(dir, 'runner summary fixture');
+  }
+});
+
+test('JOED-187 (j): over-cap Board and Results attempts reach only the injected summary writer, once per width/kind', async () => {
+  for (const runner of ['Board', 'Results']) {
+    for (const recovered of [false, true]) {
+      const summaries = [];
+      let calls = 0;
+      const run = await ratioRun(runner, { patchMs: 60, switchMs: 60 }, {
+        probe: recovered ? async () => ratioProbe(++calls % 2 ? 35 : 16)() : ratioProbe(35),
+        summaryWriter: text => summaries.push(text),
+      });
+      assert.equal(run.checks.every(c => c.ok), recovered);
+      assert.equal(summaries.length, 1, 'one summary write per budget process, including all attempts');
+      assert.deepEqual(summaries[0].split('\n').filter(line => line.startsWith('Host too slow to judge:')),
+        [`Host too slow to judge: ${runner === 'Board' ? 'P3' : 'P4'} ${process.env.TZ ?? 'UTC'} 390 ${runner === 'Board' ? 'board-live' : 'results'}, k = 3.50× (cap 3×); absolute guards applied`]);
+    }
+  }
+  for (const source of ['browser-p3.mjs', 'browser-p4.mjs']) {
+    const caller = readFileSync(new URL(`../scripts/${source}`, import.meta.url), 'utf8');
+    assert.equal(caller.match(/reportCalibration\(/g)?.length, 1, 'production caller writes once');
+    assert.match(caller, /try \{\s+await run(?:Results)?Budget\([^\n]+traces: budgetTrace[^\n]+\n\s+\} finally \{\s+reportCalibration\(PROBE_CALIBRATION, budgetTrace, undefined, \{ phase: 'P[34]', zone:/);
+  }
+});
+
+test('JOED-187 (k): over-cap timing FAIL labels end with the absolute-guard explanation', async () => {
+  const suffix = 'host too slow to judge (absolute guards applied)';
+  for (const runner of ['Board', 'Results']) {
+    for (const sample of [{ patchMs: 45, switchMs: 45 }, { taskMs: 125 }]) {
+      const run = await ratioRun(runner, sample, { probe: ratioProbe(35) });
+      const failures = run.checks.filter(c => !c.ok);
+      assert.ok(failures.length > 0);
+      assert.ok(failures.every(c => c.name.endsWith(suffix)));
+    }
+  }
+});
+
+test('JOED-187 L1: over-cap functional failures keep their labels and passing timing names stay stable', async () => {
+  for (const runner of ['Board', 'Results']) {
+    const samples = runner === 'Board' ? [{ worker: false }, { mainThreadAccount: 1 }, { pushes: 0 }]
+      : [{ worker: false }, { mainThreadResults: 1 }, { renders: 0 }];
+    for (const sample of samples) {
+      const slow = await ratioRun(runner, sample, { probe: ratioProbe(35) });
+      const normal = await ratioRun(runner, sample, { probe: ratioProbe(10) });
+      assert.ok(slow.checks.some(c => !c.ok));
+      assert.deepEqual(slow.checks.map(c => c.name), normal.checks.map(c => c.name));
+      assert.ok(slow.checks.every(c => !c.name.includes('host too slow to judge')));
+    }
+    const names = [];
+    for (const median of [10, 35, 42]) {
+      const run = await ratioRun(runner, {}, { probe: ratioProbe(median) });
+      assert.ok(run.checks.every(c => c.ok));
+      names.push(run.checks.map(c => c.name));
+    }
+    assert.deepEqual(names[1], names[0]);
+    assert.deepEqual(names[2], names[0]);
+  }
+});
+
+test('JOED-187 L3: both runners retain the first over-cap attempt when the re-measure throws', async () => {
+  for (const runner of ['Board', 'Results']) {
+    const summaries = [], traces = [];
+    const error = new Error('quiet wait failed');
+    await assert.rejects(ratioRun(runner, { patchMs: 60, switchMs: 60, historyMs: 130 }, {
+      probe: ratioProbe(35), traces, summaryWriter: text => summaries.push(text),
+      waitForQuiet: async () => { throw error; },
+    }), error);
+    assert.equal(traces.length, 1);
+    assert.equal(traces[0].hostTooSlowToJudge, true);
+    assert.equal(summaries.length, 1);
+    assert.ok(summaries[0].includes(`Host too slow to judge: ${runner === 'Board' ? 'P3' : 'P4'} ${process.env.TZ ?? 'UTC'} 390`));
+  }
+});
+
+test('JOED-187 L3: production budget collection reports on errors and skipped budgets write nothing', async () => {
+  for (const phase of ['P3', 'P4']) {
+    const caller = readFileSync(new URL(`../scripts/browser-${phase.toLowerCase()}.mjs`, import.meta.url), 'utf8');
+    const start = caller.indexOf("  if (run('budget')) {");
+    assert.ok(start >= 0);
+    const end = phase === 'P3' ? caller.indexOf("\n\n\n  if (run('design'))", start)
+      : caller.indexOf("\n  timing.enter('host-timezone');", start);
+    assert.ok(end > start);
+    const collection = caller.slice(start, end);
+    for (const enabled of [false, true]) {
+      const summaries = [];
+      const error = new Error('runner failed');
+      const runner = async ({ traces }) => {
+        traces.push({ viewport: '1024', kind: phase === 'P3' ? 'board-live' : 'results', hostTooSlowToJudge: true, k: 3.5, cap: 3 });
+        throw error;
+      };
+      const promise = runInNewContext(`(async () => { ${collection} })()`, {
+        run: () => enabled, view: () => true, page: {}, newBoard() {}, check() {}, CI_GUARD,
+        probeSource: {}, budgetTrace: null, runBudget: runner, runResultsBudget: runner,
+        PROBE_CALIBRATION: ratioCalibration(), process: { env: { TZ: 'Europe/Vienna' } }, expectedTimeZone: 'Europe/Vienna',
+        reportCalibration: (record, traces, writer, context) => {
+          assert.equal(writer, undefined);
+          ratioGuard.reportCalibration(record, traces, text => summaries.push(text), context);
+        },
+      });
+      if (enabled) {
+        await assert.rejects(promise, error);
+        assert.equal(summaries.length, 1);
+        assert.ok(summaries[0].includes(`Host too slow to judge: ${phase} Europe/Vienna 1024`));
+      } else {
+        await promise;
+        assert.equal(summaries.length, 0);
+      }
+    }
+  }
+});
+
+test('JOED-187 (l): uncalibrated and within-cap attempts add no host-too-slow summary line or label', async () => {
+  for (const runner of ['Board', 'Results']) {
+    for (const options of [{ calibration: { status: 'uncalibrated', cap: 3 }, probe: ratioProbe(100) }, { probe: ratioProbe(16) }, { probe: ratioProbe(30) }]) {
+      const summaries = [];
+      const run = await ratioRun(runner, { patchMs: 130, switchMs: 130 }, { ...options, summaryWriter: text => summaries.push(text) });
+      assert.equal(summaries.length, 1);
+      assert.doesNotMatch(summaries[0], /Host too slow to judge:/);
+      assert.ok(run.checks.some(c => !c.ok));
+      assert.ok(run.checks.every(c => !c.name.includes('host too slow to judge')));
+    }
+  }
+});
+
+test('JOED-187 M2: both runners fall back on host or Chrome mismatch and scale on exact match', async () => {
+  for (const runner of ['Board', 'Results']) {
+    for (const runSource of [{ host: 'ubuntu-latest', chrome: 'HeadlessChrome fixture' }, { host: 'quiet-fixture', chrome: 'new Chrome' }, { host: 'quiet-fixture', chrome: 'HeadlessChrome fixture' }]) {
+      const exact = runSource.host === 'quiet-fixture' && runSource.chrome === 'HeadlessChrome fixture';
+      const run = await ratioRun(runner, { patchMs: 60, switchMs: 60 }, { runSource });
+      assert.equal(run.checks.every(c => c.ok), exact);
+      assert.ok(run.traces.every(r => r.k === (exact ? 1.6 : 1)));
+      if (!exact) {
+        assert.ok(run.checks.every(c => c.detail.measurements.every(m => /calibration is for .*this run is .*absolute guards/.test(m.ratioReason))));
+        const table = runner === 'Board' ? budgetTable(run.traces, CI_GUARD) : resultsBudgetTable(run.traces, CI_GUARD);
+        assert.ok(table.includes(`this run is ${runSource.host}/${runSource.chrome}: absolute guards`));
+      }
+    }
+  }
+});
+
+test('JOED-187 L3: both runners round fractional limits in check names without rounding measurements', async () => {
+  for (const runner of ['Board', 'Results']) {
+    const run = await ratioRun(runner, { patchMs: 80, switchMs: 80, historyMs: 190, taskMs: 200 }, { probe: ratioProbe(13.740000000000002) });
+    const names = run.checks.map(c => c.name).join('\n');
+    assert.match(names, /at most 55\.0 ms/);
+    assert.match(names, /171\.8 ms/);
+    assert.doesNotMatch(names, /54\.96000000000001|171\.750000/);
+    assert.ok(run.checks.every(c => c.detail.measurements.every(m => m.limitMs.patchMs === 40 * m.k)));
+  }
+});
+
+test('JOED-187 (b): k = 1.6 scales patch, history, cold render, Results render and long-task limits', async () => {
+  for (const runner of ['Board', 'Results']) {
+    for (const [factor, pass] of [[1.5, true], [1.7, false]]) {
+      const run = await ratioRun(runner, runner === 'Board' ? { patchMs: factor * 40 } : { switchMs: factor * 40 });
+      assert.equal(run.checks.every(c => c.ok), pass);
+      assert.ok(run.traces.every(row => row.k === 1.6 && row.limitMs.patchMs === 64 && row.limitMs.historyMs === 200 && row.limitMs.taskMs === 200));
+      assert.equal(runner === 'Board' ? run.loads.live : run.loads['390'], pass ? 1 : 2);
+    }
+    for (const [taskMs, pass] of [[199.9, true], [200, false], [210, false]]) {
+      const run = await ratioRun(runner, { taskMs });
+      assert.equal(run.checks.every(c => c.ok), pass);
+      assert.equal(runner === 'Board' ? run.loads.live : run.loads['390'], pass ? 1 : 2);
+    }
+  }
+  for (const [historyMs, pass] of [[190, true], [200, true], [210, false]]) {
+    const run = await ratioRun('Board', { historyMs });
+    assert.equal(run.checks.every(c => c.ok), pass);
+    assert.deepEqual(run.loads, { cold: pass ? 1 : 2, live: pass ? 1 : 2 });
+    assert.ok(run.checks.filter(c => 'historyBudget' in c.detail.conditions || 'renderBudget' in c.detail.conditions).every(c => c.ok === pass));
+  }
+});
+
+test('JOED-187 (c/d): above-cap attempts use absolute guards: 35 ms passes, 45 ms fails; the cap is inclusive', async () => {
+  for (const runner of ['Board', 'Results']) {
+    for (const [patchMs, pass] of [[35, true], [45, false]]) {
+      const over = await ratioRun(runner, { patchMs, historyMs: patchMs, switchMs: patchMs, taskMs: null }, { probe: ratioProbe(35) });
+      assert.equal(over.checks.every(c => c.ok), pass);
+      assert.ok(over.traces.every(r => r.k === 3.5 && r.hostTooSlowToJudge && r.limitMs.patchMs === 40 && r.limitMs.historyMs === 125 && r.limitMs.taskMs === 125));
+      assert.equal(runner === 'Board' ? over.loads.live : over.loads['390'], pass ? 1 : 2);
+      assert.ok(over.checks.every(c => c.detail.measurements.every(m => m.hostTooSlowToJudge === true)));
+      assert.ok(over.checks.filter(c => !c.ok && Object.keys(c.detail.conditions).some(k => TIMING_GUARDS.includes(k)))
+        .every(c => /k = 3\.50× \(cap 3×\); host too slow to judge \(absolute guards applied\)$/.test(c.name)));
+      assert.ok(over.checks.filter(c => c.ok).every(c => !c.name.includes('host too slow to judge')));
+      assert.ok(over.checks.every(c => !('hostTooSlowToJudge' in c.detail.conditions)), 'the flag records evidence, not an extra failure condition');
+    }
+    const atCap = await ratioRun(runner, { patchMs: 110, switchMs: 110, historyMs: 300, taskMs: 350 }, { probe: ratioProbe(30) });
+    assert.ok(atCap.checks.every(c => c.ok));
+    assert.ok(atCap.traces.every(r => r.k === 3 && !r.hostTooSlowToJudge && r.attempts === 1));
+    for (const [taskMs, pass] of [[124.9, true], [125, false]]) {
+      const over = await ratioRun(runner, { taskMs, historyMs: 125 }, { probe: ratioProbe(35) });
+      assert.equal(over.checks.every(c => c.ok), pass, 'above cap preserves the absolute task boundary');
+    }
+  }
+});
+
+test('JOED-187: each re-measure uses its own probe and ratio, and functional failures still close the retry path', async () => {
+  for (const runner of ['Board', 'Results']) {
+    let calls = 0;
+    const probe = async () => ratioProbe(++calls % 2 ? 35 : 16)();
+    const cleared = await ratioRun(runner, { patchMs: 60, switchMs: 60, historyMs: 180, taskMs: 190 }, { probe });
+    assert.ok(cleared.checks.every(c => c.ok));
+    assert.deepEqual(Array.from(cleared.traces, r => r.k), runner === 'Board' ? [3.5, 1.6, 3.5, 1.6] : [3.5, 1.6]);
+    assert.ok(cleared.traces.every(r => r.attempts === 2));
+    const functional = await ratioRun(runner, { worker: false }, { probe: ratioProbe(35) });
+    assert.ok(functional.traces.every(r => r.attempts === 1));
+    assert.ok(functional.checks.some(c => !c.ok && c.detail.conditions.worker === false));
+    // A slower second host can independently exceed the cap after an ordinary
+    // scaled timing breach; it remains a red final measurement.
+    calls = 0;
+    const final = await ratioRun(runner, { patchMs: 70, switchMs: 70, historyMs: 210 }, { probe: async () => ratioProbe(++calls % 2 ? 16 : 35)() });
+    assert.ok(final.checks.some(c => !c.ok && /host too slow to judge.*absolute guards/.test(c.name)));
+    assert.ok(final.checks.some(c => c.detail.measurements.some(m => m.hostTooSlowToJudge === true)));
+  }
+});
+
+test('JOED-187 (a/d): calibrated k = 1 and faster-than-quiet probes preserve all 12 baseline decisions and waits', async () => {
+  for (const limits of [CI_GUARD, REFERENCE_BUDGET]) {
+    for (const second of [{}, { worker: false }, { taskMs: 130 }]) {
+      for (const runner of ['Board', 'Results']) {
+        const run = async (calibration, medianMs) => {
+          const options = { limits, calibration, probe: ratioProbe(medianMs) };
+          return runner === 'Board' ? simulatedBudget({ ...options, cold: [{ taskMs: 130 }, second], live: [{ patchMs: 41 }, second] })
+            : simulatedResultsBudget({ ...options, samples: { 390: [{ switchMs: 41 }, second] } });
+        };
+        const baseline = await run({ status: 'uncalibrated', cap: 3 }, 10);
+        for (const medianMs of [5, 10]) {
+          const actual = await run(ratioCalibration(), medianMs);
+          assert.deepEqual(actual.loads, baseline.loads);
+          assert.deepEqual(actual.events, baseline.events);
+          assert.deepEqual(Array.from(actual.checks, c => [c.name, c.ok, JSON.stringify(c.detail.conditions)]), Array.from(baseline.checks, c => [c.name, c.ok, JSON.stringify(c.detail.conditions)]));
+          assert.ok(actual.traces.every(r => r.k === 1));
+        }
+      }
+    }
+  }
+});
+
+test('JOED-187 (e): a missing or malformed probe falls back to k = 1 with visible evidence on every attempt', async () => {
+  for (const runner of ['Board', 'Results']) {
+    for (const probe of [async () => { throw new Error('probe missing'); }, async () => ({ medianMs: 16 })]) {
+      const run = await ratioRun(runner, { patchMs: 60, switchMs: 60 }, { probe });
+      assert.ok(run.checks.some(c => !c.ok));
+      assert.ok(run.traces.every(r => r.k === 1 && r.limitMs.patchMs === 40 && r.probe === null && /probe unavailable: k = 1/.test(r.ratioReason)));
+      assert.ok(run.checks.every(c => c.detail.measurements.every(m => m.k === 1 && /probe unavailable/.test(m.ratioReason))));
+      const table = runner === 'Board' ? budgetTable(run.traces, CI_GUARD) : resultsBudgetTable(run.traces, CI_GUARD);
+      assert.match(table, /probe unavailable: k = 1, absolute guards/);
+      assert.match(table, /calibrated: run 41276169961/);
+    }
+  }
+});
+
+test('JOED-187 (i): single and repeated failure lines retain per-attempt k and limitMs before offendingTasks within 2400 characters', async () => {
+  for (const runner of ['Board', 'Results']) {
+    for (const functional of [false, true]) {
+      const run = await ratioRun(runner, { patchMs: 80, switchMs: 80, taskMs: 210, ...(functional ? { worker: false } : {}) });
+      const messages = [], original = console.error;
+      try {
+        console.error = line => messages.push(line);
+        const gate = createGate('unused');
+        for (const c of run.checks.filter(c => !c.ok)) gate.check('budget', c.name, c.ok, { ...c.detail, offendingTasks: [{ attribution: 'x'.repeat(5000) }] });
+      } finally { console.error = original; }
+      assert.ok(messages.length > 0);
+      for (const message of messages) {
+        assert.ok(message.indexOf('"measurements"') < message.indexOf('"offendingTasks"'));
+        assert.ok(message.indexOf('calibrated: run 41276169961') < message.indexOf('"offendingTasks"'));
+        assert.ok(message.includes('calibrated: run 41276169961'));
+        const measurements = JSON.parse(message.match(/"measurements":(\[.*?\])/)[1]);
+        assert.equal(measurements.length, functional ? 1 : 2);
+        for (const m of measurements) { assert.equal(m.k, 1.6); assert.equal(m.hostTooSlowToJudge, false); assert.deepEqual(m.limitMs, { patchMs: 64, historyMs: 200, taskMs: 200 }); }
+        const detail = message.slice(message.indexOf(': {') + 2);
+        assert.ok(detail.length <= 2400);
+      }
+    }
+  }
+});
+
+test('JOED-187 (f): Board and Results runners select their exact width and kind calibration', async () => {
+  const calibration = ratioCalibration();
+  calibration.quiet['390']['board-live'].medianMs = 100;
+  calibration.quiet['1440'].results.medianMs = 20;
+  const options = { runSource: { host: 'quiet-fixture', chrome: 'HeadlessChrome fixture' }, calibration, probe: ratioProbe(16) };
+  const board = await simulatedBudget({ ...options, viewports: ['1440'], cold: [{ historyMs: 190 }], live: [{ patchMs: 60 }] });
+  assert.ok(board.checks.every(c => c.ok));
+  assert.ok(board.traces.every(row => row.viewport === '1440' && row.k === 1.6));
+  const results = await simulatedResultsBudget({ ...options, samples: { 1440: [{ switchMs: 60 }, { switchMs: 60 }] } });
+  assert.ok(results.checks.some(c => !c.ok));
+  assert.ok(results.traces.every(row => row.viewport === '1440' && row.k === 1));
 });

@@ -496,19 +496,93 @@ recorded as a refund reason, without marking the completed wait as skipped.
 The second measurement is final; a reproduced breach or
 any functional failure still fails. Both
 attempts appear in the trace, table and failure detail. Results keeps its
-40 ms switch-render guard and rejects tasks reaching 125 ms; worker/main-thread
+40 ms base switch-render guard and rejects tasks reaching its 125 ms base
+limit (both scale with the calibrated ratio); worker/main-thread
 and render-count failures never trigger a re-measure. The reference budget
 never re-measures and its limits stay unchanged.
-JOED-186 adds a fixed, JoeDesk-independent synthetic table/layout and JavaScript
-probe (seven repetitions in a fresh `about:blank` document, separate layout/JS
-medians and total median/min/max ms) before every attempt's measured navigation,
-including the reference command, so neither JoeDesk layout nor probe tasks enter
-the other workload. The attempt trace retains all timings, budget/load tables
-show layout / JS and concise failure measurements keep the total as `probeMs`;
-probe errors record null values and a short `unavailable` reason while the run
-continues, changing no limit, quiet wait or re-measure.
-Phase 2 will scale the CI guard by a calibrated `probeNow / probeQuiet` ratio,
-capped, and fail when the slowdown exceeds the cap.
+JOED-186 records a fixed synthetic table/layout and JavaScript probe before
+every Board and Results attempt, including re-measurements and the shared
+reference-device run. JOED-187 adds one untimed warm-up before seven timed
+repetitions in a fresh `about:blank` document; a fresh navigation then opens
+the budget windows. Separate layout and JS medians plus total median/min/max
+milliseconds stay in the trace. Non-finite or unavailable probe results are
+caught and recorded as null with a short reason, so the attempt still runs.
+
+JOED-187 scales only CI timing guards by
+`k = max(1, probeNow.medianMs / quiet[width][kind].medianMs)`, using exactly the
+same width (1440, 1024 or 390) and kind (`board-live` or `results`). Board cold
+History and live measurements use that width's `board-live` baseline; cold
+probes are retained as evidence but excluded when building the live calibration.
+Patch and Results renders use `40 × k` ms, History uses `125 × k` ms, and
+long tasks must stay below `125 × k` ms. Each re-measure uses its own fresh
+probe and ratio. Non-timing checks, the reference-device budget, the existing
+one-time timing-only re-measure, and JOED-180's quiet wait/shared 300 s
+allowance remain unchanged.
+
+The strict `scripts/browser/probe-calibration.json` record is calibrated
+from two quiet agm2 runs (42538794854 and 42543351170, Chrome/151.0.7922.75,
+load1 1.34–2.20) with cap 3.0; an `"uncalibrated"` record gives absolute guards
+and exactly the previous decisions. The validator requires `1 < cap ≤ 3`. A calibrated ratio is floored
+at 1; an unavailable probe uses `k = 1` and says so in the evidence. Calibration
+applies only to its exact host and Chrome version. A different host (including
+an ubuntu-latest fallback) or Chrome version uses `k = 1`, with the reason
+`calibration is for <host>/<chrome>, this run is <host>/<chrome>: absolute guards`.
+An invalid calibration fails loudly at startup. Within the cap, timing limits
+scale with k. If `k > cap`, the measured ratio remains in the evidence and the
+attempt records `hostTooSlowToJudge: true`, but all timing limits revert to the
+absolute CI guard (`k = 1` for limits): a 35 ms patch passes and a 45 ms patch
+fails at k = 3.5, cap 3. This never judges an overloaded host more loosely or
+more strictly than today's absolute guard. The existing timing-only re-measure
+still uses its own probe and limits. This is not the rejected option
+“(4) inconclusive on overload”: every attempt is judged against timing limits,
+and overload alone grants neither a pass nor a failure.
+Budget and machine-load tables show k to two decimals and applied
+patch/history/task limits to 0.1 ms; check names round fractional limits to
+0.1 ms. JSON evidence keeps exact values. Failure-line `measurements` keep each
+attempt's k, `limitMs`, `hostTooSlowToJudge` (true or false), probe and load before
+task attribution. The step summary is written once per budget process (P3,
+and each P4 zone), including when the runner throws. Processes whose budget
+did not run write nothing. It includes calibration provenance plus one line
+per width/kind with any over-cap attempt, using its highest k, even if a
+re-measure passed:
+`Host too slow to judge: <phase> <zone> <width> <kind>, k = <k>× (cap <cap>×); absolute guards applied`.
+Over-cap timing-only failure labels end with
+`host too slow to judge (absolute guards applied)`. Functional failures keep
+their normal labels, and passing check names stay stable; k stays in evidence.
+Uncalibrated and within-cap attempts add no such line. The runners never write
+the summary file; their simulated tests inject a writer that captures the text.
+
+To prepare calibration, retain Board and Results evidence from 1–5 quiet CI
+runs on the same host and Chrome, then pass their evidence files to
+`node scripts/probe-calibrate.mjs /path/to/p3/index.md /path/to/p4/index.md`.
+A combined index or JSON evidence bundle can include several runs. The indices
+include lossless JSON probe evidence with provenance; JSON input is an object
+or array of `{ source, traces }` bundles. Calibration evidence and records require
+GitHub Actions run IDs: strings of 1–20 ASCII digits with no leading zero
+(`/^[1-9][0-9]{0,19}$/`); `local-…` and other run IDs are refused. Probe
+capture records its own timestamp just before the workload; `source.capturedAt`
+is the latest actual probe time, rather than the browser launch time. Every
+recorded attempt must have known load1 < 5 and an available positive probe;
+each run (ID and attempt) must include all three widths and both kinds across
+its evidence files (a P3 index plus each P4 zone index is accepted). Duplicate
+probe evidence, identified by run, attempt, viewport, cold/live bucket, kind and
+probe capture instant in integer milliseconds, is refused even if timestamp
+spelling or the phase name within its bucket changes. Any timestamp that is not
+strict UTC `YYYY-MM-DDTHH:mm:ssZ` with optional three-digit milliseconds
+(`YYYY-MM-DDTHH:mm:ss.sssZ`) is refused, including parseable timezone offsets;
+invalid calendar dates are also refused. The five-run cap counts distinct runs,
+not files.
+The tool takes the median of recorded live/Results medians within each width
+and kind across the quiet runs. It prints per-cell min/max
+spread across those samples and per-width cold/live total-median ratios to stderr (or an explicit unavailable
+label without cold probes), plus the candidate JSON record to stdout, without
+writing any file. Multi-run candidates retain every run's provenance in
+`sources`, with the latest probe's run in `source`. The coordinator shows LEAD
+the candidate, spread and cold/live ratios before committing an approved record;
+no calibration is silently learned from loaded runs. Historical phase-1 indices
+without lossless probe evidence are refused rather than reconstructed from
+rounded table cells.
+
 Recorded reference:
 mbp2607 (Apple M5 Max, 18 cores, HeadlessChrome 153.0.8010.12, Node
 v26.11.1) on 2026-10-15: Desk patch worst 7.7 ms, History draw worst

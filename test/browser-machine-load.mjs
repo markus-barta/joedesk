@@ -157,6 +157,6 @@ test('JOED-186 CPU evidence caps display strings without truncating the quota lo
   ], {});
   const rows = table.split('Machine load before each attempt')[1].split('\n').filter(row => row.startsWith('|'));
   assert.equal(rows.length, 5);
-  for (const row of rows) assert.equal(row.split('|').length - 2, 21, row);
+  for (const row of rows) assert.equal(row.split('|').length - 2, 24, row);
   assert.match(rows[0], /availableParallelism \| cpusAllowed \| cgroup \| cpuMax/);
 });

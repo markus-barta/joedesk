@@ -7,6 +7,7 @@ import { basename } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { quietWaitBudget, QUIET_WAIT_SECONDS } from './quiet-wait-budget.mjs';
 import { probeCell } from './reference-probe.mjs';
+import { ratioCells } from './ratio-guard.mjs';
 
 // Only the runners' timing-only CI retry branch calls this helper. Load
 // polling stays outside measured page work and never inspects process argv.
@@ -122,11 +123,11 @@ export function machineLoadTable(traces, lock = process.env) {
 
 Machine load before each attempt (host-wide browser processes include this browser and its helpers; unavailable counts are not zero):
 
-| Width | Phase | Probe layout / JS (ms) | Attempt | Quiet wait seconds | Quiet reached | Quiet threshold (load1) | Wait start load1 | Job wait budget before (s) | Job wait budget after (s) | Wait skipped | Skip reason | Budget state | Sampled (UTC) | Loadavg 1 / 5 / 15 min | Logical CPUs | availableParallelism | cpusAllowed | cgroup | cpuMax | Browser processes |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Width | Phase | Probe layout / JS (ms) | k | Applied limits patch / history / task (ms) | Ratio evidence | Attempt | Quiet wait seconds | Quiet reached | Quiet threshold (load1) | Wait start load1 | Job wait budget before (s) | Job wait budget after (s) | Wait skipped | Skip reason | Budget state | Sampled (UTC) | Loadavg 1 / 5 / 15 min | Logical CPUs | availableParallelism | cpusAllowed | cgroup | cpuMax | Browser processes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 ${traces.map(r => {
     const m = r.machineLoad;
-    return `| ${r.viewport} | ${r.phase} | ${probeCell(r)} | ${r.attempt ?? 1}/${r.attempts ?? 1} |${quietWaitCells(r.quietWait)} ${m?.sampledAt ?? 'unavailable'} | ${m?.loadavg?.map(loadCell).join(' / ') ?? 'unavailable'} | ${m?.cpuCount ?? 'unavailable'} | ${m?.availableParallelism ?? 'unavailable'} | ${m?.cpusAllowed ?? 'unavailable'} | ${m?.cgroup ?? 'unavailable'} | ${m?.cpuMax ?? 'unavailable'} | ${m?.browserProcesses ?? 'unavailable'} |`;
+    return `| ${r.viewport} | ${r.phase} | ${probeCell(r)} |${ratioCells(r, { patchMs: 'unavailable', historyMs: 'unavailable', taskMs: 'unavailable' })} ${r.attempt ?? 1}/${r.attempts ?? 1} |${quietWaitCells(r.quietWait)} ${m?.sampledAt ?? 'unavailable'} | ${m?.loadavg?.map(loadCell).join(' / ') ?? 'unavailable'} | ${m?.cpuCount ?? 'unavailable'} | ${m?.availableParallelism ?? 'unavailable'} | ${m?.cpusAllowed ?? 'unavailable'} | ${m?.cgroup ?? 'unavailable'} | ${m?.cpuMax ?? 'unavailable'} | ${m?.browserProcesses ?? 'unavailable'} |`;
   }).join('\n')}
 `;
 }
