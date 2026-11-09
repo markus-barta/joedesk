@@ -3,7 +3,7 @@
 // at 390/1024/1440 in light and dark (AC-1, 2, 5–9, 18–21, 28–34, 36, 38–47).
 // One browser, one page, run sequentially; screenshots go to the QA folder.
 import { readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
-import { homedir, cpus } from 'node:os';
+import { homedir, cpus, hostname } from 'node:os';
 import { join } from 'node:path';
 import * as nodeModule from 'node:module';
 import { retainedDocument, assertSignedOutPage } from '../test/fixtures/signed-out-cases.mjs';
@@ -15,6 +15,7 @@ import { setDeskDisclosures, phoneDeskSnapshot } from './browser/desk-disclosure
 import { heroWordingFixtures } from './browser/hero-wording-fixtures.mjs';
 import { focusTermTips } from './browser/term-focus.mjs';
 import { runBudget, budgetTable, CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
+import { PROBE_CALIBRATION, reportCalibration } from './browser/ratio-guard.mjs';
 import { TERMS } from '../public/joe/terms.js';
 import { createGate, proportional, shifted, WIDE_FONT } from './browser/gate.mjs';
 import { phaseBChecks, deskRankingFocusChecks } from './browser/phase-b.mjs';
@@ -476,6 +477,8 @@ const browser = await launch({ hostRules: 'MAP joedesk.example.test 127.0.0.1' }
 // The performance reference: this browser build on this machine, recorded with every trace.
 const engine = await browser.send('Browser.getVersion');
 const reference = `${engine.product} (headless, ${process.platform} ${process.arch}), ${cpus()[0]?.model ?? 'unknown CPU'}, ${cpus().length} cores, Node ${process.version}`;
+const probeSource = { runId: process.env.GITHUB_RUN_ID ?? `local-${Date.now()}`, attempt: Number(process.env.GITHUB_RUN_ATTEMPT ?? 1),
+  host: hostname(), chrome: engine.product };
 const page = await openPage(browser, { headers: { 'x-auth-request-user': ACTOR } });
 await page.s('Page.addScriptToEvaluateOnNewDocument', { source: AUDIT });
 let board = null, current = null, budgetTrace = null;
@@ -1668,7 +1671,12 @@ try {
   // so this gate holds the 2.5 × regression guard; the budget itself (16 ms
   // patch, no task reaching 50 ms) is measured on a reference device by
   // scripts/budget-reference.mjs.
-  budgetTrace = await runBudget({ page, newBoard, check, limits: CI_GUARD });
+  budgetTrace = [];
+  try {
+    await runBudget({ page, newBoard, check, limits: CI_GUARD, runSource: probeSource, traces: budgetTrace });
+  } finally {
+    reportCalibration(PROBE_CALIBRATION, budgetTrace, undefined, { phase: 'P3', zone: process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone });
+  }
   console.log('render trace', JSON.stringify(budgetTrace));
   }
 
@@ -1771,13 +1779,13 @@ ${failed.length ? `### Failures\n\n${failed.map(f => `- ${f.ac} ${f.name}: \`${J
 This run: ${reference}. Fonts: the system UI stack of this machine; the
 Linux CI run uses its own fonts and is the merge gate for layout.
 
-Held here: the ${CI_GUARD.name} (a normal patch at most ${CI_GUARD.patchMs} ms,
+Base limits before per-attempt ratio scaling: the ${CI_GUARD.name} (a normal patch at most ${CI_GUARD.patchMs} ms,
 a History draw at most ${CI_GUARD.historyMs} ms, no task reaching ${CI_GUARD.taskMs} ms). The
 ${REFERENCE_BUDGET.name} itself (patch under ${REFERENCE_BUDGET.patchMs} ms, no task reaching
 ${REFERENCE_BUDGET.taskMs} ms) is measured on a reference device by
 \`node scripts/budget-reference.mjs\`.
 
-${budgetTrace ? budgetTable(budgetTrace, CI_GUARD) : 'Not run.\n'}
+${budgetTrace ? budgetTable(budgetTrace, CI_GUARD, probeSource) : 'Not run.\n'}
 ## Screenshots (\`<viewport>-<theme>-<surface>.png\`)
 
 ${shots.map(s => `- \`${s.file}\` — ${s.what}`).join('\n')}

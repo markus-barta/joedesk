@@ -7,9 +7,10 @@
 import { scenario, NOW, at } from './board.mjs';
 import { largeResults } from './results.mjs';
 import { VIEWPORTS, configure, load, settle, waitFor } from './shots.mjs';
-import { decideTaskGuard, TIMING_GUARDS } from './budget.mjs';
+import { decideTaskGuard, TIMING_GUARDS, CI_GUARD } from './budget.mjs';
 import { captureMachineLoad, machineLoadTable, waitForQuietHost, quietWaitCells, budgetAttemptLine } from './machine-load.mjs';
 import { runReferenceProbe, captureReferenceProbe, probeCell } from './reference-probe.mjs';
+import { PROBE_CALIBRATION, validateCalibration, attemptGuard, applyAttemptGuard, guardCheck, calibrationSummary, ratioCells, calibrationEvidence } from './ratio-guard.mjs';
 
 const max = list => (list.length ? Math.max(...list) : NaN);
 
@@ -28,9 +29,11 @@ export async function serveResults(browser, page, board, payload) {
   return async () => { await page.setFetch(null); browser.off(handler); };
 }
 
-export async function runResultsBudget({ page, newBoard, check, limits, serve, sampleLoad = captureMachineLoad, waitForQuiet = waitForQuietHost, probe = runReferenceProbe }) {
+export async function runResultsBudget({ page, newBoard, check, limits, serve, sampleLoad = captureMachineLoad, waitForQuiet = waitForQuietHost, probe = runReferenceProbe, calibration = PROBE_CALIBRATION, runSource, traces = [] }) {
+  validateCalibration(calibration);
   const within = (ms, limit) => (limits.atMost ? ms <= limit : ms < limit);
-  const bound = limit => `${limits.atMost ? 'at most' : 'under'} ${limit} ms`;
+  const displayMs = limit => Number.isInteger(limit) ? limit : limit.toFixed(1);
+  const bound = limit => `${limits.atMost ? 'at most' : 'under'} ${displayMs(limit)} ms`;
   const { snapshot, history } = scenario(NOW);
   const board = await newBoard({ history });
   board.setNow(NOW);
@@ -39,8 +42,7 @@ export async function runResultsBudget({ page, newBoard, check, limits, serve, s
   const record = largeResults(NOW);
   const sizeBytes = new TextEncoder().encode(JSON.stringify(record)).length;
   const unserve = await serve(record, board);
-  const traces = [];
-  const measure = async viewport => {
+  const measure = async (viewport, timing) => {
     const { identifier } = await page.s('Page.addScriptToEvaluateOnNewDocument', { source: `window.__long = []; new PerformanceObserver(list => { for (const e of list.getEntries()) window.__long.push([e.startTime, Math.round(e.duration)]); }).observe({ type: 'longtask', buffered: true });` });
     await load(page, board.url, 'results');
     await waitFor(page, `window.__joedesk.timings.some(t => t.reason === 'results-worker') && document.querySelectorAll('#tiles .tile .tval .num').length > 0`, 30000);
@@ -58,10 +60,10 @@ export async function runResultsBudget({ page, newBoard, check, limits, serve, s
     return { row, checks: [
       { name: `${viewport.name}: the ${record.trades.length}-trade record is read, validated and indexed in the worker, never on the page`,
         conditions: { worker: trace.worker, noMainThreadResults: !row.mainThreadResults } },
-      { name: `${viewport.name}: each of ${clicks.length} period, desk, step and day changes renders Results in ${bound(limits.patchMs)} (${limits.name})`,
-        conditions: { switchRenders: renders.length >= clicks.length, renderBudget: within(row.switchWorst, limits.patchMs) } },
-      { name: `${viewport.name}: no task on the page reaches ${limits.taskMs} ms once the record has arrived (${limits.name})`,
-        conditions: { taskBudget: !row.longTasks.some(ms => ms >= limits.taskMs) } },
+      { name: `${viewport.name}: each of ${clicks.length} period, desk, step and day changes renders Results in ${bound(timing.patchMs)} (${limits.name})`,
+        conditions: { switchRenders: renders.length >= clicks.length, renderBudget: within(row.switchWorst, timing.patchMs) } },
+      { name: `${viewport.name}: no task on the page reaches ${displayMs(timing.taskMs)} ms once the record has arrived (${limits.name})`,
+        conditions: { taskBudget: !row.longTasks.some(ms => ms >= timing.taskMs) } },
     ] };
   };
   try {
@@ -70,36 +72,42 @@ export async function runResultsBudget({ page, newBoard, check, limits, serve, s
       const conditions = result => Object.assign({}, ...result.checks.map(c => c.conditions));
       const firstLoad = sampleLoad();
       const firstProbe = await captureReferenceProbe(page, probe, waitFor);
-      const first = await measure(viewport);
-      console.log(budgetAttemptLine('Results', { ...first.row, machineLoad: firstLoad, ...firstProbe, attempt: 1 }));
+      const firstGuard = attemptGuard(limits, limits === CI_GUARD, calibration, viewport.name, 'results', firstProbe, runSource);
+      const first = await measure(viewport, firstGuard.limitMs);
+      applyAttemptGuard(first, firstGuard);
+      const rows = [{ ...first.row, machineLoad: firstLoad, ...firstProbe, attempt: 1 }];
+      traces.push(rows[0]);
+      console.log(budgetAttemptLine('Results', rows[0]));
       let decision = decideTaskGuard(conditions(first), null, limits);
       // Two explicit calls: only a CI timing-only breach gets a second sample.
       const quietWait = decision.remeasure ? await waitForQuiet() : null;
       const secondLoad = decision.remeasure ? sampleLoad() : null;
       const secondProbe = decision.remeasure ? await captureReferenceProbe(page, probe, waitFor) : null;
-      const second = decision.remeasure ? await measure(viewport) : null;
+      const secondGuard = decision.remeasure ? attemptGuard(limits, limits === CI_GUARD, calibration, viewport.name, 'results', secondProbe, runSource) : null;
+      const second = decision.remeasure ? await measure(viewport, secondGuard.limitMs) : null;
       if (second) {
-        console.log(budgetAttemptLine('Results', { ...second.row, machineLoad: secondLoad, ...secondProbe, attempt: 2, quietWait }));
-        decision = decideTaskGuard(conditions(first), conditions(second), limits);
+        applyAttemptGuard(second, secondGuard);
+        rows.push({ ...second.row, machineLoad: secondLoad, ...secondProbe, quietWait, attempt: 2 });
+        traces.push(rows[1]);
+        console.log(budgetAttemptLine('Results', rows[1]));
       }
-      const rows = (decision.remeasured ? [first, second] : [first]).map((result, i) => ({ ...result.row,
-        machineLoad: i === 0 ? firstLoad : secondLoad, ...(i === 0 ? firstProbe : secondProbe),
-        ...(i === 1 ? { quietWait } : {}),
-        attempt: i + 1, attempts: decision.attempts, remeasured: decision.remeasured }));
-      traces.push(...rows);
+      if (second) decision = decideTaskGuard(conditions(first), conditions(second), limits);
+      for (const row of rows) Object.assign(row, { attempts: decision.attempts, remeasured: decision.remeasured });
       const result = decision.remeasured ? second : first;
-      for (const { name, conditions } of result.checks) {
+      for (const original of result.checks) {
+        const { name, conditions } = guardCheck(original.name, original.conditions, rows.at(-1), TIMING_GUARDS);
         const failed = Object.keys(conditions).filter(key => !conditions[key]);
         const label = decision.remeasured && Object.keys(conditions).some(key => TIMING_GUARDS.includes(key))
           ? name.replace(`(${limits.name})`, `(${limits.name}; re-measured once after a breach)`) : name;
         check('budget', label, !failed.length, { failed, conditions,
           // Keep both concise samples ahead of potentially large task lists.
-          ...(decision.remeasured ? { measurements: rows.map(r => ({ attempt: r.attempt,
+          measurements: rows.map(r => ({ attempt: r.attempt, k: r.k, limitMs: r.limitMs, hostTooSlowToJudge: r.hostTooSlowToJudge, ratioReason: r.ratioReason,
             switchMs: r.switchWorst, taskMs: r.longTasks.length ? max(r.longTasks) : null,
             load1: r.machineLoad?.loadavg?.[0] ?? null, probeMs: r.probeMs,
             ...(r.quietWait ? { quietWait: { waitedSeconds: r.quietWait.waitedSeconds, quiet: r.quietWait.quiet,
-              threshold: r.quietWait.threshold, skipped: r.quietWait.skipped, skipReason: r.quietWait.skipReason } } : {}) })) } : {}),
-          offendingTasks: rows.at(-1).longTasks.filter(ms => ms >= limits.taskMs),
+              threshold: r.quietWait.threshold, skipped: r.quietWait.skipped, skipReason: r.quietWait.skipReason } } : {}) })),
+          calibration: rows.at(-1).calibration,
+          offendingTasks: rows.at(-1).longTasks.filter(ms => ms >= rows.at(-1).limitMs.taskMs),
           ...rows.at(-1), ...(decision.remeasured ? { attemptRows: rows } : {}) });
       }
     }
@@ -107,12 +115,15 @@ export async function runResultsBudget({ page, newBoard, check, limits, serve, s
   return traces;
 }
 
-export function resultsBudgetTable(traces, limits) {
+export function resultsBudgetTable(traces, limits, source) {
   const remeasured = traces.some(r => r.remeasured);
-  return `| Width | Record | Probe layout / JS (ms) |${remeasured ? ' Attempt | Quiet wait seconds | Quiet reached | Quiet threshold (load1) | Wait start load1 | Job wait budget before (s) | Job wait budget after (s) | Wait skipped | Skip reason | Budget state |' : ''} Results render worst (ms) | Renders | Long task worst (ms) | Long tasks (≥ 50 ms) | Tasks ≥ ${limits.taskMs} ms |
-| --- | --- | --- |${remeasured ? ' --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |' : ''} --- | --- | --- | --- | --- |
-${traces.map(r => `| ${r.viewport} | ${r.phase} | ${probeCell(r)} |${remeasured ? ` ${r.attempt}/${r.attempts}${r.remeasured ? ' (re-measured)' : ''} |${quietWaitCells(r.quietWait)}` : ''} ${r.switchWorst.toFixed(1)} | ${r.switches} | ${r.longTasks.length ? max(r.longTasks).toFixed(1) : '—'} | ${r.longTasks.length} | ${r.longTasks.filter(ms => ms >= limits.taskMs).length} |`).join('\n')}
+  return `Probe calibration: ${traces[0]?.calibration ?? calibrationSummary()}
+
+| Width | Record | Probe layout / JS (ms) | k | Applied limits patch / history / task (ms) | Ratio evidence |${remeasured ? ' Attempt | Quiet wait seconds | Quiet reached | Quiet threshold (load1) | Wait start load1 | Job wait budget before (s) | Job wait budget after (s) | Wait skipped | Skip reason | Budget state |' : ''} Results render worst (ms) | Renders | Long task worst (ms) | Long tasks (≥ 50 ms) | Tasks ≥ applied task limit |
+| --- | --- | --- | --- | --- | --- |${remeasured ? ' --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |' : ''} --- | --- | --- | --- | --- |
+${traces.map(r => `| ${r.viewport} | ${r.phase} | ${probeCell(r)} |${ratioCells(r, limits)}${remeasured ? ` ${r.attempt}/${r.attempts}${r.remeasured ? ' (re-measured)' : ''} |${quietWaitCells(r.quietWait)}` : ''} ${r.switchWorst.toFixed(1)} | ${r.switches} | ${r.longTasks.length ? max(r.longTasks).toFixed(1) : '—'} | ${r.longTasks.length} | ${r.longTasks.filter(ms => ms >= (r.limitMs ?? limits).taskMs).length} |`).join('\n')}
 
 ${machineLoadTable(traces)}
+${calibrationEvidence(traces, source)}
 `;
 }

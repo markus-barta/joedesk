@@ -1,0 +1,50 @@
+{
+  "schema": "joedesk.adoption.v1",
+  "version": "261104111323.0.0",
+  "version_scheme": "inspr-calver-3",
+  "release_channel": "stable",
+  "release_sequence": 44,
+  "source": {
+    "commit": "fa97f884f925b2251690fcf32825ab8a8672fcae",
+    "tree": "0302cd5b4a3f8da1340ee82a0c4b670b4f9f99c3"
+  },
+  "release_set_sha256": "a403174342907761d9b48bcd36354cbd82b34c9b13ff4fb6939e60ed71e53aef",
+  "image_digest": "sha256:0da23d127e33440452983531d215db5b4e4b22a75efa7fac81a8fc54316af076",
+  "contract_set_sha256": "c266b39e33e6e15be491263b0ca3575598dd264da3e1a9f6d5a147fc9f1bd49b",
+  "validation_run_id": "42445753184",
+  "decisions": [
+    "d460fa43-0d9d-4831-8897-9248321cf9a0",
+    "dcd81341-18c4-42d8-a543-b0d70ef6fa00",
+    "6b7ec808-4fca-4971-9fd1-d092aef8f582"
+  ],
+  "deployment": {
+    "deployed_at": "2026-11-08T11:31:16Z",
+    "operator_ticket": "JOED-183",
+    "rollback_reference": "JOED-183: revert the csb0 re-pin (nixcfg #1236, merge aa77977a3a15cee1b28c00d36d2498f2bc79df22) and switch csb0 to the previous generation qld57wmqzmnm4aqx8fjmpm6w5y43ybd6-nixos-system-csb0 with the retained sequence-43 image csb0-joe-board:source-36fecfeb7e56400db3076304d150e9eeb2beb05b (sha256:4357525d9090…, pull_policy never); hsb0 untouched; backup board-pre-44-20261108T113016Z.tar"
+  },
+  "live_checks": {
+    "joed_live_check": {
+      "status": "pass",
+      "checked_at": "2026-11-08T11:32:15Z"
+    },
+    "ops_t76_live": {
+      "status": "pass",
+      "checked_at": "2026-11-08T11:32:22Z"
+    },
+    "smoke_release": {
+      "status": "pass",
+      "checked_at": "2026-11-08T11:32:19Z"
+    },
+    "spoof_check": {
+      "status": "pass",
+      "checked_at": "2026-11-08T11:31:34Z"
+    }
+  },
+  "markus_ui_look": {
+    "status": "delegated",
+    "checked_at": "2026-11-08T11:32:15Z",
+    "performed_by": "JOED",
+    "delegation": "JOED-42 comment 2026-10-20: Markus delegated the post-switch look to JOED; GET-only served look with the QA actor on loopback: release 44 (About 44 > 43, 62 version refs, none stale, JOED-185 gap rule and About entry served, JOED-173/175 still served); feeds fresh, gateway confirmed, data seq advanced; J/Joe/Joel equity, Today and OPEN exact; KEEP position_stale, cash source_unavailable, as before; same-build CI run 42445753184"
+  },
+  "adopted_at": "2026-11-08T12:25:23Z"
+}

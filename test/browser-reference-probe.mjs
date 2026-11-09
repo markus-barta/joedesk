@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
-import { runReferenceProbe, captureReferenceProbe, probeCell } from '../scripts/browser/reference-probe.mjs';
+import { runReferenceProbe, referenceProbeWorkload, captureReferenceProbe, probeCell } from '../scripts/browser/reference-probe.mjs';
 
 // A DOM recorder exercises the serialized page workload itself, not a second
 // implementation. No browser, JoeDesk data, wall-clock timing or layout engine.
@@ -45,16 +45,17 @@ function fixture({ layoutError = false } = {}) {
 
 test('JOED-186 (a): serialized reference probe repeats exactly the same isolated DOM and CPU shape without public imports', async () => {
   const source = readFileSync(new URL('../scripts/browser/reference-probe.mjs', import.meta.url), 'utf8');
-  assert.doesNotMatch(source, /\bimport\s|public\/|__joedesk|Math\.random|Date\./);
+  assert.doesNotMatch(source, /\bimport\s|public\/|__joedesk|Math\.random/);
+  assert.doesNotMatch(referenceProbeWorkload.toString(), /Date\./);
   for (let run = 0; run < 2; run++) {
     const f = fixture();
     const result = await runReferenceProbe(f.page);
-    assert.equal(f.page.calls, 1, 'all seven repetitions use one evaluate');
+    assert.equal(f.page.calls, 1, 'warm-up and all seven timed repetitions use one evaluate');
     assert.deepEqual(JSON.parse(JSON.stringify(result)), { layoutMedianMs: 4, jsMedianMs: 4, medianMs: 9, minMs: 7, maxMs: 10, reps: 7 });
-    assert.deepEqual(f.counts(), { layouts: 7, loops: 70000000 });
+    assert.deepEqual(f.counts(), { layouts: 8, loops: 80000000 });
     assert.equal(f.connected.size, 0, 'no probe DOM survives');
-    assert.equal(f.created.filter(n => n.tag === 'div').length, 7);
-    assert.equal(f.created.filter(n => n.tag === 'style').length, 7);
+    assert.equal(f.created.filter(n => n.tag === 'div').length, 8);
+    assert.equal(f.created.filter(n => n.tag === 'style').length, 8);
     for (const root of f.roots) {
       assert.equal(root.children[0].tag, 'style');
       const table = root.children[1];
@@ -99,8 +100,8 @@ test('JOED-186 L1/L2: capture waits for a neutral document and tolerates navigat
       assert.equal(expression, "location.href === 'about:blank' && document.readyState === 'complete'");
       events.push('readiness');
       fail('readiness');
-    });
-    const stages = ['navigation', 'readiness', 'probe'];
+    }, () => { events.push('timestamp'); return new Date('2026-11-04T10:00:00.000Z'); });
+    const stages = ['navigation', 'readiness', 'timestamp', 'probe'];
     assert.deepEqual(events, failure ? stages.slice(0, stages.indexOf(failure) + 1) : stages);
     if (failure) {
       assert.equal(captured.probe, null);
@@ -109,8 +110,21 @@ test('JOED-186 L1/L2: capture waits for a neutral document and tolerates navigat
       assert.doesNotMatch(captured.probeReason, /[|\r\n]/);
       assert.equal(probeCell(captured), `unavailable (${captured.probeReason})`);
     } else {
-      assert.deepEqual(captured, { probe: result, probeMs: 12 });
+      assert.deepEqual(captured, { probe: result, probeMs: 12, probeCapturedAt: '2026-11-04T10:00:00.000Z' });
       assert.equal(probeCell(captured), '5.0 / 7.0');
+    }
+  }
+});
+
+test('JOED-187: malformed probe results become unavailable inside capture, before tables or ratio decisions', async () => {
+  const good = { layoutMedianMs: 5, jsMedianMs: 7, medianMs: 12, minMs: 10, maxMs: 14, reps: 7 };
+  for (const field of Object.keys(good)) {
+    for (const invalid of [undefined, null, '12', NaN, Infinity]) {
+      const captured = await captureReferenceProbe({ async s() {} }, async () => ({ ...good, [field]: invalid }), async () => {});
+      assert.equal(captured.probe, null, `${field}: ${invalid}`);
+      assert.equal(captured.probeMs, null);
+      assert.match(captured.probeReason, /finite numbers/);
+      assert.match(probeCell(captured), /unavailable/);
     }
   }
 });

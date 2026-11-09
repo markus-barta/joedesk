@@ -2,10 +2,19 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "261104111323.0.0",
+    APP_VERSION: "261109023132.0.0",
     VERSION_SCHEME: "inspr-calver-3",
-    RELEASE_SEQUENCE: 44,
+    RELEASE_SEQUENCE: 45,
     VERSION_HISTORY: [
+      {
+        version: "261109023132.0.0",
+        versionScheme: "inspr-calver-3",
+        date: "2026-11-09",
+        title: "Steadier CI timing checks",
+        changes: [
+          "Release 45 changes only CI checks; board behaviour is unchanged.",
+        ],
+      },
       {
         version: "261104111323.0.0",
         versionScheme: "inspr-calver-3",

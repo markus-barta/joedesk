@@ -2,14 +2,17 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261104111323.0.0` (`inspr-calver-3`, stable sequence 44), reserved once at `2026-11-04T11:13:23Z` for honest account chart gaps (JOED-185; release [JOED-183](https://aeon.barta.cm/p/JOED/JOED-183)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
+**Candidate version:** `261109023132.0.0` (`inspr-calver-3`, stable sequence 45), reserved once at `2026-11-09T02:31:32Z` for CI timing checks (JOED-187; release [JOED-189](https://aeon.barta.cm/p/JOED/JOED-189)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
 
-**Last deployed release:** `inspr-calver-3` / `261101023838.0.0` / sequence 43,
-published on `main` at `36fecfeb7e56400db3076304d150e9eeb2beb05b` under JOED-177,
-live on csb0 since `2026-11-01T11:14:45Z` and adopted at `2026-11-01T11:18:26Z`
-(`adoption/261101023838.0.0.json`). Both `previous_release` and
-`last_deployed_release` record sequence 43, with disposition `deployed` and
+**Last deployed release:** `inspr-calver-3` / `261104111323.0.0` / sequence 44,
+published on `main` at `fa97f884f925b2251690fcf32825ab8a8672fcae` under JOED-183,
+live on csb0 since `2026-11-08T11:31:16Z` and adopted at `2026-11-08T12:25:23Z`
+(`adoption/261104111323.0.0.json`). Both `previous_release` and
+`last_deployed_release` record sequence 44, with disposition `deployed` and
 `deployed: true` on `previous_release`.
+Sequence 43 (`261101023838.0.0`, JOED-177) was previously live on csb0 since
+`2026-11-01T11:14:45Z` and adopted at `2026-11-01T11:18:26Z`
+(`adoption/261101023838.0.0.json`).
 Sequence 42 (`261031052151.0.0`, JOED-174) was verified in run `41215247109`
 but never live: its only csb0 switch at `2026-10-31T16:55Z` rolled back on
 `feeds_not_ready` (upstream gateway). It retains its historical
@@ -48,14 +51,14 @@ published on `main` at `dafe7909af04ba5ded3c4b55504ea10970e07e4d`; JOED-41
 records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
-`previous_release` from `last_deployed_release`. About lists the current build, deployed and adopted sequence 43, superseded published sequence 42, deployed and adopted sequences 41, 40 and 39, published sequence 38,
+`previous_release` from `last_deployed_release`. About lists the current build, deployed and adopted sequences 44 and 43, superseded published sequence 42, deployed and adopted sequences 41, 40 and 39, published sequence 38,
 deployed sequences 37, 36, 35, 34, 33, 32, 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
 ## P6a release preparation (JOED-26)
 
 This branch carries paper-only preparation from `rebuild/v2`. It is **not ready for
-cutover**. The sequence-44 candidate has not been published. The candidate
+cutover**. The sequence-45 candidate has not been published. The candidate
 reservation and unchanged legacy anchor live in `release/preparation.json`;
 published artifacts, historical tags and legacy history are preserved. The old CalVer2 proposal JOED-13 is
 superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
@@ -105,7 +108,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261104111323.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261109023132.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -556,14 +559,86 @@ quiet-wait result ahead of task attribution, so log truncation cannot hide them.
 
 JOED-186 records a fixed synthetic table/layout and JavaScript probe before
 every Board and Results attempt, including re-measurements and the shared
-reference-device run; seven repetitions in a fresh `about:blank` document report
-separate layout and JS medians plus total median/min/max milliseconds.
-It gates nothing yet: a fresh navigation opens the budget windows afterward,
-the budget/load tables show layout / JS, concise failure measurements keep the
-total median as `probeMs`, and a probe error records null values with a short
-`unavailable` reason while the budget run continues. Phase 2 will scale the CI
-guard by `probeNow / probeQuiet`, capped using calibration data; a slowdown above
-the cap will fail.
+reference-device run. JOED-187 adds one untimed warm-up before seven timed
+repetitions in a fresh `about:blank` document; a fresh navigation then opens
+the budget windows. Separate layout and JS medians plus total median/min/max
+milliseconds stay in the trace. Non-finite or unavailable probe results are
+caught and recorded as null with a short reason, so the attempt still runs.
+
+JOED-187 scales only CI timing guards by
+`k = max(1, probeNow.medianMs / quiet[width][kind].medianMs)`, using exactly the
+same width (1440, 1024 or 390) and kind (`board-live` or `results`). Board cold
+History and live measurements use that width's `board-live` baseline; cold
+probes are retained as evidence but excluded when building the live calibration.
+Patch and Results renders use `40 × k` ms, History uses `125 × k` ms, and
+long tasks must stay below `125 × k` ms. Each re-measure uses its own fresh
+probe and ratio. Non-timing checks, the reference-device budget, the existing
+one-time timing-only re-measure, and JOED-180's quiet wait/shared 300 s
+allowance remain unchanged.
+
+The strict `scripts/browser/probe-calibration.json` record is calibrated
+from two quiet agm2 runs (42538794854 and 42543351170, Chrome/151.0.7922.75,
+load1 1.34–2.20) with cap 3.0; an `"uncalibrated"` record gives absolute guards
+and exactly the previous decisions. The validator requires `1 < cap ≤ 3`. A calibrated ratio is floored
+at 1; an unavailable probe uses `k = 1` and says so in the evidence. Calibration
+applies only to its exact host and Chrome version. A different host (including
+an ubuntu-latest fallback) or Chrome version uses `k = 1`, with the reason
+`calibration is for <host>/<chrome>, this run is <host>/<chrome>: absolute guards`.
+An invalid calibration fails loudly at startup. Within the cap, timing limits
+scale with k. If `k > cap`, the measured ratio remains in the evidence and the
+attempt records `hostTooSlowToJudge: true`, but all timing limits revert to the
+absolute CI guard (`k = 1` for limits): a 35 ms patch passes and a 45 ms patch
+fails at k = 3.5, cap 3. This never judges an overloaded host more loosely or
+more strictly than today's absolute guard. The existing timing-only re-measure
+still uses its own probe and limits. This is not the rejected option
+“(4) inconclusive on overload”: every attempt is judged against timing limits,
+and overload alone grants neither a pass nor a failure.
+Budget and machine-load tables show k to two decimals and applied
+patch/history/task limits to 0.1 ms; check names round fractional limits to
+0.1 ms. JSON evidence keeps exact values. Failure-line `measurements` keep each
+attempt's k, `limitMs`, `hostTooSlowToJudge` (true or false), probe and load before
+task attribution. The step summary is written once per budget process (P3,
+and each P4 zone), including when the runner throws. Processes whose budget
+did not run write nothing. It includes calibration provenance plus one line
+per width/kind with any over-cap attempt, using its highest k, even if a
+re-measure passed:
+`Host too slow to judge: <phase> <zone> <width> <kind>, k = <k>× (cap <cap>×); absolute guards applied`.
+Over-cap timing-only failure labels end with
+`host too slow to judge (absolute guards applied)`. Functional failures keep
+their normal labels, and passing check names stay stable; k stays in evidence.
+Uncalibrated and within-cap attempts add no such line. The runners never write
+the summary file; their simulated tests inject a writer that captures the text.
+
+To prepare calibration, retain Board and Results evidence from 1–5 quiet CI
+runs on the same host and Chrome, then pass their evidence files to
+`node scripts/probe-calibrate.mjs /path/to/p3/index.md /path/to/p4/index.md`.
+A combined index or JSON evidence bundle can include several runs. The indices
+include lossless JSON probe evidence with provenance; JSON input is an object
+or array of `{ source, traces }` bundles. Calibration evidence and records require
+GitHub Actions run IDs: strings of 1–20 ASCII digits with no leading zero
+(`/^[1-9][0-9]{0,19}$/`); `local-…` and other run IDs are refused. Probe
+capture records its own timestamp just before the workload; `source.capturedAt`
+is the latest actual probe time, rather than the browser launch time. Every
+recorded attempt must have known load1 < 5 and an available positive probe;
+each run (ID and attempt) must include all three widths and both kinds across
+its evidence files (a P3 index plus each P4 zone index is accepted). Duplicate
+probe evidence, identified by run, attempt, viewport, cold/live bucket, kind and
+probe capture instant in integer milliseconds, is refused even if timestamp
+spelling or the phase name within its bucket changes. Any timestamp that is not
+strict UTC `YYYY-MM-DDTHH:mm:ssZ` with optional three-digit milliseconds
+(`YYYY-MM-DDTHH:mm:ss.sssZ`) is refused, including parseable timezone offsets;
+invalid calendar dates are also refused. The five-run cap counts distinct runs,
+not files.
+The tool takes the median of recorded live/Results medians within each width
+and kind across the quiet runs. It prints per-cell min/max
+spread across those samples and per-width cold/live total-median ratios to stderr (or an explicit unavailable
+label without cold probes), plus the candidate JSON record to stdout, without
+writing any file. Multi-run candidates retain every run's provenance in
+`sources`, with the latest probe's run in `source`. The coordinator shows LEAD
+the candidate, spread and cold/live ratios before committing an approved record;
+no calibration is silently learned from loaded runs. Historical phase-1 indices
+without lossless probe evidence are refused rather than reconstructed from
+rounded table cells.
 
 Chrome installation runs hosted-only. Self-hosted jobs first use a non-empty,
 executable `BROWSER_PATH`; otherwise they resolve `chromium`, `chromium-browser`,
@@ -693,7 +768,8 @@ The budget trace keeps timestamped long-task attribution, overlapping render
 and worker-reply events, and long-animation-frame script/layout attribution
 where supported. Desk and History live-push windows begin after their setup
 settles; setup tasks remain in the trace separately, and tasks crossing into
-an update window still count. The CI guard remains 125 ms (2.5 × reference).
+an update window still count. The base CI task guard is 125 ms (2.5 × reference),
+scaled per attempt only after JOED-187 calibration.
 The Board and Results CI guards re-measure once per viewport (the Board:
 per viewport and phase), only when every failed condition is a render-time
 or long-task limit. Before that CI-only second attempt, poll load1 every 5 s
@@ -710,7 +786,8 @@ wait never reached a quiet host”; a corrupt budget resets to 300 s and is reco
 The second measurement is final; a reproduced breach or
 any functional failure still fails. Both
 attempts appear in the trace, table and failure detail. Results keeps its
-40 ms switch-render guard and rejects tasks reaching 125 ms; worker/main-thread
+40 ms base switch-render guard and rejects tasks reaching its 125 ms base
+limit (both scale with the calibrated ratio); worker/main-thread
 and render-count failures never trigger a re-measure. The reference budget
 never re-measures and its limits stay unchanged.
 When no long task was observed, concise attempt diagnostics report
@@ -3149,5 +3226,34 @@ the legacy anchor.
 The approved presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`
 is retained: the config, templates and renderer are unchanged in the available
 INSPR checkout, and the complete offline bundle remains active in footer/About.
+This local candidate grants no publication or deployment approval. The
+coordinator owns the cross-family gate, publication and live verification.
+
+## Release 45 candidate (JOED-189)
+
+Reserve `261109023132.0.0` at `2026-11-09T02:31:32Z` as `inspr-calver-3`, stable sequence 45,
+for CI timing guards scaled by the calibrated probe slowdown (JOED-187)
+and the allowed CPU list evidence label fix. Board behaviour is unchanged.
+
+Previous and last deployed release are sequence 44 (`261104111323.0.0`), main
+`fa97f884f925b2251690fcf32825ab8a8672fcae` (JOED-183), live on csb0 since
+`2026-11-08T11:31:16Z`, adopted at `2026-11-08T12:25:23Z` as recorded in
+`adoption/261104111323.0.0.json`. The previous release has disposition
+`deployed` and `deployed: true`. The supplied adoption record is preserved
+byte for byte. About orders 45, 44, 43, 42, 41, 40, 39, 38, 37 through 26, then
+legacy; all previous entries retain their original content. Earlier
+preparation sections record their reservation-time state.
+
+- Release 45 changes only CI checks; board behaviour is unchanged.
+
+Contract revision 11 remains accepted beside revision 10 under the same schema
+ID. The pusher switch (JOED-149) belongs to DEVOPS and is separate; this
+candidate makes no claim of dollar-desk exchange-rate proof. The contract set
+remains `c266b39e33e6e15be491263b0ca3575598dd264da3e1a9f6d5a147fc9f1bd49b`.
+Reseal the integrated runtime closure once; preserve historical artifacts and
+the legacy anchor.
+
+The approved presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`
+is retained; the complete offline bundle remains active in footer/About.
 This local candidate grants no publication or deployment approval. The
 coordinator owns the cross-family gate, publication and live verification.
