@@ -1865,3 +1865,32 @@ is retained: the config, templates and renderer are unchanged in the available
 INSPR checkout, and the complete offline bundle remains active in footer/About.
 This local candidate grants no publication or deployment approval. The
 coordinator owns the cross-family gate, publication and live verification.
+
+## Release 45 candidate (JOED-189)
+
+Reserve `261109023132.0.0` at `2026-11-09T02:31:32Z` as `inspr-calver-3`, stable sequence 45,
+for CI timing guards scaled by the calibrated probe slowdown (JOED-187)
+and the allowed CPU list evidence label fix. Board behaviour is unchanged.
+
+Previous and last deployed release are sequence 44 (`261104111323.0.0`), main
+`fa97f884f925b2251690fcf32825ab8a8672fcae` (JOED-183), live on csb0 since
+`2026-11-08T11:31:16Z`, adopted at `2026-11-08T12:25:23Z` as recorded in
+`adoption/261104111323.0.0.json`. The previous release has disposition
+`deployed` and `deployed: true`. The supplied adoption record is preserved
+byte for byte. About orders 45, 44, 43, 42, 41, 40, 39, 38, 37 through 26, then
+legacy; all previous entries retain their original content. Earlier
+preparation sections record their reservation-time state.
+
+- Release 45 changes only CI checks; board behaviour is unchanged.
+
+Contract revision 11 remains accepted beside revision 10 under the same schema
+ID. The pusher switch (JOED-149) belongs to DEVOPS and is separate; this
+candidate makes no claim of dollar-desk exchange-rate proof. The contract set
+remains `c266b39e33e6e15be491263b0ca3575598dd264da3e1a9f6d5a147fc9f1bd49b`.
+Reseal the integrated runtime closure once; preserve historical artifacts and
+the legacy anchor.
+
+The approved presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`
+is retained; the complete offline bundle remains active in footer/About.
+This local candidate grants no publication or deployment approval. The
+coordinator owns the cross-family gate, publication and live verification.
