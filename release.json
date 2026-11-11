@@ -1,9 +1,9 @@
 {
   "product": "JoeDesk",
   "version_scheme": "inspr-calver-3",
-  "version": "261109023132.0.0",
+  "version": "261111154448.0.0",
   "release_channel": "stable",
-  "release_sequence": 45,
+  "release_sequence": 46,
   "status": "candidate",
-  "note": "Release 45 changes only CI checks; board behaviour is unchanged."
+  "note": "Release 46 changes only CI checks: faster signed-out checks and Results coverage split into a nightly run; board behaviour is unchanged."
 }

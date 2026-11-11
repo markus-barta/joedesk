@@ -1894,3 +1894,34 @@ The approved presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`
 is retained; the complete offline bundle remains active in footer/About.
 This local candidate grants no publication or deployment approval. The
 coordinator owns the cross-family gate, publication and live verification.
+
+## Release 46 candidate (JOED-193)
+
+Reserve `261111154448.0.0` at `2026-11-11T15:44:48Z` as `inspr-calver-3`, stable sequence 46,
+for faster signed-out checks across four parallel shards (JOED-190), the
+PR/dispatch Results plan on push and full three-zone Results coverage in a
+nightly run with the AGM-303 hold check (JOED-192), and shard-runner test
+cleanup (JOED-191). Board behaviour is unchanged.
+
+Previous and last deployed release are sequence 45 (`261109023132.0.0`), main
+`6ba8051af1108cd35ee6fb6e3cd51a94474f6d24` (JOED-189), live on csb0 since
+`2026-11-09T08:53:35Z`, adopted at `2026-11-09T08:56:44Z` as recorded in
+`adoption/261109023132.0.0.json`. The previous release has disposition
+`deployed` and `deployed: true`. The supplied adoption record is preserved
+byte for byte. About orders 46, 45, 44, 43, 42, 41, 40, 39, 38, 37 through 26,
+then legacy; all previous entries retain their original content. Earlier
+preparation sections record their reservation-time state.
+
+- Release 46 changes only CI checks: faster signed-out checks and Results coverage split into a nightly run; board behaviour is unchanged.
+
+Contract revision 11 remains accepted beside revision 10 under the same schema
+ID. The pusher switch (JOED-149) belongs to DEVOPS and is separate; this
+candidate makes no claim of dollar-desk exchange-rate proof. The contract set
+remains `c266b39e33e6e15be491263b0ca3575598dd264da3e1a9f6d5a147fc9f1bd49b`.
+Reseal the integrated runtime closure once; preserve historical artifacts and
+the legacy anchor.
+
+The approved presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`
+is retained; the complete offline bundle remains active in footer/About.
+This local candidate grants no publication or deployment approval. The
+coordinator owns the cross-family gate, publication and live verification.
