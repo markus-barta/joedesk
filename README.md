@@ -811,9 +811,10 @@ zone-sensitive **views** in UTC and America/New_York, retaining every check in a
 selected view. The full suite in all three zones runs once a night on agm2
 (`results-nightly.yml`, 23:00 UTC; with its 95-minute timeout it ends before the
 02:10 UTC agm2 quiet window; from the default branch, under the browser host lock; JOED-192), keeping its screenshots as an
-artifact. It skips with `skipped: quiet window` while the agm2 HOLD-ALL flag is
-set and fails closed when the runner cannot read the hold state; a failed or
-missing nightly run is reported to JOED the same morning. A view identifies
+artifact. It reads the DEVOPS mirror in `/run/agm-hold` (AGM-303): it skips with
+`skipped: quiet window` while HOLD-ALL is set, runs only when `SYNCED` is younger
+than 30 s (file time and content) and HOLD-ALL is absent, and otherwise fails
+closed and red. A failed or missing nightly run is reported to JOED the same morning. A view identifies
 its group, fixture/interaction, width and theme; workflows can include their
 associated detail screenshots and crops. Check-only setup, boundary and
 geometry cases are also inventoried. Full mode retains every existing check.

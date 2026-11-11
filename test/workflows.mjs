@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { parse } from 'yaml';
@@ -272,7 +272,7 @@ test('JOED-192 nightly: the full 3-timezone Results suite runs once a night on a
   assert.equal(hold.id, 'hold');
   assert.match(hold.run, /exit 1/);
   assert.match(hold.run, /skipped: quiet window/);
-  assert.equal(hold.env.HOLD_FILE, '/run/agm-hold/HOLD-ALL', 'the DEVOPS runner-readable mirror of HOLD-ALL');
+  assert.equal(hold.env.HOLD_DIR, '/run/agm-hold', 'the DEVOPS runner-readable mirror of HOLD-ALL (AGM-303)');
   for (const step of later) assert.match(step.if ?? '', /steps\.hold\.outputs\.skip == 'false'/, `${step.name ?? step.uses}: gated on the hold check`);
   const locked = job.steps.filter(step => step.shell === 'bash scripts/with-browser-lock.sh {0}');
   assert.equal(locked.length, 1);
@@ -284,4 +284,52 @@ test('JOED-192 nightly: the full 3-timezone Results suite runs once a night on a
   assert.equal(keep.if, "always() && steps.hold.outputs.skip == 'false'");
   assert.equal(keep.with.path, '${{ runner.temp }}/joedesk-qa/p4');
   assert.ok(job.steps.every(step => !/\bsudo\b|\bapt(?:-get)?\b/.test(step.run ?? '')), 'no host package installation');
+});
+
+test('JOED-192 hold contract (AGM-303): held unless SYNCED is fresh and HOLD-ALL absent; HOLD-ALL skips, unconfirmed fails', t => {
+  const nightly = parse(workflows.get('results-nightly.yml'), { version: '1.2', uniqueKeys: true });
+  const hold = nightly.jobs.results.steps[0];
+  const root = scratch('joed192-hold-');
+  t.after(() => discard(root, 'JOED-192 hold contract test'));
+  const iso = seconds => new Date(Date.now() + seconds * 1000).toISOString().replace(/\.\d+Z$/, 'Z');
+  let n = 0;
+  const run = ({ holdAll, synced, syncedAge = 0 }) => {
+    const dir = join(root, `case-${++n}`), files = join(root, `out-${n}`);
+    mkdirSync(dir); mkdirSync(files);
+    if (holdAll !== undefined) writeFileSync(join(dir, 'HOLD-ALL'), holdAll);
+    if (synced !== undefined) {
+      writeFileSync(join(dir, 'SYNCED'), synced);
+      const when = new Date(Date.now() + syncedAge * 1000);
+      utimesSync(join(dir, 'SYNCED'), when, when);
+    }
+    writeFileSync(join(files, 'output'), ''); writeFileSync(join(files, 'summary'), '');
+    const result = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', hold.run], { encoding: 'utf8',
+      env: { PATH: process.env.PATH, HOLD_DIR: dir, GITHUB_OUTPUT: join(files, 'output'), GITHUB_STEP_SUMMARY: join(files, 'summary') } });
+    return { status: result.status, output: readFileSync(join(files, 'output'), 'utf8'), log: result.stdout + result.stderr };
+  };
+  const fresh = `${iso(-3)}\n`;
+  // Not held: fresh SYNCED (content and mtime), no HOLD-ALL.
+  assert.deepEqual([run({ synced: fresh }).status, run({ synced: fresh }).output], [0, 'skip=false\n']);
+  // HOLD-ALL present is always held, with or without a reason, fresh or not.
+  for (const holdAll of ['', 'quiet window HNET-433\n', '::error::forged\nsecond line\n']) {
+    for (const synced of [fresh, undefined]) {
+      const r = run({ holdAll, synced });
+      assert.equal(r.status, 0); assert.equal(r.output, 'skip=true\n');
+      assert.doesNotMatch(r.log, /^::error::/m, 'a reason cannot start a workflow command');
+    }
+  }
+  // Unconfirmed hold state fails red and never reports skip=false.
+  for (const [name, args] of Object.entries({
+    'SYNCED missing': {},
+    'SYNCED mtime stale': { synced: fresh, syncedAge: -45 },
+    'SYNCED content stale': { synced: `${iso(-120)}\n` },
+    'SYNCED content in the future': { synced: `${iso(120)}\n` },
+    'SYNCED garbled': { synced: 'yesterday\n' },
+    'SYNCED empty': { synced: '' },
+    'SYNCED not UTC': { synced: `${iso(-3).replace('Z', '+01:00')}\n` },
+  })) {
+    const r = run(args);
+    assert.equal(r.status, 1, name); assert.equal(r.output, '', `${name}: no skip output`);
+    assert.match(r.log, /::error::agm2 hold state not confirmed/, name);
+  }
 });

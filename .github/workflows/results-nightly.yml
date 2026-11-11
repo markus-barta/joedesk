@@ -23,27 +23,43 @@ jobs:
     timeout-minutes: 95
     steps:
       # The agm2 hold flag pauses heavy work (HNET-433 quiet window). DEVOPS
-      # mirrors HOLD-ALL for runner users: present iff set, content = reason only.
-      # Fail closed and loudly when this runner cannot read the hold state.
+      # mirrors it for runner users (AGM-303): /run/agm-hold/HOLD-ALL present
+      # = held (its first line is the reason, possibly empty); /run/agm-hold/SYNCED
+      # holds one UTC ISO-8601 line, refreshed every 10 s after each successful
+      # sync. HELD unless SYNCED is younger than 30 s (mtime and content) and
+      # HOLD-ALL is absent. Held by HOLD-ALL skips green; an unconfirmed hold
+      # state (stale/missing/garbled SYNCED) fails red so a stuck mirror is loud.
       - name: Respect the agm2 hold (HOLD-ALL)
         id: hold
         env:
-          HOLD_FILE: /run/agm-hold/HOLD-ALL
+          HOLD_DIR: /run/agm-hold
         run: |
-          hold_dir=$(dirname "$HOLD_FILE")
-          if [ ! -d "$hold_dir" ] || [ ! -x "$hold_dir" ]; then
-            echo "::error::Cannot read the agm2 hold state: $hold_dir is not accessible to this runner; not running into a possible quiet window."
-            exit 1
-          fi
-          if [ -e "$HOLD_FILE" ]; then
+          hold="$HOLD_DIR/HOLD-ALL" synced="$HOLD_DIR/SYNCED"
+          skip_held() {
             # The reason follows a fixed prefix, so it cannot start a workflow command.
-            reason=$(head -n 1 "$HOLD_FILE" 2>/dev/null | head -c 200 | tr -cd '[:print:]')
+            reason=$(head -n 1 "$hold" 2>/dev/null | head -c 200 | tr -cd '[:print:]')
             echo "::notice::skipped: quiet window (HOLD-ALL is set; reason: ${reason:-none})"
             printf 'skipped: quiet window (HOLD-ALL is set; reason: %s)\n' "${reason:-none}" >> "$GITHUB_STEP_SUMMARY"
             echo 'skip=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'skip=false' >> "$GITHUB_OUTPUT"
-          fi
+            exit 0
+          }
+          unconfirmed() {
+            echo "::error::agm2 hold state not confirmed ($1); treating it as held and not running."
+            exit 1
+          }
+          if [ -e "$hold" ]; then skip_held; fi
+          [ -f "$synced" ] || unconfirmed "$synced missing"
+          now=$(date -u +%s)
+          mtime=$(stat -c %Y "$synced" 2>/dev/null) || unconfirmed "cannot stat $synced"
+          stamp=$(head -n 1 "$synced" 2>/dev/null | head -c 64 | tr -d '\r')
+          [[ "$stamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$ ]] || unconfirmed "SYNCED is not one UTC ISO-8601 line"
+          written=$(date -u -d "$stamp" +%s 2>/dev/null) || unconfirmed "SYNCED time unreadable"
+          for age in $((now - mtime)) $((now - written)); do
+            if [ "$age" -lt -5 ] || [ "$age" -ge 30 ]; then unconfirmed "SYNCED is ${age}s old"; fi
+          done
+          # Re-check: HOLD-ALL may have been set while SYNCED was read.
+          if [ -e "$hold" ]; then skip_held; fi
+          echo 'skip=false' >> "$GITHUB_OUTPUT"
       - name: Keep temporary files under RUNNER_TEMP
         if: steps.hold.outputs.skip == 'false'
         run: |
