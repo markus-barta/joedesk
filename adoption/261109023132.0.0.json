@@ -1,0 +1,50 @@
+{
+  "schema": "joedesk.adoption.v1",
+  "version": "261109023132.0.0",
+  "version_scheme": "inspr-calver-3",
+  "release_channel": "stable",
+  "release_sequence": 45,
+  "source": {
+    "commit": "6ba8051af1108cd35ee6fb6e3cd51a94474f6d24",
+    "tree": "40ebbf676c8609e42f2f957f00168c782efb8596"
+  },
+  "release_set_sha256": "974e9ed5ffd49ce4351f5434944af954762169550e92cb4fe1bf7a9d96040f4c",
+  "image_digest": "sha256:4ecb24c59e16067f97a88a14f357c75612dca12f603c9dd4565b8886a9fd5a85",
+  "contract_set_sha256": "c266b39e33e6e15be491263b0ca3575598dd264da3e1a9f6d5a147fc9f1bd49b",
+  "validation_run_id": "42561715872",
+  "decisions": [
+    "d460fa43-0d9d-4831-8897-9248321cf9a0",
+    "dcd81341-18c4-42d8-a543-b0d70ef6fa00",
+    "6b7ec808-4fca-4971-9fd1-d092aef8f582"
+  ],
+  "deployment": {
+    "deployed_at": "2026-11-09T08:53:35Z",
+    "operator_ticket": "JOED-189",
+    "rollback_reference": "JOED-189: revert the csb0 re-pin (nixcfg #1243, merge 9208a48a05d182233c7ca1015ee7f632747c4e6c) and switch csb0 to the previous generation qjf8dmph…-csb0 with the retained sequence-44 image csb0-joe-board:source-fa97f884f925b2251690fcf32825ab8a8672fcae (sha256:91f88ea3af98…, pull_policy never); hsb0 untouched; backup board-pre-45-20261109T085226Z.tar"
+  },
+  "live_checks": {
+    "joed_live_check": {
+      "status": "pass",
+      "checked_at": "2026-11-09T08:54:58Z"
+    },
+    "ops_t76_live": {
+      "status": "pass",
+      "checked_at": "2026-11-09T08:54:39Z"
+    },
+    "smoke_release": {
+      "status": "pass",
+      "checked_at": "2026-11-09T08:54:36Z"
+    },
+    "spoof_check": {
+      "status": "pass",
+      "checked_at": "2026-11-09T08:54:58Z"
+    }
+  },
+  "markus_ui_look": {
+    "status": "delegated",
+    "checked_at": "2026-11-09T08:55:07Z",
+    "performed_by": "JOED",
+    "delegation": "JOED-42 comment 2026-10-20: Markus delegated the post-switch look to JOED; GET-only served look with the QA actor on loopback: release 45 (About 45 > 44, 62 version refs, none stale, JOED-185/173/175 still served); feeds fresh, gateway confirmed, data seq advanced; J/Joe/Joel equity, Today and OPEN exact, cash value; KEEP day not exact yet pre-market; board unchanged (CI-only release); same-build CI run 42561715872"
+  },
+  "adopted_at": "2026-11-09T08:56:44Z"
+}
