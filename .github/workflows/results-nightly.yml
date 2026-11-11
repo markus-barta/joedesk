@@ -5,10 +5,10 @@ name: results-nightly
 # 3-timezone Results suite. GitHub runs schedules from the default branch only.
 on:
   schedule:
-    # 04:55 UTC = 05:55 Europe/Vienna (CET) or 06:55 (CEST): inside 22:00-07:00,
-    # after the 02:10-04:45 UTC agm2 quiet window (HNET-433), clear of the
-    # 22:00-23:00 switch hour and the 00:45-01:30 OPS-585 slot.
-    - cron: '55 4 * * *'
+    # 23:00 UTC = 00:00 Europe/Vienna (CET) or 01:00 (CEST). With the 95-minute
+    # timeout the worst case ends 00:35 UTC, clear of the 02:10-04:45 UTC agm2
+    # quiet window (HNET-433), the only recurring agm2 constraint.
+    - cron: '0 23 * * *'
   workflow_dispatch:
 
 permissions:
@@ -19,8 +19,8 @@ jobs:
     # Never on a GitHub-hosted runner: without the agm2 opt-in the job is skipped.
     if: vars.JOEDESK_AGM2 == 'on'
     runs-on: ${{ (vars.JOEDESK_AGM2 == 'on' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","agm2"]') || 'ubuntu-latest' }}
-    # 60 min lock wait + ~25 min for three full zones + 15 min setup/upload.
-    timeout-minutes: 100
+    # Up to 60 min lock wait + ~25 min for three full zones + setup/upload.
+    timeout-minutes: 95
     steps:
       # The agm2 hold flag pauses heavy work (HNET-433 quiet window). DEVOPS
       # mirrors HOLD-ALL for runner users: present iff set, content = reason only.

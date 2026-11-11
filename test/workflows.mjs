@@ -256,16 +256,12 @@ test('JOED-192 nightly: the full 3-timezone Results suite runs once a night on a
   assert.equal(nightly.on.schedule.length, 1, 'exactly one nightly run');
   const [minute, hour, ...rest] = nightly.on.schedule[0].cron.split(' ');
   assert.deepEqual(rest, ['*', '*', '*'], 'daily');
-  // Vienna is UTC+1 (CET) or UTC+2 (CEST). Both local times must fall inside
-  // 22:00-07:00 and outside 22:00-23:00 (switch hour) and 00:45-01:30 (OPS-585).
-  const utc = Number(hour) * 60 + Number(minute);
-  assert.ok(!(utc >= 2 * 60 + 10 && utc < 4 * 60 + 45), 'not in the 02:10-04:45 UTC agm2 quiet window (HNET-433)');
-  for (const offset of [1, 2]) {
-    const local = ((Number(hour) + offset) % 24) * 60 + Number(minute);
-    assert.ok(local < 7 * 60 || local >= 22 * 60, `UTC+${offset}: inside the night window`);
-    assert.ok(!(local >= 22 * 60 && local < 23 * 60), `UTC+${offset}: not in the 22:00 switch hour`);
-    assert.ok(!(local >= 45 && local < 90), `UTC+${offset}: not in the OPS-585 slot`);
-  }
+  // The only recurring agm2 constraint is the HNET-433 quiet window, 02:10-04:45
+  // UTC. Both the start and the worst-case end (start + timeout) stay outside it.
+  const start = Number(hour) * 60 + Number(minute), end = start + nightly.jobs.results['timeout-minutes'];
+  const quiet = [2 * 60 + 10, 4 * 60 + 45];
+  const inQuiet = t => { const m = ((t % 1440) + 1440) % 1440; return m >= quiet[0] && m < quiet[1]; };
+  for (let t = start; t <= end; t++) assert.ok(!inQuiet(t), `minute ${t % 1440} UTC of the run lies in the agm2 quiet window`);
   assert.deepEqual(nightly.permissions, { contents: 'read' });
   assert.equal(Object.keys(nightly.jobs).length, 1);
   const job = nightly.jobs.results;

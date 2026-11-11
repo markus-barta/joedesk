@@ -809,8 +809,8 @@ and **America/New_York**. `test:browser` includes this guard. PRs, manual
 dispatch and pushes to main run full in Europe/Vienna and repeat only explicitly
 zone-sensitive **views** in UTC and America/New_York, retaining every check in a
 selected view. The full suite in all three zones runs once a night on agm2
-(`results-nightly.yml`, 04:55 UTC after the agm2 quiet window, from the default
-branch, under the browser host lock; JOED-192), keeping its screenshots as an
+(`results-nightly.yml`, 23:00 UTC; with its 95-minute timeout it ends before the
+02:10 UTC agm2 quiet window; from the default branch, under the browser host lock; JOED-192), keeping its screenshots as an
 artifact. It skips with `skipped: quiet window` while the agm2 HOLD-ALL flag is
 set and fails closed when the runner cannot read the hold state; a failed or
 missing nightly run is reported to JOED the same morning. A view identifies
