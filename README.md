@@ -805,17 +805,22 @@ BROWSER_PATH=/usr/bin/google-chrome node scripts/browser-p3.mjs
 ```
 
 `npm run test:results` runs the full P4 Results gate sequentially under **UTC**
-and **America/New_York**. `test:browser` includes this guard. CI pushes to main
-run the full suite in all three zones; PRs and manual dispatch run full in
-Europe/Vienna and repeat only explicitly zone-sensitive **views** in UTC and
-America/New_York, retaining every check in a selected view. A view identifies
+and **America/New_York**. `test:browser` includes this guard. PRs, manual
+dispatch and pushes to main run full in Europe/Vienna and repeat only explicitly
+zone-sensitive **views** in UTC and America/New_York, retaining every check in a
+selected view. The full suite in all three zones runs once a night on agm2
+(`results-nightly.yml`, 23:00 UTC; with its 95-minute timeout it ends before the
+02:10 UTC agm2 quiet window; from the default branch, under the browser host lock; JOED-192), keeping its screenshots as an
+artifact. It skips with `skipped: quiet window` while the agm2 HOLD-ALL flag is
+set and fails closed when the runner cannot read the hold state; a failed or
+missing nightly run is reported to JOED the same morning. A view identifies
 its group, fixture/interaction, width and theme; workflows can include their
 associated detail screenshots and crops. Check-only setup, boundary and
 geometry cases are also inventoried. Full mode retains every existing check.
 
 ```bash
 npm run test:results -- UTC Europe/Vienna America/New_York
-# PR/manual-dispatch plan (full budget only in Vienna):
+# PR/dispatch/push plan (full budget only in Vienna; nightly runs the line above):
 npm run test:results -- --full Europe/Vienna --subset UTC America/New_York
 # One zone, same P4 suite (including the render budget):
 TZ=UTC node scripts/browser-p4.mjs

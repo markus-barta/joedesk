@@ -1,0 +1,83 @@
+name: results-nightly
+
+# JOED-192: push, PR and dispatch runs check Results fully in Europe/Vienna and
+# as subsets in UTC and America/New_York. This nightly run keeps the full
+# 3-timezone Results suite. GitHub runs schedules from the default branch only.
+on:
+  schedule:
+    # 23:00 UTC = 00:00 Europe/Vienna (CET) or 01:00 (CEST). With the 95-minute
+    # timeout the worst case ends 00:35 UTC, clear of the 02:10-04:45 UTC agm2
+    # quiet window (HNET-433), the only recurring agm2 constraint.
+    - cron: '0 23 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  results:
+    # Never on a GitHub-hosted runner: without the agm2 opt-in the job is skipped.
+    if: vars.JOEDESK_AGM2 == 'on'
+    runs-on: ${{ (vars.JOEDESK_AGM2 == 'on' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","agm2"]') || 'ubuntu-latest' }}
+    # Up to 60 min lock wait + ~25 min for three full zones + setup/upload.
+    timeout-minutes: 95
+    steps:
+      # The agm2 hold flag pauses heavy work (HNET-433 quiet window). DEVOPS
+      # mirrors HOLD-ALL for runner users: present iff set, content = reason only.
+      # Fail closed and loudly when this runner cannot read the hold state.
+      - name: Respect the agm2 hold (HOLD-ALL)
+        id: hold
+        env:
+          HOLD_FILE: /run/agm-hold/HOLD-ALL
+        run: |
+          hold_dir=$(dirname "$HOLD_FILE")
+          if [ ! -d "$hold_dir" ] || [ ! -x "$hold_dir" ]; then
+            echo "::error::Cannot read the agm2 hold state: $hold_dir is not accessible to this runner; not running into a possible quiet window."
+            exit 1
+          fi
+          if [ -e "$HOLD_FILE" ]; then
+            # The reason follows a fixed prefix, so it cannot start a workflow command.
+            reason=$(head -n 1 "$HOLD_FILE" 2>/dev/null | head -c 200 | tr -cd '[:print:]')
+            echo "::notice::skipped: quiet window (HOLD-ALL is set; reason: ${reason:-none})"
+            printf 'skipped: quiet window (HOLD-ALL is set; reason: %s)\n' "${reason:-none}" >> "$GITHUB_STEP_SUMMARY"
+            echo 'skip=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'skip=false' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Keep temporary files under RUNNER_TEMP
+        if: steps.hold.outputs.skip == 'false'
+        run: |
+          printf 'TMPDIR=%s\nTMP=%s\nTEMP=%s\nNPM_CONFIG_CACHE=%s/npm-cache\n' \
+            "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        if: steps.hold.outputs.skip == 'false'
+        with:
+          clean: true
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: steps.hold.outputs.skip == 'false'
+        with:
+          node-version: "22"
+      - name: Resolve browser path
+        if: steps.hold.outputs.skip == 'false'
+        run: |
+          if [ -n "${BROWSER_PATH:-}" ] && [ -x "$BROWSER_PATH" ]; then
+            browser_path=$BROWSER_PATH
+          elif ! browser_path=$(command -v chromium || command -v chromium-browser || command -v google-chrome); then
+            echo '::error::No browser found on the self-hosted runner; install chromium, chromium-browser or google-chrome.'
+            exit 1
+          fi
+          printf 'BROWSER_PATH=%s\n' "$browser_path" >> "$GITHUB_ENV"
+      - name: Full Results gate in UTC, Europe/Vienna and America/New_York (browser host lock)
+        if: steps.hold.outputs.skip == 'false'
+        shell: bash scripts/with-browser-lock.sh {0}
+        env:
+          JOED_QA_ROOT: ${{ runner.temp }}/joedesk-qa
+        run: |
+          JOED_QA_DIR="$JOED_QA_ROOT/p4" npm run test:results -- UTC Europe/Vienna America/New_York
+      - name: Keep the nightly Results screenshots
+        if: always() && steps.hold.outputs.skip == 'false'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joedesk-results-nightly-screenshots
+          path: ${{ runner.temp }}/joedesk-qa/p4

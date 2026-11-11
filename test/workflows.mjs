@@ -123,9 +123,9 @@ test('combined browser step preserves all phase arguments, Results zone plans an
     assert.deepEqual(commands[1], [`scripts/browser/signed-out-pages.mjs ${event === 'pull_request' ? '--subset' : '--full --parallel 4'}`, '', 'UTC']);
     assert.equal(commands[2][1], join(dir, 'qa/p4'));
     assert.ok(commands[2][0].startsWith('run test:results -- '));
-    assert.deepEqual(parseResultsGateArgs(commands[2][0].split(' ').slice(3)), event === 'push'
-      ? ['UTC', 'Europe/Vienna', 'America/New_York'].map(timeZone => ({ timeZone, mode: 'full' }))
-      : [{ timeZone: 'Europe/Vienna', mode: 'full' }, { timeZone: 'UTC', mode: 'subset' }, { timeZone: 'America/New_York', mode: 'subset' }]);
+    assert.deepEqual(parseResultsGateArgs(commands[2][0].split(' ').slice(3)),
+      [{ timeZone: 'Europe/Vienna', mode: 'full' }, { timeZone: 'UTC', mode: 'subset' }, { timeZone: 'America/New_York', mode: 'subset' }],
+      `${event}: JOED-192 one Results plan for every event`);
     assert.deepEqual(commands[3], ['scripts/browser-p5.mjs', join(dir, 'qa/p5'), 'UTC']);
     assert.match(commands[4][0], /^scripts\/preview-capture.mjs --base-url http:\/\/127.0.0.1:1\/joe\/ --out /);
     assert.deepEqual(commands[5], [`scripts/preview-capture-ci.mjs ${dir}/joedesk-preview-capture/proxy ${dir}/joedesk-preview-capture/actor`, '', 'UTC']);
@@ -139,6 +139,9 @@ test('JOED-179 signed-out: empty and unknown events default to --full', t => {
     assert.equal(result.status, 0, result.stderr);
     assert.equal(commands[0][0], 'scripts/browser-p3.mjs --full');
     assert.equal(commands[1][0], 'scripts/browser/signed-out-pages.mjs --full --parallel 4');
+    assert.deepEqual(parseResultsGateArgs(commands[2][0].split(' ').slice(3)),
+      [{ timeZone: 'Europe/Vienna', mode: 'full' }, { timeZone: 'UTC', mode: 'subset' }, { timeZone: 'America/New_York', mode: 'subset' }],
+      `${event || 'empty'} event: JOED-192 Results plan`);
   }
 });
 
@@ -245,4 +248,40 @@ test('Docker commands avoid privileged builds and host networking; self-hosted b
     assert.equal(result.status, expected, result.stderr);
     if (expected) assert.match(result.stderr, /requires a rootless Docker daemon/);
   }
+});
+
+test('JOED-192 nightly: the full 3-timezone Results suite runs once a night on agm2 only, locked, keeping its screenshots', () => {
+  const nightly = parse(workflows.get('results-nightly.yml'), { version: '1.2', uniqueKeys: true });
+  assert.deepEqual(Object.keys(nightly.on).sort(), ['schedule', 'workflow_dispatch']);
+  assert.equal(nightly.on.schedule.length, 1, 'exactly one nightly run');
+  const [minute, hour, ...rest] = nightly.on.schedule[0].cron.split(' ');
+  assert.deepEqual(rest, ['*', '*', '*'], 'daily');
+  // The only recurring agm2 constraint is the HNET-433 quiet window, 02:10-04:45
+  // UTC. Both the start and the worst-case end (start + timeout) stay outside it.
+  const start = Number(hour) * 60 + Number(minute), end = start + nightly.jobs.results['timeout-minutes'];
+  const quiet = [2 * 60 + 10, 4 * 60 + 45];
+  const inQuiet = t => { const m = ((t % 1440) + 1440) % 1440; return m >= quiet[0] && m < quiet[1]; };
+  for (let t = start; t <= end; t++) assert.ok(!inQuiet(t), `minute ${t % 1440} UTC of the run lies in the agm2 quiet window`);
+  assert.deepEqual(nightly.permissions, { contents: 'read' });
+  assert.equal(Object.keys(nightly.jobs).length, 1);
+  const job = nightly.jobs.results;
+  assert.equal(job.if, "vars.JOEDESK_AGM2 == 'on'", 'never falls back to a GitHub-hosted runner');
+  // The hold check runs first, fails closed when the hold state is unreadable,
+  // and every later step (artifact included) runs only when it found no hold.
+  const [hold, ...later] = job.steps;
+  assert.equal(hold.id, 'hold');
+  assert.match(hold.run, /exit 1/);
+  assert.match(hold.run, /skipped: quiet window/);
+  assert.equal(hold.env.HOLD_FILE, '/run/agm-hold/HOLD-ALL', 'the DEVOPS runner-readable mirror of HOLD-ALL');
+  for (const step of later) assert.match(step.if ?? '', /steps\.hold\.outputs\.skip == 'false'/, `${step.name ?? step.uses}: gated on the hold check`);
+  const locked = job.steps.filter(step => step.shell === 'bash scripts/with-browser-lock.sh {0}');
+  assert.equal(locked.length, 1);
+  assert.equal(locked[0].run.trim(), 'JOED_QA_DIR="$JOED_QA_ROOT/p4" npm run test:results -- UTC Europe/Vienna America/New_York');
+  assert.deepEqual(parseResultsGateArgs(['UTC', 'Europe/Vienna', 'America/New_York']),
+    ['UTC', 'Europe/Vienna', 'America/New_York'].map(timeZone => ({ timeZone, mode: 'full' })));
+  assert.equal(locked[0].env.JOED_QA_ROOT, '${{ runner.temp }}/joedesk-qa');
+  const keep = job.steps.find(step => step.with?.name === 'joedesk-results-nightly-screenshots');
+  assert.equal(keep.if, "always() && steps.hold.outputs.skip == 'false'");
+  assert.equal(keep.with.path, '${{ runner.temp }}/joedesk-qa/p4');
+  assert.ok(job.steps.every(step => !/\bsudo\b|\bapt(?:-get)?\b/.test(step.run ?? '')), 'no host package installation');
 });
