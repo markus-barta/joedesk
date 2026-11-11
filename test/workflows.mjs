@@ -139,6 +139,9 @@ test('JOED-179 signed-out: empty and unknown events default to --full', t => {
     assert.equal(result.status, 0, result.stderr);
     assert.equal(commands[0][0], 'scripts/browser-p3.mjs --full');
     assert.equal(commands[1][0], 'scripts/browser/signed-out-pages.mjs --full --parallel 4');
+    assert.deepEqual(parseResultsGateArgs(commands[2][0].split(' ').slice(3)),
+      [{ timeZone: 'Europe/Vienna', mode: 'full' }, { timeZone: 'UTC', mode: 'subset' }, { timeZone: 'America/New_York', mode: 'subset' }],
+      `${event || 'empty'} event: JOED-192 Results plan`);
   }
 });
 
