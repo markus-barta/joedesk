@@ -1,0 +1,55 @@
+name: results-nightly
+
+# JOED-192: push, PR and dispatch runs check Results fully in Europe/Vienna and
+# as subsets in UTC and America/New_York. This nightly run keeps the full
+# 3-timezone Results suite. GitHub runs schedules from the default branch only.
+on:
+  schedule:
+    # 02:10 UTC = 03:10 Europe/Vienna (CET) or 04:10 (CEST): inside 22:00-07:00,
+    # clear of the 22:00-23:00 switch hour and the 00:45-01:30 OPS-585 slot.
+    - cron: '10 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  results:
+    # Never on a GitHub-hosted runner: without the agm2 opt-in the job is skipped.
+    if: vars.JOEDESK_AGM2 == 'on'
+    runs-on: ${{ (vars.JOEDESK_AGM2 == 'on' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","agm2"]') || 'ubuntu-latest' }}
+    # 60 min lock wait + ~25 min for three full zones + 15 min setup/upload.
+    timeout-minutes: 100
+    steps:
+      - name: Keep temporary files under RUNNER_TEMP
+        run: |
+          printf 'TMPDIR=%s\nTMP=%s\nTEMP=%s\nNPM_CONFIG_CACHE=%s/npm-cache\n' \
+            "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          clean: true
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+      - name: Resolve browser path
+        run: |
+          if [ -n "${BROWSER_PATH:-}" ] && [ -x "$BROWSER_PATH" ]; then
+            browser_path=$BROWSER_PATH
+          elif ! browser_path=$(command -v chromium || command -v chromium-browser || command -v google-chrome); then
+            echo '::error::No browser found on the self-hosted runner; install chromium, chromium-browser or google-chrome.'
+            exit 1
+          fi
+          printf 'BROWSER_PATH=%s\n' "$browser_path" >> "$GITHUB_ENV"
+      - name: Full Results gate in UTC, Europe/Vienna and America/New_York (browser host lock)
+        shell: bash scripts/with-browser-lock.sh {0}
+        env:
+          JOED_QA_ROOT: ${{ runner.temp }}/joedesk-qa
+        run: |
+          JOED_QA_DIR="$JOED_QA_ROOT/p4" npm run test:results -- UTC Europe/Vienna America/New_York
+      - name: Keep the nightly Results screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joedesk-results-nightly-screenshots
+          path: ${{ runner.temp }}/joedesk-qa/p4

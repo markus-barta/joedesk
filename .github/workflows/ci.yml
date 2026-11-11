@@ -105,11 +105,9 @@ jobs:
           else
             TZ=UTC node scripts/browser/signed-out-pages.mjs --full --parallel 4 || status=$?
           fi
-          if [ "$GITHUB_EVENT_NAME" = 'push' ]; then
-            JOED_QA_DIR="$JOED_QA_ROOT/p4" npm run test:results -- UTC Europe/Vienna America/New_York || status=$?
-          else
-            JOED_QA_DIR="$JOED_QA_ROOT/p4" npm run test:results -- --full Europe/Vienna --subset UTC America/New_York || status=$?
-          fi
+          # JOED-192: every event runs Vienna full + UTC/New York subsets; the
+          # full 3-timezone Results suite runs nightly (results-nightly.yml).
+          JOED_QA_DIR="$JOED_QA_ROOT/p4" npm run test:results -- --full Europe/Vienna --subset UTC America/New_York || status=$?
           JOED_QA_DIR="$JOED_QA_ROOT/p5" TZ=UTC node scripts/browser-p5.mjs || status=$?
           if [ "$status" -ne 0 ]; then exit "$status"; fi
 
