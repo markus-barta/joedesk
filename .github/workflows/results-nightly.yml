@@ -53,7 +53,10 @@ jobs:
           mtime=$(stat -c %Y "$synced" 2>/dev/null) || unconfirmed "cannot stat $synced"
           # The whole file must be exactly one UTC ISO-8601 line (Z or +00:00),
           # optionally newline-terminated; anything else is unconfirmed.
-          [ "$(stat -c %s "$synced" 2>/dev/null || echo 999)" -le 64 ] || unconfirmed "SYNCED is not one UTC ISO-8601 line"
+          bytes=$(stat -c %s "$synced" 2>/dev/null || echo 999)
+          [ "$bytes" -le 64 ] || unconfirmed "SYNCED is not one UTC ISO-8601 line"
+          # Bash drops NUL bytes in command substitution: reject them first.
+          [ "$(tr -d '\000' < "$synced" | wc -c)" -eq "$bytes" ] || unconfirmed "SYNCED contains NUL bytes"
           stamp=$(cat "$synced" 2>/dev/null; printf x) || unconfirmed "cannot read $synced"
           stamp=${stamp%x}; stamp=${stamp%$'\n'}
           case "$stamp" in *$'\n'*|*$'\r'*) unconfirmed "SYNCED is not one UTC ISO-8601 line" ;; esac

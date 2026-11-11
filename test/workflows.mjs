@@ -291,14 +291,25 @@ test('JOED-192 hold contract (AGM-303): held unless SYNCED is fresh and HOLD-ALL
   const hold = nightly.jobs.results.steps[0];
   const root = scratch('joed192-hold-');
   t.after(() => discard(root, 'JOED-192 hold contract test'));
-  // A stand-in `date` with a fixed clock makes the 30 s / -5 s bounds exact;
-  // FAKE_HOLD_ON_DATE creates HOLD-ALL while the step reads SYNCED.
-  const realDate = spawnSync('sh', ['-c', 'command -v date'], { encoding: 'utf8' }).stdout.trim();
+  // Portable stand-ins for the GNU forms the step uses on the Linux runner
+  // (`date -u +%s`, `date -u -d STAMP +%s`, `stat -c %s|%Y FILE`), so the test
+  // runs the YAML shell unchanged on macOS too. A fixed clock makes the 30 s /
+  // -5 s bounds exact; FAKE_HOLD_ON_DATE creates HOLD-ALL while SYNCED is read.
   const bin = join(root, 'bin'); mkdirSync(bin);
+  const node = JSON.stringify(process.execPath);
   writeFileSync(join(bin, 'date'), `#!/bin/sh
 if [ -n "$FAKE_HOLD_ON_DATE" ]; then : > "$FAKE_HOLD_ON_DATE"; fi
 if [ "$*" = "-u +%s" ]; then echo "$FAKE_NOW"; exit 0; fi
-exec ${realDate} "$@"
+if [ "$1" = "-u" ] && [ "$2" = "-d" ] && [ "$4" = "+%s" ] && [ $# -eq 4 ]; then
+  exec ${node} -e 'const t = Date.parse(process.argv[1]); if (!Number.isFinite(t)) process.exit(1); console.log(Math.floor(t / 1000))' "$3"
+fi
+echo "unexpected date $*" >&2; exit 2
+`, { mode: 0o700 });
+  writeFileSync(join(bin, 'stat'), `#!/bin/sh
+if [ "$1" = "-c" ] && [ $# -eq 3 ]; then
+  exec ${node} -e 'const s = require("fs").statSync(process.argv[2]); console.log(process.argv[1] === "%s" ? s.size : process.argv[1] === "%Y" ? Math.floor(s.mtimeMs / 1000) : (process.exit(2), 0))' "$2" "$3"
+fi
+echo "unexpected stat $*" >&2; exit 2
 `, { mode: 0o700 });
   const NOW = Math.floor(Date.now() / 1000);
   const iso = (offset, zone = 'Z') => new Date((NOW + offset) * 1000).toISOString().replace(/\.\d+Z$/, zone);
@@ -357,5 +368,7 @@ exec ${realDate} "$@"
     'two newlines': { synced: `${iso(-3)}\n\n`, mtime: -3 },
     'embedded carriage return': { synced: `${iso(-3)}\r\n`, mtime: -3 },
     'oversized': { synced: `${iso(-3)}${' '.repeat(80)}\n`, mtime: -3 },
+    'embedded NUL': { synced: `${iso(-3).slice(0, 10)}\0${iso(-3).slice(10)}\n`, mtime: -3 },
+    'trailing NUL': { synced: `${iso(-3)}\0\n`, mtime: -3 },
   })) runs(args, 1, '', name);
 });
