@@ -291,45 +291,71 @@ test('JOED-192 hold contract (AGM-303): held unless SYNCED is fresh and HOLD-ALL
   const hold = nightly.jobs.results.steps[0];
   const root = scratch('joed192-hold-');
   t.after(() => discard(root, 'JOED-192 hold contract test'));
-  const iso = seconds => new Date(Date.now() + seconds * 1000).toISOString().replace(/\.\d+Z$/, 'Z');
+  // A stand-in `date` with a fixed clock makes the 30 s / -5 s bounds exact;
+  // FAKE_HOLD_ON_DATE creates HOLD-ALL while the step reads SYNCED.
+  const realDate = spawnSync('sh', ['-c', 'command -v date'], { encoding: 'utf8' }).stdout.trim();
+  const bin = join(root, 'bin'); mkdirSync(bin);
+  writeFileSync(join(bin, 'date'), `#!/bin/sh
+if [ -n "$FAKE_HOLD_ON_DATE" ]; then : > "$FAKE_HOLD_ON_DATE"; fi
+if [ "$*" = "-u +%s" ]; then echo "$FAKE_NOW"; exit 0; fi
+exec ${realDate} "$@"
+`, { mode: 0o700 });
+  const NOW = Math.floor(Date.now() / 1000);
+  const iso = (offset, zone = 'Z') => new Date((NOW + offset) * 1000).toISOString().replace(/\.\d+Z$/, zone);
   let n = 0;
-  const run = ({ holdAll, synced, syncedAge = 0 }) => {
+  const run = ({ holdAll, synced, mtime = 0, holdOnDate = false }) => {
     const dir = join(root, `case-${++n}`), files = join(root, `out-${n}`);
     mkdirSync(dir); mkdirSync(files);
     if (holdAll !== undefined) writeFileSync(join(dir, 'HOLD-ALL'), holdAll);
     if (synced !== undefined) {
       writeFileSync(join(dir, 'SYNCED'), synced);
-      const when = new Date(Date.now() + syncedAge * 1000);
-      utimesSync(join(dir, 'SYNCED'), when, when);
+      utimesSync(join(dir, 'SYNCED'), NOW + mtime, NOW + mtime);
     }
     writeFileSync(join(files, 'output'), ''); writeFileSync(join(files, 'summary'), '');
     const result = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', hold.run], { encoding: 'utf8',
-      env: { PATH: process.env.PATH, HOLD_DIR: dir, GITHUB_OUTPUT: join(files, 'output'), GITHUB_STEP_SUMMARY: join(files, 'summary') } });
+      env: { PATH: `${bin}:${process.env.PATH}`, FAKE_NOW: String(NOW), HOLD_DIR: dir,
+        ...(holdOnDate ? { FAKE_HOLD_ON_DATE: join(dir, 'HOLD-ALL') } : {}),
+        GITHUB_OUTPUT: join(files, 'output'), GITHUB_STEP_SUMMARY: join(files, 'summary') } });
     return { status: result.status, output: readFileSync(join(files, 'output'), 'utf8'), log: result.stdout + result.stderr };
   };
-  const fresh = `${iso(-3)}\n`;
-  // Not held: fresh SYNCED (content and mtime), no HOLD-ALL.
-  assert.deepEqual([run({ synced: fresh }).status, run({ synced: fresh }).output], [0, 'skip=false\n']);
+  const runs = (args, status, output, name) => {
+    const r = run(args);
+    assert.equal(r.status, status, `${name}: exit`); assert.equal(r.output, output, `${name}: step output`);
+    if (status === 1) assert.match(r.log, /::error::agm2 hold state not confirmed/, name);
+    return r;
+  };
+  // Not held: fresh SYNCED (content and mtime, Z or +00:00, newline or not), no HOLD-ALL.
+  for (const [name, args] of Object.entries({
+    'fresh Z': { synced: `${iso(-3)}\n`, mtime: -3 },
+    'fresh +00:00': { synced: `${iso(-3, '+00:00')}\n`, mtime: -3 },
+    'fresh with fraction, no newline': { synced: new Date((NOW - 3) * 1000).toISOString(), mtime: -3 },
+    'age 29 s (inside)': { synced: `${iso(-29)}\n`, mtime: -29 },
+    'skew -5 s (inside)': { synced: `${iso(5)}\n`, mtime: 5 },
+  })) runs(args, 0, 'skip=false\n', name);
   // HOLD-ALL present is always held, with or without a reason, fresh or not.
   for (const holdAll of ['', 'quiet window HNET-433\n', '::error::forged\nsecond line\n']) {
-    for (const synced of [fresh, undefined]) {
-      const r = run({ holdAll, synced });
-      assert.equal(r.status, 0); assert.equal(r.output, 'skip=true\n');
+    for (const synced of [`${iso(-3)}\n`, undefined]) {
+      const r = runs({ holdAll, synced, mtime: -3 }, 0, 'skip=true\n', `HOLD-ALL ${JSON.stringify(holdAll)}`);
       assert.doesNotMatch(r.log, /^::error::/m, 'a reason cannot start a workflow command');
     }
   }
+  // HOLD-ALL set while SYNCED is read: the second check still skips.
+  runs({ synced: `${iso(-3)}\n`, mtime: -3, holdOnDate: true }, 0, 'skip=true\n', 'HOLD-ALL appears mid-step');
   // Unconfirmed hold state fails red and never reports skip=false.
   for (const [name, args] of Object.entries({
     'SYNCED missing': {},
-    'SYNCED mtime stale': { synced: fresh, syncedAge: -45 },
-    'SYNCED content stale': { synced: `${iso(-120)}\n` },
-    'SYNCED content in the future': { synced: `${iso(120)}\n` },
-    'SYNCED garbled': { synced: 'yesterday\n' },
-    'SYNCED empty': { synced: '' },
-    'SYNCED not UTC': { synced: `${iso(-3).replace('Z', '+01:00')}\n` },
-  })) {
-    const r = run(args);
-    assert.equal(r.status, 1, name); assert.equal(r.output, '', `${name}: no skip output`);
-    assert.match(r.log, /::error::agm2 hold state not confirmed/, name);
-  }
+    'age 30 s (boundary)': { synced: `${iso(-30)}\n`, mtime: -30 },
+    'mtime stale': { synced: `${iso(-3)}\n`, mtime: -45 },
+    'mtime in the future': { synced: `${iso(-3)}\n`, mtime: 60 },
+    'skew -6 s (outside)': { synced: `${iso(6)}\n`, mtime: 6 },
+    'content stale': { synced: `${iso(-120)}\n`, mtime: -3 },
+    'content in the future': { synced: `${iso(120)}\n`, mtime: -3 },
+    'garbled': { synced: 'yesterday\n', mtime: -3 },
+    'empty': { synced: '', mtime: -3 },
+    'non-UTC offset': { synced: `${iso(-3, '+01:00')}\n`, mtime: -3 },
+    'fresh line then garbage': { synced: `${iso(-3)}\ngarbage\n`, mtime: -3 },
+    'two newlines': { synced: `${iso(-3)}\n\n`, mtime: -3 },
+    'embedded carriage return': { synced: `${iso(-3)}\r\n`, mtime: -3 },
+    'oversized': { synced: `${iso(-3)}${' '.repeat(80)}\n`, mtime: -3 },
+  })) runs(args, 1, '', name);
 });

@@ -25,7 +25,7 @@ jobs:
       # The agm2 hold flag pauses heavy work (HNET-433 quiet window). DEVOPS
       # mirrors it for runner users (AGM-303): /run/agm-hold/HOLD-ALL present
       # = held (its first line is the reason, possibly empty); /run/agm-hold/SYNCED
-      # holds one UTC ISO-8601 line, refreshed every 10 s after each successful
+      # holds one UTC ISO-8601 line (Z or +00:00), refreshed every 10 s after each successful
       # sync. HELD unless SYNCED is younger than 30 s (mtime and content) and
       # HOLD-ALL is absent. Held by HOLD-ALL skips green; an unconfirmed hold
       # state (stale/missing/garbled SYNCED) fails red so a stuck mirror is loud.
@@ -51,8 +51,13 @@ jobs:
           [ -f "$synced" ] || unconfirmed "$synced missing"
           now=$(date -u +%s)
           mtime=$(stat -c %Y "$synced" 2>/dev/null) || unconfirmed "cannot stat $synced"
-          stamp=$(head -n 1 "$synced" 2>/dev/null | head -c 64 | tr -d '\r')
-          [[ "$stamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$ ]] || unconfirmed "SYNCED is not one UTC ISO-8601 line"
+          # The whole file must be exactly one UTC ISO-8601 line (Z or +00:00),
+          # optionally newline-terminated; anything else is unconfirmed.
+          [ "$(stat -c %s "$synced" 2>/dev/null || echo 999)" -le 64 ] || unconfirmed "SYNCED is not one UTC ISO-8601 line"
+          stamp=$(cat "$synced" 2>/dev/null; printf x) || unconfirmed "cannot read $synced"
+          stamp=${stamp%x}; stamp=${stamp%$'\n'}
+          case "$stamp" in *$'\n'*|*$'\r'*) unconfirmed "SYNCED is not one UTC ISO-8601 line" ;; esac
+          [[ "$stamp" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|\+00:00)$ ]] || unconfirmed "SYNCED is not one UTC ISO-8601 line"
           written=$(date -u -d "$stamp" +%s 2>/dev/null) || unconfirmed "SYNCED time unreadable"
           for age in $((now - mtime)) $((now - written)); do
             if [ "$age" -lt -5 ] || [ "$age" -ge 30 ]; then unconfirmed "SYNCED is ${age}s old"; fi
