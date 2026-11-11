@@ -258,6 +258,8 @@ test('JOED-192 nightly: the full 3-timezone Results suite runs once a night on a
   assert.deepEqual(rest, ['*', '*', '*'], 'daily');
   // Vienna is UTC+1 (CET) or UTC+2 (CEST). Both local times must fall inside
   // 22:00-07:00 and outside 22:00-23:00 (switch hour) and 00:45-01:30 (OPS-585).
+  const utc = Number(hour) * 60 + Number(minute);
+  assert.ok(!(utc >= 2 * 60 + 10 && utc < 4 * 60 + 45), 'not in the 02:10-04:45 UTC agm2 quiet window (HNET-433)');
   for (const offset of [1, 2]) {
     const local = ((Number(hour) + offset) % 24) * 60 + Number(minute);
     assert.ok(local < 7 * 60 || local >= 22 * 60, `UTC+${offset}: inside the night window`);
@@ -268,6 +270,14 @@ test('JOED-192 nightly: the full 3-timezone Results suite runs once a night on a
   assert.equal(Object.keys(nightly.jobs).length, 1);
   const job = nightly.jobs.results;
   assert.equal(job.if, "vars.JOEDESK_AGM2 == 'on'", 'never falls back to a GitHub-hosted runner');
+  // The hold check runs first, fails closed when the hold state is unreadable,
+  // and every later step (artifact included) runs only when it found no hold.
+  const [hold, ...later] = job.steps;
+  assert.equal(hold.id, 'hold');
+  assert.match(hold.run, /exit 1/);
+  assert.match(hold.run, /skipped: quiet window/);
+  assert.equal(hold.env.HOLD_FILE, '/run/agm-hold/HOLD-ALL', 'the DEVOPS runner-readable mirror of HOLD-ALL');
+  for (const step of later) assert.match(step.if ?? '', /steps\.hold\.outputs\.skip == 'false'/, `${step.name ?? step.uses}: gated on the hold check`);
   const locked = job.steps.filter(step => step.shell === 'bash scripts/with-browser-lock.sh {0}');
   assert.equal(locked.length, 1);
   assert.equal(locked[0].run.trim(), 'JOED_QA_DIR="$JOED_QA_ROOT/p4" npm run test:results -- UTC Europe/Vienna America/New_York');
@@ -275,7 +285,7 @@ test('JOED-192 nightly: the full 3-timezone Results suite runs once a night on a
     ['UTC', 'Europe/Vienna', 'America/New_York'].map(timeZone => ({ timeZone, mode: 'full' })));
   assert.equal(locked[0].env.JOED_QA_ROOT, '${{ runner.temp }}/joedesk-qa');
   const keep = job.steps.find(step => step.with?.name === 'joedesk-results-nightly-screenshots');
-  assert.equal(keep.if, 'always()');
+  assert.equal(keep.if, "always() && steps.hold.outputs.skip == 'false'");
   assert.equal(keep.with.path, '${{ runner.temp }}/joedesk-qa/p4');
   assert.ok(job.steps.every(step => !/\bsudo\b|\bapt(?:-get)?\b/.test(step.run ?? '')), 'no host package installation');
 });

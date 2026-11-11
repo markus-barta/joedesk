@@ -5,9 +5,10 @@ name: results-nightly
 # 3-timezone Results suite. GitHub runs schedules from the default branch only.
 on:
   schedule:
-    # 02:10 UTC = 03:10 Europe/Vienna (CET) or 04:10 (CEST): inside 22:00-07:00,
-    # clear of the 22:00-23:00 switch hour and the 00:45-01:30 OPS-585 slot.
-    - cron: '10 2 * * *'
+    # 04:55 UTC = 05:55 Europe/Vienna (CET) or 06:55 (CEST): inside 22:00-07:00,
+    # after the 02:10-04:45 UTC agm2 quiet window (HNET-433), clear of the
+    # 22:00-23:00 switch hour and the 00:45-01:30 OPS-585 slot.
+    - cron: '55 4 * * *'
   workflow_dispatch:
 
 permissions:
@@ -21,18 +22,44 @@ jobs:
     # 60 min lock wait + ~25 min for three full zones + 15 min setup/upload.
     timeout-minutes: 100
     steps:
+      # The agm2 hold flag pauses heavy work (HNET-433 quiet window). DEVOPS
+      # mirrors HOLD-ALL for runner users: present iff set, content = reason only.
+      # Fail closed and loudly when this runner cannot read the hold state.
+      - name: Respect the agm2 hold (HOLD-ALL)
+        id: hold
+        env:
+          HOLD_FILE: /run/agm-hold/HOLD-ALL
+        run: |
+          hold_dir=$(dirname "$HOLD_FILE")
+          if [ ! -d "$hold_dir" ] || [ ! -x "$hold_dir" ]; then
+            echo "::error::Cannot read the agm2 hold state: $hold_dir is not accessible to this runner; not running into a possible quiet window."
+            exit 1
+          fi
+          if [ -e "$HOLD_FILE" ]; then
+            # The reason follows a fixed prefix, so it cannot start a workflow command.
+            reason=$(head -n 1 "$HOLD_FILE" 2>/dev/null | head -c 200 | tr -cd '[:print:]')
+            echo "::notice::skipped: quiet window (HOLD-ALL is set; reason: ${reason:-none})"
+            printf 'skipped: quiet window (HOLD-ALL is set; reason: %s)\n' "${reason:-none}" >> "$GITHUB_STEP_SUMMARY"
+            echo 'skip=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'skip=false' >> "$GITHUB_OUTPUT"
+          fi
       - name: Keep temporary files under RUNNER_TEMP
+        if: steps.hold.outputs.skip == 'false'
         run: |
           printf 'TMPDIR=%s\nTMP=%s\nTEMP=%s\nNPM_CONFIG_CACHE=%s/npm-cache\n' \
             "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        if: steps.hold.outputs.skip == 'false'
         with:
           clean: true
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: steps.hold.outputs.skip == 'false'
         with:
           node-version: "22"
       - name: Resolve browser path
+        if: steps.hold.outputs.skip == 'false'
         run: |
           if [ -n "${BROWSER_PATH:-}" ] && [ -x "$BROWSER_PATH" ]; then
             browser_path=$BROWSER_PATH
@@ -42,13 +69,14 @@ jobs:
           fi
           printf 'BROWSER_PATH=%s\n' "$browser_path" >> "$GITHUB_ENV"
       - name: Full Results gate in UTC, Europe/Vienna and America/New_York (browser host lock)
+        if: steps.hold.outputs.skip == 'false'
         shell: bash scripts/with-browser-lock.sh {0}
         env:
           JOED_QA_ROOT: ${{ runner.temp }}/joedesk-qa
         run: |
           JOED_QA_DIR="$JOED_QA_ROOT/p4" npm run test:results -- UTC Europe/Vienna America/New_York
       - name: Keep the nightly Results screenshots
-        if: always()
+        if: always() && steps.hold.outputs.skip == 'false'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: joedesk-results-nightly-screenshots
