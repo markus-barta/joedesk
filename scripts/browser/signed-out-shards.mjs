@@ -13,30 +13,50 @@ const pagesScript = fileURLToPath(new URL('./signed-out-pages.mjs', import.meta.
 const minutes = since => ((Date.now() - since) / 60000).toFixed(1);
 
 function prefixLines(input, output, label) {
-  createInterface({ input, crlfDelay: Infinity }).on('line', line => output.write(`[${label}] ${line}\n`));
+  if (input) createInterface({ input, crlfDelay: Infinity }).on('line', line => output.write(`[${label}] ${line}\n`));
 }
 
 const KILL_AFTER_MS = 10000;
 const SIGNAL_EXIT = { SIGINT: 130, SIGTERM: 143 };
 
-function runShard(script, index, count, report, children) {
+// Never rejects: a shard that cannot start resolves as failed and calls
+// onStartFailure, so the runner stops and awaits the shards already running.
+function runShard(spawnShard, script, index, count, report, children, onStartFailure) {
   const label = `shard ${index}/${count}`, started = Date.now();
   return new Promise(resolve => {
-    const child = spawn(process.execPath, [script, '--full', '--shard', `${index}/${count}`, '--report', report],
-      { stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
+    let child, settled = false;
+    const done = result => {
+      if (settled) return;
+      settled = true; children.delete(child);
+      resolve({ label, report, minutes: minutes(started), ...result });
+    };
+    try {
+      child = spawnShard(process.execPath, [script, '--full', '--shard', `${index}/${count}`, '--report', report],
+        { stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
+    } catch (error) {
+      onStartFailure(label); done({ code: 1, error: error.message }); return;
+    }
     children.add(child);
-    prefixLines(child.stdout, process.stdout, label);
-    prefixLines(child.stderr, process.stderr, label);
-    const done = result => { children.delete(child); resolve({ label, report, minutes: minutes(started), ...result }); };
-    child.on('error', error => done({ code: 1, error: error.message }));
+    // Handlers first. A failed spawn (no pid) reports 'error' and may never
+    // close; any other 'error' (e.g. a failed kill) waits for 'close'.
+    child.on('error', error => {
+      if (child.pid !== undefined) { console.error(`[${label}] ${error.message}`); return; }
+      onStartFailure(label); done({ code: 1, error: error.message });
+    });
     child.on('close', (code, signal) => done({ code: code ?? 1, signal }));
+    try {
+      prefixLines(child.stdout, process.stdout, label);
+      prefixLines(child.stderr, process.stderr, label);
+    } catch (error) {
+      onStartFailure(label); child.kill('SIGKILL');
+    }
   });
 }
 
 // Cancellation (SIGINT/SIGTERM to this process, or `signal` aborting) stops
 // every shard, waits until all have exited, cleans up and fails the phase, so
 // no shard browser can still run when the next CI phase starts.
-export async function runSignedOutShards({ count, plan, shapes, endpoints, script = pagesScript, signal }) {
+export async function runSignedOutShards({ count, plan, shapes, endpoints, script = pagesScript, signal, spawnShard = spawn }) {
   const dir = mkdtempSync(join(process.env.RUNNER_TEMP || tmpdir(), 'joedesk-signed-out-shards-'));
   const started = Date.now(), children = new Set();
   let peak = loadavg()[0], cancelled = null, killTimer = null;
@@ -56,7 +76,7 @@ export async function runSignedOutShards({ count, plan, shapes, endpoints, scrip
     console.log(`Signed-out matrix: full; ${plan.caseCount} planned cases in ${count} parallel shards`);
     const results = await Promise.all(Array.from({ length: count }, (_, i) => cancelled
       ? Promise.resolve({ label: `shard ${i + 1}/${count}`, code: 1, signal: 'not started', minutes: '0.0' })
-      : runShard(script, i + 1, count, join(dir, `shard-${i + 1}.json`), children)));
+      : runShard(spawnShard, script, i + 1, count, join(dir, `shard-${i + 1}.json`), children, label => cancel(`${label} failed to start`))));
     peak = Math.max(peak, loadavg()[0]);
     console.log(`Signed-out shards: ${results.map(r => `${r.label} ${r.minutes} min exit ${r.signal ?? r.code}`).join('; ')}; wall ${minutes(started)} min; peak load1 ${peak.toFixed(2)}`);
     if (cancelled) {

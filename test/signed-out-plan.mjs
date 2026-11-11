@@ -457,8 +457,20 @@ writeFileSync(args[4], JSON.stringify({ schema: 'joedesk.signed-out-shard.v1', s
   }
   assert.deepEqual(readdirSync(dir).filter(name => name.startsWith('joedesk-signed-out-shards-')), [], 'shard reports directory removed');
   assert.equal(await run('', AbortSignal.abort()), 1, 'an already-aborted runner starts no shard');
+  // A shard that cannot start stops and awaits the shards already running.
+  for (const file of pids) rmSync(file, { force: true });
+  const startFailure = (command, args, options) => args.includes('3/4')
+    ? spawn(join(dir, 'missing-node'), args, options) : spawn(command, args, options);
+  process.env.JOED190_FAKE = 'hang'; process.env.RUNNER_TEMP = dir;
+  try {
+    assert.equal(await runSignedOutShards({ count: 4, plan: full, shapes: nativeAuthShapes, endpoints, script: fake, spawnShard: startFailure }), 1);
+  } finally { delete process.env.JOED190_FAKE; delete process.env.RUNNER_TEMP; }
+  for (const file of pids.filter(existsSync)) {
+    assert.throws(() => process.kill(Number(readFileSync(file, 'utf8')), 0), { code: 'ESRCH' }, `${file}: started shard stopped after a start failure`);
+  }
+  assert.deepEqual(readdirSync(dir).filter(name => name.startsWith('joedesk-signed-out-shards-')), [], 'reports directory removed after a start failure');
   // A real SIGTERM to the runner process (CI job cancellation) does the same.
-  for (const file of pids) rmSync(file);
+  for (const file of pids) rmSync(file, { force: true });
   const parent = join(dir, 'parent.mjs');
   writeFileSync(parent, `import { runSignedOutShards } from ${JSON.stringify(new URL('../scripts/browser/signed-out-shards.mjs', import.meta.url).href)};
 import { readFileSync } from 'node:fs';
