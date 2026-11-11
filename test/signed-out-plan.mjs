@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { authShapes, nativeAuthShapes, authResponse, reasons, widths, screens, pageFixture } from './fixtures/signed-out-cases.mjs';
@@ -408,82 +408,93 @@ test('JOED-190 merge: rejects a missing, duplicated, reordered or foreign shard 
   assert.throws(() => mergeSignedOutShards(full, reports().slice(0, 3), options), /planned cases|exactly once|foreign report/, 'a lost shard fails the merge');
 });
 
-test('JOED-190 runner: spawns every shard, merges their reports and fails on a failed or incomplete shard', async t => {
+test('JOED-190 runner: spawns every shard, merges their reports, and on failure or cancellation leaves no shard or browser process', { timeout: 60000 }, async t => {
   const dir = scratch('joed190-shards-');
   t.after(() => discard(dir, 'JOED-190 shard runner test'));
   const full = plan('full'), endpoints = [...new Set(full.views[0].opaque.map(c => c.endpoint))];
   writeFileSync(join(dir, 'plan.json'), JSON.stringify(full));
   // A stand-in for signed-out-pages.mjs --full --shard K/N --report FILE that
-  // reports its planned tags; JOED190_FAKE selects a failing variant.
+  // reports its planned tags; JOED190_FAKE selects a failing variant. In
+  // 'hang' mode it starts a "browser" grandchild in its process group that
+  // ignores SIGTERM, then hangs. Barrier: the grandchild writes browser-K only
+  // after its SIGTERM handler is installed; the shard writes shard-K after that.
   const fake = join(dir, 'fake-shard.mjs');
-  writeFileSync(fake, `import { readFileSync, writeFileSync } from 'node:fs';
+  writeFileSync(fake, `import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { shardSignedOutPlan, signedOutCaseTags } from ${JSON.stringify(new URL('../scripts/signed-out-plan.mjs', import.meta.url).href)};
 const args = process.argv.slice(2);
 if (args[0] !== '--full' || args[1] !== '--shard' || args[3] !== '--report' || args.length !== 5) process.exit(9);
 const [index, count] = args[2].split('/').map(Number);
 const full = JSON.parse(readFileSync(${JSON.stringify(join(dir, 'plan.json'))}, 'utf8'));
 const tags = signedOutCaseTags(shardSignedOutPlan(full, index, count));
-const mode = process.env.JOED190_FAKE ?? '';
+const mode = process.env.JOED190_FAKE ?? '', pids = process.env.JOED190_PIDS;
 if (mode === 'exit' && index === 2) process.exit(3);
-if (mode === 'hang') { writeFileSync(${JSON.stringify(dir)} + '/pid-' + index, String(process.pid)); setInterval(() => {}, 1000); }
-else {
-if (mode === 'drop' && index === 3) tags.pop();
-const visited = ${JSON.stringify(nativeAuthShapes)}.flatMap(shape => ${JSON.stringify(endpoints)}.map(endpoint => shape + '/' + endpoint));
-console.log('fake shard ' + index + '/' + count);
-writeFileSync(args[4], JSON.stringify({ schema: 'joedesk.signed-out-shard.v1', shard: index + '/' + count, caseCount: tags.length, tags, visited }), { flag: 'wx' });
+if (mode === 'hang') {
+  const browserFile = pids + '/browser-' + index;
+  spawn(process.execPath, ['-e', "process.on('SIGTERM', () => {}); require('fs').writeFileSync(" + JSON.stringify(browserFile) + ", String(process.pid)); setInterval(() => {}, 1000);"], { stdio: 'ignore' });
+  const ready = setInterval(() => { if (existsSync(browserFile)) { clearInterval(ready); writeFileSync(pids + '/shard-' + index, String(process.pid)); } }, 10);
+  setInterval(() => {}, 1000);
+} else {
+  if (mode === 'drop' && index === 3) tags.pop();
+  const visited = ${JSON.stringify(nativeAuthShapes)}.flatMap(shape => ${JSON.stringify(endpoints)}.map(endpoint => shape + '/' + endpoint));
+  console.log('fake shard ' + index + '/' + count);
+  writeFileSync(args[4], JSON.stringify({ schema: 'joedesk.signed-out-shard.v1', shard: index + '/' + count, caseCount: tags.length, tags, visited }), { flag: 'wx' });
 }
 `);
-  const run = async (variant, signal) => {
-    const prior = process.env.JOED190_FAKE, priorTemp = process.env.RUNNER_TEMP;
-    process.env.JOED190_FAKE = variant; process.env.RUNNER_TEMP = dir;
-    try { return await runSignedOutShards({ count: 4, plan: full, shapes: nativeAuthShapes, endpoints, script: fake, signal }); }
-    finally {
-      if (prior === undefined) delete process.env.JOED190_FAKE; else process.env.JOED190_FAKE = prior;
-      if (priorTemp === undefined) delete process.env.RUNNER_TEMP; else process.env.RUNNER_TEMP = priorTemp;
-    }
+  let scenario = 0;
+  const pidDir = () => { const d = join(dir, `pids-${++scenario}`); mkdirSync(d); return d; };
+  const env = (variant, pids) => ({ JOED190_FAKE: variant, JOED190_PIDS: pids, RUNNER_TEMP: dir });
+  const run = async (variant, { signal, spawnShard, pids = pidDir() } = {}) => {
+    const keys = ['JOED190_FAKE', 'JOED190_PIDS', 'RUNNER_TEMP'], prior = keys.map(key => process.env[key]);
+    Object.assign(process.env, env(variant, pids));
+    try {
+      return await runSignedOutShards({ count: 4, plan: full, shapes: nativeAuthShapes, endpoints, script: fake, signal, killAfterMs: 300,
+        ...(spawnShard ? { spawnShard } : {}) });
+    } finally { keys.forEach((key, n) => { if (prior[n] === undefined) delete process.env[key]; else process.env[key] = prior[n]; }); }
   };
+  // Every recorded shard and browser pid must be gone when the runner returns.
+  const noSurvivors = (pids, what) => {
+    const files = readdirSync(pids);
+    for (const file of files) {
+      assert.throws(() => process.kill(Number(readFileSync(join(pids, file), 'utf8')), 0), { code: 'ESRCH' }, `${what}: ${file} still running`);
+    }
+    assert.deepEqual(readdirSync(dir).filter(name => name.startsWith('joedesk-signed-out-shards-')), [], `${what}: reports directory removed`);
+    return files;
+  };
+  const allStarted = pids => [1, 2, 3, 4].every(i => existsSync(join(pids, `shard-${i}`)));
+
   assert.equal(await run(''), 0, 'four complete shards merge');
   assert.equal(await run('exit'), 1, 'a failed shard fails the phase');
   assert.equal(await run('drop'), 1, 'a shard that skipped a case fails the merge');
-  // Cancellation stops every running shard and waits for it before returning.
-  const controller = new AbortController();
-  const pids = [1, 2, 3, 4].map(i => join(dir, `pid-${i}`));
-  const watcher = setInterval(() => { if (pids.every(existsSync)) controller.abort(); }, 20);
+
+  // Abort after the barrier: every shard and its SIGTERM-ignoring browser runs.
+  const aborted = pidDir(), controller = new AbortController();
+  const barrier = setInterval(() => { if (allStarted(aborted)) { clearInterval(barrier); controller.abort(); } }, 10);
   let code;
-  try { code = await run('hang', controller.signal); } finally { clearInterval(watcher); }
+  try { code = await run('hang', { signal: controller.signal, pids: aborted }); } finally { clearInterval(barrier); }
   assert.equal(code, 1, 'a cancelled phase fails');
-  for (const file of pids) {
-    assert.throws(() => process.kill(Number(readFileSync(file, 'utf8')), 0), { code: 'ESRCH' }, `${file}: shard stopped before the runner returned`);
-  }
-  assert.deepEqual(readdirSync(dir).filter(name => name.startsWith('joedesk-signed-out-shards-')), [], 'shard reports directory removed');
-  assert.equal(await run('', AbortSignal.abort()), 1, 'an already-aborted runner starts no shard');
+  assert.equal(noSurvivors(aborted, 'abort').length, 8, 'four shards and four browsers were running at the abort');
+
+  assert.equal(await run('', { signal: AbortSignal.abort() }), 1, 'an already-aborted runner starts no shard');
+
   // A shard that cannot start stops and awaits the shards already running.
-  for (const file of pids) rmSync(file, { force: true });
+  const failedStart = pidDir();
   const startFailure = (command, args, options) => args.includes('3/4')
     ? spawn(join(dir, 'missing-node'), args, options) : spawn(command, args, options);
-  process.env.JOED190_FAKE = 'hang'; process.env.RUNNER_TEMP = dir;
-  try {
-    assert.equal(await runSignedOutShards({ count: 4, plan: full, shapes: nativeAuthShapes, endpoints, script: fake, spawnShard: startFailure }), 1);
-  } finally { delete process.env.JOED190_FAKE; delete process.env.RUNNER_TEMP; }
-  for (const file of pids.filter(existsSync)) {
-    assert.throws(() => process.kill(Number(readFileSync(file, 'utf8')), 0), { code: 'ESRCH' }, `${file}: started shard stopped after a start failure`);
-  }
-  assert.deepEqual(readdirSync(dir).filter(name => name.startsWith('joedesk-signed-out-shards-')), [], 'reports directory removed after a start failure');
-  // A real SIGTERM to the runner process (CI job cancellation) does the same.
-  for (const file of pids) rmSync(file, { force: true });
-  const parent = join(dir, 'parent.mjs');
+  assert.equal(await run('hang', { spawnShard: startFailure, pids: failedStart }), 1);
+  noSurvivors(failedStart, 'start failure');
+
+  // A real SIGTERM to the runner process (CI job cancellation), after the barrier.
+  const terminated = pidDir(), parent = join(dir, 'parent.mjs');
   writeFileSync(parent, `import { runSignedOutShards } from ${JSON.stringify(new URL('../scripts/browser/signed-out-shards.mjs', import.meta.url).href)};
 import { readFileSync } from 'node:fs';
 const full = JSON.parse(readFileSync(${JSON.stringify(join(dir, 'plan.json'))}, 'utf8'));
-process.exit(await runSignedOutShards({ count: 4, plan: full, shapes: ${JSON.stringify(nativeAuthShapes)}, endpoints: ${JSON.stringify(endpoints)}, script: ${JSON.stringify(fake)} }));
+process.exit(await runSignedOutShards({ count: 4, plan: full, shapes: ${JSON.stringify(nativeAuthShapes)}, endpoints: ${JSON.stringify(endpoints)}, script: ${JSON.stringify(fake)}, killAfterMs: 300 }));
 `);
-  const child = spawn(process.execPath, [parent], { stdio: 'ignore', env: { ...process.env, JOED190_FAKE: 'hang', RUNNER_TEMP: dir } });
+  const child = spawn(process.execPath, [parent], { stdio: 'ignore', env: { ...process.env, ...env('hang', terminated) } });
   const exited = new Promise(resolve => child.on('close', (code, signal) => resolve({ code, signal })));
-  await new Promise(resolve => { const poll = setInterval(() => { if (pids.every(existsSync)) { clearInterval(poll); resolve(); } }, 20); });
+  await new Promise(resolve => { const poll = setInterval(() => { if (allStarted(terminated)) { clearInterval(poll); resolve(); } }, 10); });
   child.kill('SIGTERM');
-  assert.deepEqual(await exited, { code: 143, signal: null }, 'SIGTERM fails the phase with 143 after the shards exit');
-  for (const file of pids) {
-    assert.throws(() => process.kill(Number(readFileSync(file, 'utf8')), 0), { code: 'ESRCH' }, `${file}: no orphaned shard after SIGTERM`);
-  }
-  assert.deepEqual(readdirSync(dir).filter(name => name.startsWith('joedesk-signed-out-shards-')), [], 'reports directory removed after SIGTERM');
+  assert.deepEqual(await exited, { code: 143, signal: null }, 'SIGTERM fails the phase with 143 after every group is empty');
+  assert.equal(noSurvivors(terminated, 'SIGTERM').length, 8);
 });
