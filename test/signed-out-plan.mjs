@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { authShapes, nativeAuthShapes, authResponse, reasons, widths, screens, pageFixture } from './fixtures/signed-out-cases.mjs';
@@ -7,7 +7,7 @@ import { nativeAuthPaths, parseSignedOutArgs, parseSignedOutOptions, planSignedO
   assertSignedOutTransportCoverage, mergeSignedOutShards } from '../scripts/signed-out-plan.mjs';
 import { acceptRead } from '../contracts/read.mjs';
 import { freshPageSession } from './fixtures/board-session.mjs';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { runSignedOutShards } from '../scripts/browser/signed-out-shards.mjs';
 import { scratch, discard } from '../scripts/browser/scratch.mjs';
@@ -413,15 +413,22 @@ test('JOED-190 runner: spawns every shard, merges their reports, and on failure 
   // JOED-191: one cleanup that also runs on failure or timeout: stop every
   // polling interval, kill every recorded shard group (shard + "browser") and
   // the SIGTERM case's runner process, then discard the scratch directory.
+  // Records whose process was confirmed gone are deleted (noSurvivors); any
+  // remaining one is signalled only if that pid still runs our own command
+  // (its command line names this scratch directory), never a reused pid.
   const timers = new Set(), spawned = new Set();
+  const ours = pid => {
+    const ps = spawnSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' });
+    return ps.status === 0 && ps.stdout.includes(dir);
+  };
   t.after(async () => {
     for (const timer of timers) clearInterval(timer);
-    for (const proc of spawned) { try { proc.kill('SIGKILL'); } catch {} }
+    for (const proc of spawned) if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL');
     for (const entry of existsSync(dir) ? readdirSync(dir) : []) {
       if (!entry.startsWith('pids-')) continue;
       for (const file of readdirSync(join(dir, entry))) {
         const pid = Number(readFileSync(join(dir, entry, file), 'utf8'));
-        if (!Number.isInteger(pid) || pid <= 1) continue;
+        if (!Number.isInteger(pid) || pid <= 1 || !ours(pid)) continue;
         for (const target of file.startsWith('shard-') ? [-pid, pid] : [pid]) { try { process.kill(target, 'SIGKILL'); } catch {} }
       }
     }
@@ -482,6 +489,7 @@ if (mode === 'hang') {
     const files = readdirSync(pids);
     for (const file of files) {
       assert.throws(() => process.kill(Number(readFileSync(join(pids, file), 'utf8')), 0), { code: 'ESRCH' }, `${what}: ${file} still running`);
+      unlinkSync(join(pids, file)); // retired: confirmed gone, never signalled again
     }
     assert.deepEqual(readdirSync(dir).filter(name => name.startsWith('joedesk-signed-out-shards-')), [], `${what}: reports directory removed`);
     return files;
