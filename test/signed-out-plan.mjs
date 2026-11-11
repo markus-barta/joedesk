@@ -3,9 +3,14 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { authShapes, nativeAuthShapes, authResponse, reasons, widths, screens, pageFixture } from './fixtures/signed-out-cases.mjs';
-import { nativeAuthPaths, parseSignedOutArgs, planSignedOutMatrix } from '../scripts/signed-out-plan.mjs';
+import { nativeAuthPaths, parseSignedOutArgs, parseSignedOutOptions, planSignedOutMatrix, shardSignedOutPlan, signedOutCaseTags,
+  assertSignedOutTransportCoverage, mergeSignedOutShards } from '../scripts/signed-out-plan.mjs';
 import { acceptRead } from '../contracts/read.mjs';
 import { freshPageSession } from './fixtures/board-session.mjs';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { runSignedOutShards } from '../scripts/browser/signed-out-shards.mjs';
+import { scratch, discard } from '../scripts/browser/scratch.mjs';
 const { readJSON, classifyResponse, createBoardSession, boardSession, readFailure, AUTH_FAILURE } = await import('../public/joe/transport.js');
 const { createFeed } = await import('../public/joe/feed.js');
 const { cellReason } = await import('../public/joe/health.js');
@@ -15,9 +20,10 @@ const browser = readFileSync(new URL('../scripts/browser/signed-out-pages.mjs', 
 // Evaluate the browser's actual inputs/CLI wiring, stopping before any server
 // or browser starts. A new native shape must enter this plan and the invariant.
 const bootstrap = browser.slice(browser.indexOf('const nativeShapes ='), browser.indexOf('const f ='));
-function plan(mode) {
+function plan(mode, extra = []) {
   const result = runInNewContext(`${bootstrap}\nplan`, { nativeAuthShapes, widths, reasons, screens,
-    parseSignedOutArgs, planSignedOutMatrix, process: { argv: ['node', 'signed-out-pages.mjs', ...(mode ? [`--${mode}`] : [])] }, console: { log() {} } });
+    parseSignedOutOptions, planSignedOutMatrix, shardSignedOutPlan,
+    process: { argv: ['node', 'signed-out-pages.mjs', ...(mode ? [`--${mode}`] : []), ...extra] }, console: { log() {} } });
   // The endpoint array originates in the VM; compare data, not realm prototypes.
   return JSON.parse(JSON.stringify(result));
 }
@@ -292,7 +298,8 @@ test('JOED-179 (f): unknown and ambiguous modes are rejected before startup', ()
   }
   assert.throws(() => planSignedOutMatrix({ mode: 'unknown' }), /Unknown signed-out matrix mode/);
   assert.throws(() => plan('unknown'), /use --full or --subset/);
-  assert.ok(browser.indexOf('parseSignedOutArgs(process.argv.slice(2))') < browser.indexOf('await startBoard('));
+  assert.ok(browser.indexOf('parseSignedOutOptions(process.argv.slice(2))') < browser.indexOf('await startBoard('));
+  assert.ok(browser.indexOf('if (options.parallel) process.exit(await runSignedOutShards(') < browser.indexOf('await startBoard('), 'the parallel runner starts no server or browser of its own');
 });
 
 // Run the actual browser matrix/invariant loops with a synthetic check. This
@@ -318,9 +325,9 @@ async function executeMatrix(mode, { varyShape = false, missingVisit = null } = 
     await runInNewContext(`(async () => { ${loop} })()`, context);
   }
   assert.equal(observed.length, selected.caseCount);
-  const visitation = browser.slice(browser.indexOf('  for (const auth of nativeShapes) for (const endpoint of endpoints)'), browser.indexOf('\n  console.log(`${checked} signed-out browser cases passed'));
-  assert.ok(visitation, 'execute the actual runtime endpoint assertion');
-  runInNewContext(visitation, { assert, nativeShapes: nativeAuthShapes, endpoints, visited });
+  assert.deepEqual(observed.map(c => c.tag), signedOutCaseTags(selected), 'the planned tags are exactly the executed check() tags');
+  assert.ok(browser.includes('if (!options.shard) assertSignedOutTransportCoverage(visited, nativeShapes, endpoints);'), 'the runtime endpoint assertion runs unsharded');
+  assertSignedOutTransportCoverage(visited, nativeAuthShapes, endpoints);
   return observed;
 }
 
@@ -336,4 +343,100 @@ test('JOED-179 (c) browser wiring: both modes execute their plan and reject a mi
     await assert.rejects(executeMatrix(mode, { missingVisit: 'HTML fragment/account-history.json' }), /HTML fragment\/account-history.json: actual auth response exercised/);
   }
   await assert.rejects(executeMatrix('subset', { varyShape: true }), /signed-out DOM must be identical across native auth shapes/);
+});
+
+test('JOED-190 options: --parallel and --shard need the full matrix and well-formed counts', () => {
+  assert.deepEqual(parseSignedOutOptions(['--full', '--parallel', '4']), { mode: 'full', parallel: 4, shard: null, report: null });
+  assert.deepEqual(parseSignedOutOptions(['--parallel', '4']), { mode: 'full', parallel: 4, shard: null, report: null });
+  assert.deepEqual(parseSignedOutOptions(['--full', '--shard', '2/4', '--report', '/tmp/r.json']),
+    { mode: 'full', parallel: null, shard: { index: 2, count: 4 }, report: '/tmp/r.json' });
+  assert.equal(parseSignedOutArgs(['--full', '--parallel', '4']), 'full');
+  for (const args of [['--subset', '--parallel', '4'], ['--subset', '--shard', '1/2', '--report', 'r'], ['--parallel', '1'], ['--parallel', '17'],
+    ['--parallel', '04'], ['--parallel'], ['--parallel', '--full'], ['--parallel', '2', '--parallel', '3'], ['--shard', '1/4'], ['--shard', '5/4', '--report', 'r'],
+    ['--shard', '0/4', '--report', 'r'], ['--shard', '1/1', '--report', 'r'], ['--report', 'r'], ['--parallel', '4', '--shard', '1/4', '--report', 'r']]) {
+    assert.throws(() => parseSignedOutOptions(args), /use --full or --subset/, args.join(' '));
+  }
+  assert.equal(plan('full', ['--parallel', '4']).caseCount, 2496, 'the parallel runner merges against the full plan');
+  assert.throws(() => plan('subset', ['--parallel', '4']), /shards need the full matrix/);
+});
+
+test('JOED-190 shards: every full case lands in exactly one shard, in the unsharded order', () => {
+  const full = plan('full'), expected = signedOutCaseTags(full);
+  assert.equal(expected.length, 2496);
+  assert.equal(new Set(expected).size, expected.length);
+  for (let count = 2; count <= 16; count++) {
+    const shards = Array.from({ length: count }, (_, i) => shardSignedOutPlan(full, i + 1, count));
+    const tags = shards.flatMap(signedOutCaseTags);
+    assert.deepEqual(tags, expected, `${count} shards concatenate to the full plan`);
+    assert.equal(shards.reduce((n, shard) => n + shard.caseCount, 0), full.caseCount);
+    for (const shard of shards) {
+      assert.ok(shard.caseCount > 0 && shard.views.length > 0);
+      assert.equal(signedOutCaseTags(shard).length, shard.caseCount);
+      assert.equal(shard.invariantCases, 0);
+    }
+  }
+  const four = Array.from({ length: 4 }, (_, i) => plan('full', ['--shard', `${i + 1}/4`, '--report', 'r']));
+  assert.deepEqual(four.map(shard => shard.views.map(view => `${view.width}:${view.matrix.length}+${view.opaque.length}`)),
+    [['390:4+0'], ['390:4+32'], ['1440:4+0'], ['1440:4+32']], 'four shards: one width each, four auth shapes, opaque cases once per width');
+  assert.throws(() => shardSignedOutPlan(plan('subset'), 1, 2), /require the full matrix/);
+  assert.throws(() => shardSignedOutPlan(full, 1, 17), /shard count/);
+  assert.throws(() => shardSignedOutPlan(full, 3, 2), /shard index/);
+});
+
+test('JOED-190 merge: rejects a missing, duplicated, reordered or foreign shard and a missing transport visit', () => {
+  const full = plan('full'), count = 4, endpoints = [...new Set(full.views[0].opaque.map(c => c.endpoint))];
+  const visitedAll = nativeAuthShapes.flatMap(shape => endpoints.map(endpoint => `${shape}/${endpoint}`));
+  const reports = () => Array.from({ length: count }, (_, i) => {
+    const tags = signedOutCaseTags(shardSignedOutPlan(full, i + 1, count));
+    return { schema: 'joedesk.signed-out-shard.v1', shard: `${i + 1}/${count}`, caseCount: tags.length, tags,
+      visited: visitedAll.filter((_, n) => n % count === i) };
+  });
+  const options = { shapes: nativeAuthShapes, endpoints };
+  assert.equal(mergeSignedOutShards(full, reports(), options), 2496);
+  const cases = {
+    'missing case': r => { r[1].tags.pop(); r[1].caseCount--; },
+    'reordered cases': r => { r[2].tags.reverse(); },
+    'duplicated case': r => { r[0].tags[1] = r[0].tags[0]; },
+    'foreign schema': r => { r[3].schema = 'other'; },
+    'wrong shard label': r => { r[3].shard = '1/4'; },
+    'missing visit': r => { for (const report of r) report.visited = report.visited.filter(v => v !== 'HTML fragment/account-history.json'); },
+  };
+  for (const [name, mutate] of Object.entries(cases)) {
+    const r = reports(); mutate(r);
+    assert.throws(() => mergeSignedOutShards(full, r, options), /planned cases|exactly once|foreign report|actual auth response exercised/, name);
+  }
+  assert.throws(() => mergeSignedOutShards(full, reports().slice(0, 3), options), /planned cases|exactly once|foreign report/, 'a lost shard fails the merge');
+});
+
+test('JOED-190 runner: spawns every shard, merges their reports and fails on a failed or incomplete shard', async t => {
+  const dir = scratch('joed190-shards-');
+  t.after(() => discard(dir, 'JOED-190 shard runner test'));
+  const full = plan('full'), endpoints = [...new Set(full.views[0].opaque.map(c => c.endpoint))];
+  writeFileSync(join(dir, 'plan.json'), JSON.stringify(full));
+  // A stand-in for signed-out-pages.mjs --full --shard K/N --report FILE that
+  // reports its planned tags; JOED190_FAKE selects a failing variant.
+  const fake = join(dir, 'fake-shard.mjs');
+  writeFileSync(fake, `import { readFileSync, writeFileSync } from 'node:fs';
+import { shardSignedOutPlan, signedOutCaseTags } from ${JSON.stringify(new URL('../scripts/signed-out-plan.mjs', import.meta.url).href)};
+const args = process.argv.slice(2);
+if (args[0] !== '--full' || args[1] !== '--shard' || args[3] !== '--report' || args.length !== 5) process.exit(9);
+const [index, count] = args[2].split('/').map(Number);
+const full = JSON.parse(readFileSync(${JSON.stringify(join(dir, 'plan.json'))}, 'utf8'));
+const tags = signedOutCaseTags(shardSignedOutPlan(full, index, count));
+const mode = process.env.JOED190_FAKE ?? '';
+if (mode === 'exit' && index === 2) process.exit(3);
+if (mode === 'drop' && index === 3) tags.pop();
+const visited = ${JSON.stringify(nativeAuthShapes)}.flatMap(shape => ${JSON.stringify(endpoints)}.map(endpoint => shape + '/' + endpoint));
+console.log('fake shard ' + index + '/' + count);
+writeFileSync(args[4], JSON.stringify({ schema: 'joedesk.signed-out-shard.v1', shard: index + '/' + count, caseCount: tags.length, tags, visited }), { flag: 'wx' });
+`);
+  const run = async variant => {
+    const prior = process.env.JOED190_FAKE;
+    process.env.JOED190_FAKE = variant;
+    try { return await runSignedOutShards({ count: 4, plan: full, shapes: nativeAuthShapes, endpoints, script: fake }); }
+    finally { if (prior === undefined) delete process.env.JOED190_FAKE; else process.env.JOED190_FAKE = prior; }
+  };
+  assert.equal(await run(''), 0, 'four complete shards merge');
+  assert.equal(await run('exit'), 1, 'a failed shard fails the phase');
+  assert.equal(await run('drop'), 1, 'a shard that skipped a case fails the merge');
 });

@@ -2657,8 +2657,16 @@ re-serving one fixed record and refreshing its independent money input; it
 does not manufacture an older receipt on the second read. P3's signed-out fixture
 now checks that successful feed responses leave the old page frozen and a fresh
 page load resumes rendering. CI runs `scripts/browser/signed-out-pages.mjs --subset`
-on PRs (544 cases, including cross-shape DOM invariants) and `--full` on main pushes
-and workflow dispatches (all 2,496 cases). Each resume assertion observes a probe-triggered
+on PRs (544 cases, including cross-shape DOM invariants) and `--full --parallel 4` on main pushes
+and workflow dispatches (all 2,496 cases, JOED-190). The parallel runner starts four
+`--full --shard K/4` processes, each with its own fixture server and headless browser
+and one contiguous quarter of the (width, auth shape) blocks; every shard repeats its
+width's preamble regressions. Each shard checks that it ran exactly its planned case
+tags in order and writes a value-free report; the runner then requires every case of
+the full plan exactly once across shards and every native auth shape on every
+transport, and prints each shard's minutes, the wall time and the peak load1. The
+subset stays in one process because its invariant compares captures across shapes.
+A single unsharded `--full` run remains available locally. Each resume assertion observes a probe-triggered
 page reload and a live new document, including the Results-503 case with its cold
 unavailable state. It also exercises the real manual Reload control. All
 seven CI browser phases run in the same locked shell; signed-out checks retain
