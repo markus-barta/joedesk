@@ -120,7 +120,7 @@ test('combined browser step preserves all phase arguments, Results zone plans an
     assert.equal(commands.length, 7, 'all browser phases execute inside the one shell');
     assert.equal(commands[0][0], `scripts/browser-p3.mjs ${event === 'pull_request' ? '--subset' : '--full'}`);
     assert.equal(commands[0][1], join(dir, 'qa/p3'));
-    assert.deepEqual(commands[1], [`scripts/browser/signed-out-pages.mjs ${event === 'pull_request' ? '--subset' : '--full'}`, '', 'UTC']);
+    assert.deepEqual(commands[1], [`scripts/browser/signed-out-pages.mjs ${event === 'pull_request' ? '--subset' : '--full --parallel 4'}`, '', 'UTC']);
     assert.equal(commands[2][1], join(dir, 'qa/p4'));
     assert.ok(commands[2][0].startsWith('run test:results -- '));
     assert.deepEqual(parseResultsGateArgs(commands[2][0].split(' ').slice(3)), event === 'push'
@@ -138,7 +138,7 @@ test('JOED-179 signed-out: empty and unknown events default to --full', t => {
     const { result, commands } = simulateBrowserPhases(t, { event });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(commands[0][0], 'scripts/browser-p3.mjs --full');
-    assert.equal(commands[1][0], 'scripts/browser/signed-out-pages.mjs --full');
+    assert.equal(commands[1][0], 'scripts/browser/signed-out-pages.mjs --full --parallel 4');
   }
 });
 
