@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { authShapes, nativeAuthShapes, authResponse, reasons, widths, screens, pageFixture } from './fixtures/signed-out-cases.mjs';
@@ -7,7 +7,7 @@ import { nativeAuthPaths, parseSignedOutArgs, parseSignedOutOptions, planSignedO
   assertSignedOutTransportCoverage, mergeSignedOutShards } from '../scripts/signed-out-plan.mjs';
 import { acceptRead } from '../contracts/read.mjs';
 import { freshPageSession } from './fixtures/board-session.mjs';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { runSignedOutShards } from '../scripts/browser/signed-out-shards.mjs';
 import { scratch, discard } from '../scripts/browser/scratch.mjs';
@@ -410,7 +410,39 @@ test('JOED-190 merge: rejects a missing, duplicated, reordered or foreign shard 
 
 test('JOED-190 runner: spawns every shard, merges their reports, and on failure or cancellation leaves no shard or browser process', { timeout: 60000 }, async t => {
   const dir = scratch('joed190-shards-');
-  t.after(() => discard(dir, 'JOED-190 shard runner test'));
+  // JOED-191: one cleanup that also runs on failure or timeout: stop every
+  // polling interval, kill every recorded shard group (shard + "browser") and
+  // the SIGTERM case's runner process, then discard the scratch directory.
+  // Records whose process was confirmed gone are deleted (noSurvivors); any
+  // remaining one is signalled only if that pid still runs our own command
+  // (its command line names this scratch directory), never a reused pid.
+  const timers = new Set(), spawned = new Set();
+  const ours = pid => {
+    const ps = spawnSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' });
+    return ps.status === 0 && ps.stdout.includes(dir);
+  };
+  t.after(async () => {
+    for (const timer of timers) clearInterval(timer);
+    for (const proc of spawned) if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL');
+    for (const entry of existsSync(dir) ? readdirSync(dir) : []) {
+      if (!entry.startsWith('pids-')) continue;
+      for (const file of readdirSync(join(dir, entry))) {
+        const pid = Number(readFileSync(join(dir, entry, file), 'utf8'));
+        if (!Number.isInteger(pid) || pid <= 1 || !ours(pid)) continue;
+        for (const target of file.startsWith('shard-') ? [-pid, pid] : [pid]) { try { process.kill(target, 'SIGKILL'); } catch {} }
+      }
+    }
+    await discard(dir, 'JOED-190 shard runner test');
+  });
+  // Bounded barrier: resolves when ready() holds, fails clearly after ms.
+  const waitFor = (ready, what, ms = 20000) => new Promise((resolve, reject) => {
+    const end = Date.now() + ms;
+    const poll = setInterval(() => {
+      if (ready()) { clearInterval(poll); timers.delete(poll); resolve(); }
+      else if (Date.now() >= end) { clearInterval(poll); timers.delete(poll); reject(new Error(`barrier timed out after ${ms} ms: ${what}`)); }
+    }, 10);
+    timers.add(poll);
+  });
   const full = plan('full'), endpoints = [...new Set(full.views[0].opaque.map(c => c.endpoint))];
   writeFileSync(join(dir, 'plan.json'), JSON.stringify(full));
   // A stand-in for signed-out-pages.mjs --full --shard K/N --report FILE that
@@ -457,6 +489,7 @@ if (mode === 'hang') {
     const files = readdirSync(pids);
     for (const file of files) {
       assert.throws(() => process.kill(Number(readFileSync(join(pids, file), 'utf8')), 0), { code: 'ESRCH' }, `${what}: ${file} still running`);
+      unlinkSync(join(pids, file)); // retired: confirmed gone, never signalled again
     }
     assert.deepEqual(readdirSync(dir).filter(name => name.startsWith('joedesk-signed-out-shards-')), [], `${what}: reports directory removed`);
     return files;
@@ -469,9 +502,9 @@ if (mode === 'hang') {
 
   // Abort after the barrier: every shard and its SIGTERM-ignoring browser runs.
   const aborted = pidDir(), controller = new AbortController();
-  const barrier = setInterval(() => { if (allStarted(aborted)) { clearInterval(barrier); controller.abort(); } }, 10);
-  let code;
-  try { code = await run('hang', { signal: controller.signal, pids: aborted }); } finally { clearInterval(barrier); }
+  const barrier = waitFor(() => allStarted(aborted), 'all four shards and browsers started (abort)').then(() => controller.abort());
+  const code = await run('hang', { signal: controller.signal, pids: aborted });
+  await barrier;
   assert.equal(code, 1, 'a cancelled phase fails');
   assert.equal(noSurvivors(aborted, 'abort').length, 8, 'four shards and four browsers were running at the abort');
 
@@ -492,8 +525,9 @@ const full = JSON.parse(readFileSync(${JSON.stringify(join(dir, 'plan.json'))}, 
 process.exit(await runSignedOutShards({ count: 4, plan: full, shapes: ${JSON.stringify(nativeAuthShapes)}, endpoints: ${JSON.stringify(endpoints)}, script: ${JSON.stringify(fake)}, killAfterMs: 300 }));
 `);
   const child = spawn(process.execPath, [parent], { stdio: 'ignore', env: { ...process.env, ...env('hang', terminated) } });
+  spawned.add(child);
   const exited = new Promise(resolve => child.on('close', (code, signal) => resolve({ code, signal })));
-  await new Promise(resolve => { const poll = setInterval(() => { if (allStarted(terminated)) { clearInterval(poll); resolve(); } }, 10); });
+  await waitFor(() => allStarted(terminated), 'all four shards and browsers started (SIGTERM)');
   child.kill('SIGTERM');
   assert.deepEqual(await exited, { code: 143, signal: null }, 'SIGTERM fails the phase with 143 after every group is empty');
   assert.equal(noSurvivors(terminated, 'SIGTERM').length, 8);
