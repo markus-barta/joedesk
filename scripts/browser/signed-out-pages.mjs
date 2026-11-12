@@ -1,7 +1,9 @@
 // The actual app, native page/worker transports, one owned headless browser.
 import assert from 'node:assert/strict';
+import { writeFileSync } from 'node:fs';
 import { nativeAuthShapes, reasons, widths, screens, pageFixture, dirtyPreview, retainedDocument, assertSignedOutPage, blame } from '../../test/fixtures/signed-out-cases.mjs';
-import { nativeAuthPaths, parseSignedOutArgs, planSignedOutMatrix } from '../signed-out-plan.mjs';
+import { nativeAuthPaths, parseSignedOutOptions, planSignedOutMatrix, shardSignedOutPlan, signedOutCaseTags, assertSignedOutTransportCoverage } from '../signed-out-plan.mjs';
+import { runSignedOutShards } from './signed-out-shards.mjs';
 import { history as accountHistory } from '../../test/fixtures/account-fixtures.mjs';
 import { launch, openPage } from './cdp.mjs';
 import { configure, waitFor } from './shots.mjs';
@@ -9,13 +11,16 @@ import { startBoard, ACTOR } from './board.mjs';
 
 const nativeShapes = nativeAuthShapes;
 const endpoints = ['state.json', 'history.json', 'history-continuity.json', 'results.json', 'fleet-config.json', 'fleet-config/actions.json', 'board-settings.json', 'account-history.json'];
-const plan = planSignedOutMatrix({ mode: parseSignedOutArgs(process.argv.slice(2)), widths, shapes: nativeShapes, reasons, screens, endpoints });
-console.log(`Signed-out matrix: ${plan.mode}; ${plan.caseCount} planned cases (${plan.matrixCases} matrix, ${plan.opaqueCases} opaque-only, ${plan.invariantCases} cross-shape DOM); full shapes: ${plan.views.map(view => `${view.width}px=${view.fullShape ?? 'all'}`).join(', ')}`);
+const options = parseSignedOutOptions(process.argv.slice(2));
+const fullPlan = planSignedOutMatrix({ mode: options.mode, widths, shapes: nativeShapes, reasons, screens, endpoints });
+const plan = options.shard ? shardSignedOutPlan(fullPlan, options.shard.index, options.shard.count) : fullPlan;
+if (!options.parallel) console.log(`Signed-out matrix: ${plan.mode}${options.shard ? ` shard ${options.shard.index}/${options.shard.count}` : ''}; ${plan.caseCount} planned cases (${plan.matrixCases} matrix, ${plan.opaqueCases} opaque-only, ${plan.invariantCases} cross-shape DOM); full shapes: ${plan.views.map(view => `${view.width}px=${view.fullShape ?? 'all'}`).join(', ')}`);
 const f = pageFixture(), account = accountHistory();
+if (options.parallel) process.exit(await runSignedOutShards({ count: options.parallel, plan: fullPlan, shapes: nativeShapes, endpoints }));
 const board = await startBoard({ fleetConfig: f['fleet-config'], history: f.history });
 board.setNow(f.data.receivedAt);
 let browser, checked = 0, stage = 'launch';
-const failures = [], visited = new Set();
+const failures = [], visited = new Set(), tags = [];
 try {
   browser = await launch({ commandTimeout: 30000 });
   const page = await openPage(browser, { headers: { 'x-auth-request-user': ACTOR } });
@@ -172,7 +177,7 @@ try {
     assert.ok(await page.evaluate(`window.__joedesk.renders > ${count}`), `${tag}: recovery resumes renders`);
     assert.deepEqual(page.errors, [], `${tag}: no render errors`);
     assert.deepEqual(failures, [], 'no routing errors');
-    checked++;
+    checked++; tags.push(tag);
     if (checked % 100 === 0) console.log(`${checked} complete DOM comparisons passed`);
   };
   for (const view of plan.views) {
@@ -360,8 +365,12 @@ try {
     }
   }
   assert.equal(checked, plan.caseCount, `${plan.mode}: executed every planned signed-out case`);
-  for (const auth of nativeShapes) for (const endpoint of endpoints) assert.ok(visited.has(`${auth}/${endpoint}`), `${auth}/${endpoint}: actual auth response exercised`);
-  console.log(`${checked} signed-out browser cases passed; all native auth shapes exercised on every transport`);
+  assert.deepEqual(tags, signedOutCaseTags(plan), `${plan.mode}: executed exactly the planned signed-out cases in order`);
+  // A shard sees only its own auth shapes; the parallel runner checks the union.
+  if (!options.shard) assertSignedOutTransportCoverage(visited, nativeShapes, endpoints);
+  console.log(`${checked} signed-out browser cases passed; ${options.shard ? `shard ${options.shard.index}/${options.shard.count}, transport coverage merged across shards` : 'all native auth shapes exercised on every transport'}`);
+  if (options.shard) writeFileSync(options.report, JSON.stringify({ schema: 'joedesk.signed-out-shard.v1',
+    shard: `${options.shard.index}/${options.shard.count}`, caseCount: checked, tags, visited: [...visited].sort() }), { mode: 0o600, flag: 'wx' });
 } catch (error) {
   console.error(`Failed at ${stage}`); throw error;
 } finally {

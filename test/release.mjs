@@ -130,33 +130,33 @@ test('P6 reservation: one UTC second, no collisions, continued sequence, mixed-e
   const later = reserveVersion({ ...next, version_scheme: 'inspr-calendar-v2' }, laterUTC);
   assert.equal(later.version_scheme, 'inspr-calver-3'); assert.equal(later.release_sequence, next.release_sequence + 1);
 });
-test('JOED-189: closure names the active candidate version', () => {
+test('JOED-193: closure names the active candidate version', () => {
   assert.equal(read('release/closure.json').candidate_version, active.version);
 });
-test('JOED-189: sequence 45 follows adopted 44 and preserves About history', () => {
-  assert.equal(prep.ticket, 'JOED-189');
-  assert.equal(next.release_sequence, 45);
+test('JOED-193: sequence 46 follows adopted 45 and preserves About history', () => {
+  assert.equal(prep.ticket, 'JOED-193');
+  assert.equal(next.release_sequence, 46);
   assert.equal(active.status, 'candidate');
-  assert.equal(active.note, 'Release 45 changes only CI checks; board behaviour is unchanged.');
-  const adoption = read('adoption/261104111323.0.0.json');
+  assert.equal(active.note, 'Release 46 changes only CI checks: faster signed-out checks and Results coverage split into a nightly run; board behaviour is unchanged.');
+  const adoption = read('adoption/261109023132.0.0.json');
   assert.deepEqual(oldRelease, {
-    product: 'JoeDesk', version_scheme: 'inspr-calver-3', version: '261104111323.0.0',
-    release_channel: 'stable', release_sequence: 44, status: 'published-candidate',
-    source_branch: 'main', source_commit: 'fa97f884f925b2251690fcf32825ab8a8672fcae',
-    release_set_ticket: 'JOED-183', disposition: 'deployed', deployed: true,
-    note: 'live on csb0 since 2026-11-08T11:31:16Z (JOED-183); adopted 2026-11-08T12:25:23Z (adoption/261104111323.0.0.json)',
+    product: 'JoeDesk', version_scheme: 'inspr-calver-3', version: '261109023132.0.0',
+    release_channel: 'stable', release_sequence: 45, status: 'published-candidate',
+    source_branch: 'main', source_commit: '6ba8051af1108cd35ee6fb6e3cd51a94474f6d24',
+    release_set_ticket: 'JOED-189', disposition: 'deployed', deployed: true,
+    note: 'live on csb0 since 2026-11-09T08:53:35Z (JOED-189); adopted 2026-11-09T08:56:44Z (adoption/261109023132.0.0.json)',
   });
   assert.equal(fs.existsSync(new URL('../adoption/261031052151.0.0.json', import.meta.url)), false);
   assert.equal(adoption.version, lastDeployed.version);
   assert.equal(adoption.release_sequence, lastDeployed.release_sequence);
   assert.equal(adoption.source.commit, oldRelease.source_commit);
-  assert.equal(adoption.deployment.deployed_at, '2026-11-08T11:31:16Z');
-  assert.equal(adoption.adopted_at, '2026-11-08T12:25:23Z');
+  assert.equal(adoption.deployment.deployed_at, '2026-11-09T08:53:35Z');
+  assert.equal(adoption.adopted_at, '2026-11-09T08:56:44Z');
   assert.deepEqual(prep.anchor, { legacy_scheme: 'calendar', last_legacy_version: '26.09.21.12.00',
     last_legacy_sequence: 23, first_calendar_version: '261016151218.0.0', first_calendar_sequence: 24 });
-  assert.equal(lastDeployed.version, '261104111323.0.0');
-  assert.equal(lastDeployed.release_sequence, 44);
-  assert.equal(lastDeployed.note, 'live on csb0 since 2026-11-08T11:31:16Z (JOED-183)');
+  assert.equal(lastDeployed.version, '261109023132.0.0');
+  assert.equal(lastDeployed.release_sequence, 45);
+  assert.equal(lastDeployed.note, 'live on csb0 since 2026-11-09T08:53:35Z (JOED-189)');
   const versionSource = fs.readFileSync(new URL('../public/joe/joe-version.js', import.meta.url), 'utf8');
   const ui = new Function('window', `${versionSource}; return window.JoeVersion;`)({});
   assert.equal(ui.APP_VERSION, active.version);
@@ -167,30 +167,35 @@ test('JOED-189: sequence 45 follows adopted 44 and preserves About history', () 
     active.note,
   ]);
   assert.deepEqual(ui.VERSION_HISTORY[1], {
-    version: oldRelease.version, versionScheme: 'inspr-calver-3', date: '2026-11-04',
+    version: oldRelease.version, versionScheme: 'inspr-calver-3', date: '2026-11-09',
+    title: 'Steadier CI timing checks',
+    changes: ['Release 45 changes only CI checks; board behaviour is unchanged.'],
+  });
+  assert.deepEqual(ui.VERSION_HISTORY[2], {
+    version: '261104111323.0.0', versionScheme: 'inspr-calver-3', date: '2026-11-04',
     title: 'Honest account chart gaps',
     changes: [
       'History thinned to save space now stays connected; only real outages and unavailable values show as gaps.',
       'History thinned before this release keeps its old gaps until it ages out within 14 days.',
     ],
   });
-  assert.deepEqual(ui.VERSION_HISTORY[2], {
+  assert.deepEqual(ui.VERSION_HISTORY[3], {
     version: '261101023838.0.0', versionScheme: 'inspr-calver-3', date: '2026-11-01',
     title: 'Clear signed-out figures after returning',
     changes: ['When your sign-in expires, keep clearly frozen figures, including after returning with Back or Forward, and reload to sign in again.'],
   });
-  assert.deepEqual(ui.VERSION_HISTORY[3], {
+  assert.deepEqual(ui.VERSION_HISTORY[4], {
     version: '261031052151.0.0', versionScheme: 'inspr-calver-3', date: '2026-10-31',
     title: 'Clear signed-out notice',
     changes: ['When your sign-in expires, keep clearly frozen figures and reload to sign in again.'],
   });
   assert.equal(ui.VERSION_HISTORY[1].version, lastDeployed.version);
-  assert.deepEqual(ui.VERSION_HISTORY[4], {
+  assert.deepEqual(ui.VERSION_HISTORY[5], {
     version: '261030154842.0.0', versionScheme: 'inspr-calver-3', date: '2026-10-30',
     title: 'Faster Results switching',
     changes: ['Switch Results views faster while keeping rows readable.'],
   });
-  assert.deepEqual(ui.VERSION_HISTORY[5], {
+  assert.deepEqual(ui.VERSION_HISTORY[6], {
     version: '261030085000.0.0', versionScheme: 'inspr-calver-3', date: '2026-10-30',
     title: 'Exact Results dates and clearer missing values',
     changes: [
@@ -199,27 +204,27 @@ test('JOED-189: sequence 45 follows adopted 44 and preserves About history', () 
       'Get steadier release speed checks by running browser checks one job at a time and recording machine load.',
     ],
   });
-  assert.equal(ui.VERSION_HISTORY[6].version, '261029192345.0.0');
-  assert.equal(ui.VERSION_HISTORY[7].version, '261029075623.0.0');
-  assert.equal(ui.VERSION_HISTORY[8].version, '261028202622.0.0');
-  assert.equal(ui.VERSION_HISTORY[9].version, '261028081016.0.0');
-  assert.equal(ui.VERSION_HISTORY[10].version, '261027124551.0.0');
-  assert.equal(ui.VERSION_HISTORY[11].version, '261026232616.0.0');
-  assert.equal(ui.VERSION_HISTORY[12].version, '261026070713.0.0');
-  assert.equal(ui.VERSION_HISTORY[13].version, '261025221940.0.0');
-  assert.equal(ui.VERSION_HISTORY[14].version, '261025144826.0.0');
-  assert.equal(ui.VERSION_HISTORY[15].version, '261023155418.0.0');
-  assert.equal(ui.VERSION_HISTORY[16].version, '261023100632.0.0');
-  assert.equal(ui.VERSION_HISTORY[17].version, '261021113113.0.0');
-  assert.equal(ui.VERSION_HISTORY[18].version, '261021083537.0.0');
-  assert.equal(ui.VERSION_HISTORY[19].version, '261021015923.0.0');
-  assert.equal(ui.VERSION_HISTORY[20].version, prep.anchor.last_legacy_version);
+  assert.equal(ui.VERSION_HISTORY[7].version, '261029192345.0.0');
+  assert.equal(ui.VERSION_HISTORY[8].version, '261029075623.0.0');
+  assert.equal(ui.VERSION_HISTORY[9].version, '261028202622.0.0');
+  assert.equal(ui.VERSION_HISTORY[10].version, '261028081016.0.0');
+  assert.equal(ui.VERSION_HISTORY[11].version, '261027124551.0.0');
+  assert.equal(ui.VERSION_HISTORY[12].version, '261026232616.0.0');
+  assert.equal(ui.VERSION_HISTORY[13].version, '261026070713.0.0');
+  assert.equal(ui.VERSION_HISTORY[14].version, '261025221940.0.0');
+  assert.equal(ui.VERSION_HISTORY[15].version, '261025144826.0.0');
+  assert.equal(ui.VERSION_HISTORY[16].version, '261023155418.0.0');
+  assert.equal(ui.VERSION_HISTORY[17].version, '261023100632.0.0');
+  assert.equal(ui.VERSION_HISTORY[18].version, '261021113113.0.0');
+  assert.equal(ui.VERSION_HISTORY[19].version, '261021083537.0.0');
+  assert.equal(ui.VERSION_HISTORY[20].version, '261021015923.0.0');
+  assert.equal(ui.VERSION_HISTORY[21].version, prep.anchor.last_legacy_version);
   for (const version of ['261019102825.0.0', prep.anchor.first_calendar_version]) {
     assert.equal(ui.VERSION_HISTORY.some(r => r.version === version), false,
       'About must not imply either superseded candidate was deployed');
   }
 });
-test('JOED-189 check-release: accepts the CI-only reservation and rejects equal or earlier reservations after integrity verification', t => {
+test('JOED-193 check-release: accepts the CI-only reservation and rejects equal or earlier reservations after integrity verification', t => {
   const root = temporary(t), closure = read('release/closure.json');
   for (const name of [...closure.files.map(f => f.path), 'release/closure.json', 'scripts/check-release.mjs']) {
     const target = join(root, name); fs.mkdirSync(join(target, '..'), { recursive: true });
@@ -229,7 +234,7 @@ test('JOED-189 check-release: accepts the CI-only reservation and rejects equal 
   const accepted = run();
   assert.equal(accepted.status, 0, accepted.stderr);
   assert.equal(JSON.parse(accepted.stdout).candidate, next.version);
-  for (const [version, reserved_at] of [['261104111323.0.0', '2026-11-04T11:13:23Z'], ['261104111322.0.0', '2026-11-04T11:13:22Z']]) {
+  for (const [version, reserved_at] of [['261109023132.0.0', '2026-11-09T02:31:32Z'], ['261109023131.0.0', '2026-11-09T02:31:31Z']]) {
     const invalid = structuredClone(prep);
     Object.assign(invalid.reservation, { version, reserved_at });
     fs.writeFileSync(join(root, 'release/preparation.json'), JSON.stringify(invalid, null, 2) + '\n');

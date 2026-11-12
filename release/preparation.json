@@ -1,13 +1,13 @@
 {
   "schema": "joedesk.release-preparation.v1",
-  "ticket": "JOED-189",
+  "ticket": "JOED-193",
   "status": "candidate",
   "reservation": {
     "version_scheme": "inspr-calver-3",
-    "version": "261109023132.0.0",
+    "version": "261111154448.0.0",
     "release_channel": "stable",
-    "release_sequence": 45,
-    "reserved_at": "2026-11-09T02:31:32Z"
+    "release_sequence": 46,
+    "reserved_at": "2026-11-11T15:44:48Z"
   },
   "anchor": {
     "legacy_scheme": "calendar",
@@ -134,16 +134,16 @@
   "previous_release": {
     "product": "JoeDesk",
     "version_scheme": "inspr-calver-3",
-    "version": "261104111323.0.0",
+    "version": "261109023132.0.0",
     "release_channel": "stable",
-    "release_sequence": 44,
+    "release_sequence": 45,
     "status": "published-candidate",
     "source_branch": "main",
-    "source_commit": "fa97f884f925b2251690fcf32825ab8a8672fcae",
-    "release_set_ticket": "JOED-183",
+    "source_commit": "6ba8051af1108cd35ee6fb6e3cd51a94474f6d24",
+    "release_set_ticket": "JOED-189",
     "disposition": "deployed",
     "deployed": true,
-    "note": "live on csb0 since 2026-11-08T11:31:16Z (JOED-183); adopted 2026-11-08T12:25:23Z (adoption/261104111323.0.0.json)"
+    "note": "live on csb0 since 2026-11-09T08:53:35Z (JOED-189); adopted 2026-11-09T08:56:44Z (adoption/261109023132.0.0.json)"
   },
   "legacy_deployment_inventory": {
     "board_source_pin": "db621bf",
@@ -157,9 +157,9 @@
   "last_deployed_release": {
     "product": "JoeDesk",
     "version_scheme": "inspr-calver-3",
-    "version": "261104111323.0.0",
+    "version": "261109023132.0.0",
     "release_channel": "stable",
-    "release_sequence": 44,
-    "note": "live on csb0 since 2026-11-08T11:31:16Z (JOED-183)"
+    "release_sequence": 45,
+    "note": "live on csb0 since 2026-11-09T08:53:35Z (JOED-189)"
   }
 }
