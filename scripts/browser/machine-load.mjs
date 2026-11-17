@@ -7,7 +7,7 @@ import { basename } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { quietWaitBudget, QUIET_WAIT_SECONDS } from './quiet-wait-budget.mjs';
 import { probeCell } from './reference-probe.mjs';
-import { ratioCells } from './ratio-guard.mjs';
+import { guardCheck, ratioCells } from './ratio-guard.mjs';
 
 // Only the runners' timing-only CI retry branch calls this helper. Load
 // polling stays outside measured page work and never inspects process argv.
@@ -25,7 +25,7 @@ export async function waitForQuietHost({ load = os.loadavg, parallelism = os.ava
     });
   } catch (error) {
     const startLoad1 = load()[0];
-    return { waitedSeconds: 0, quiet: startLoad1 <= threshold, threshold, startLoad1,
+    return { waitedSeconds: 0, quiet: startLoad1 <= threshold, threshold, startLoad1, endLoad1: startLoad1,
       budgetBeforeSeconds: null, budgetAfterSeconds: null, skipped: true,
       skipReason: error.staleLock ? 'abandoned quiet-wait budget lock (>10 s)' : 'quiet-wait budget unavailable',
       budgetState: `unavailable (${error.code ?? 'unknown'})` };
@@ -58,7 +58,7 @@ export async function waitForQuietHost({ load = os.loadavg, parallelism = os.ava
       if (error.staleLock) refundReason = 'abandoned quiet-wait budget lock (>10 s) during refund';
     }
   }
-  return { waitedSeconds, quiet, threshold, startLoad1, ...reservation, budgetAfterSeconds,
+  return { waitedSeconds, quiet, threshold, startLoad1, endLoad1: load1, ...reservation, budgetAfterSeconds,
     ...(!reservation.skipped ? { refundBudgetState } : {}), ...(refundReason ? { refundReason } : {}) };
 }
 
@@ -94,6 +94,39 @@ export function captureMachineLoad({ clock = () => new Date(), cpuList = os.cpus
     ...cpuEvidence({ platform, parallelism, readFile }),
     browserProcesses: known ? processes.stdout.split('\n').filter(line =>
       /^(?:chrome(?:[-_].*)?|chromium(?:[-_].*)?|headless_shell|Google Chrome(?: Helper.*)?|Chromium(?: Helper.*)?)$/i.test(basename(line.trim()))).length : null };
+}
+
+// CPU percentages are used only for ranking. Never request argv, users or env,
+// and keep only plain executable names in evidence and the step summary.
+export function captureLoadOwners({ ps = spawnSync, platform = process.platform } = {}) {
+  if (platform !== 'linux') return 'unavailable';
+  try {
+    const result = ps('ps', ['-eo', 'comm=,pcpu='], { encoding: 'utf8', timeout: 2000, maxBuffer: 4 * 1024 * 1024,
+      env: { ...process.env, LC_ALL: 'C' } });
+    if (result.error || result.status !== 0 || typeof result.stdout !== 'string') return 'unavailable';
+    const owners = result.stdout.split('\n').flatMap(line => {
+      const match = line.match(/^\s*(\S+)\s+(\d+(?:\.\d+)?)\s*$/);
+      if (!match) return [];
+      const name = basename(match[1]), cpu = Number(match[2]);
+      return /^[A-Za-z0-9_.+():\[\]-]+$/.test(name) && Number.isFinite(cpu) ? [{ name, cpu }] : [];
+    }).sort((a, b) => b.cpu - a.cpu).slice(0, 5).map(owner => owner.name);
+    return owners.length ? owners : 'unavailable';
+  } catch { return 'unavailable'; }
+}
+
+// Record each check separately: a functional failure must not inherit another
+// check's inconclusive outcome. Sample owners once, when the verdict is made.
+export function assessBudgetCheck(name, conditions, row, timingKeys, { sampleLoadOwners = captureLoadOwners } = {}) {
+  const verdict = guardCheck(name, conditions, row, timingKeys);
+  if (verdict.inconclusive) {
+    if (row.loadOwners === undefined) {
+      try { row.loadOwners = sampleLoadOwners(); }
+      catch { row.loadOwners = 'unavailable'; }
+    }
+    (row.inconclusiveChecks ??= []).push({ name: verdict.name, inconclusive: true, inconclusiveReason: verdict.inconclusiveReason });
+    verdict.loadOwners = row.loadOwners;
+  }
+  return verdict;
 }
 
 // Print independently of the report tables, including clean first attempts.

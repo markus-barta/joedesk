@@ -8,9 +8,9 @@ import { scenario, NOW, at } from './board.mjs';
 import { largeResults } from './results.mjs';
 import { VIEWPORTS, configure, load, settle, waitFor } from './shots.mjs';
 import { decideTaskGuard, TIMING_GUARDS, CI_GUARD } from './budget.mjs';
-import { captureMachineLoad, machineLoadTable, waitForQuietHost, quietWaitCells, budgetAttemptLine } from './machine-load.mjs';
+import { captureMachineLoad, machineLoadTable, waitForQuietHost, quietWaitCells, budgetAttemptLine, assessBudgetCheck } from './machine-load.mjs';
 import { runReferenceProbe, captureReferenceProbe, probeCell } from './reference-probe.mjs';
-import { PROBE_CALIBRATION, validateCalibration, attemptGuard, applyAttemptGuard, guardCheck, calibrationSummary, ratioCells, calibrationEvidence } from './ratio-guard.mjs';
+import { PROBE_CALIBRATION, validateCalibration, attemptGuard, applyAttemptGuard, calibrationSummary, ratioCells, calibrationEvidence } from './ratio-guard.mjs';
 
 const max = list => (list.length ? Math.max(...list) : NaN);
 
@@ -95,20 +95,20 @@ export async function runResultsBudget({ page, newBoard, check, limits, serve, s
       for (const row of rows) Object.assign(row, { attempts: decision.attempts, remeasured: decision.remeasured });
       const result = decision.remeasured ? second : first;
       for (const original of result.checks) {
-        const { name, conditions } = guardCheck(original.name, original.conditions, rows.at(-1), TIMING_GUARDS);
-        const failed = Object.keys(conditions).filter(key => !conditions[key]);
+        const { name, conditions, failed, ok, ...judgment } = assessBudgetCheck(original.name, original.conditions, rows.at(-1), TIMING_GUARDS);
         const label = decision.remeasured && Object.keys(conditions).some(key => TIMING_GUARDS.includes(key))
           ? name.replace(`(${limits.name})`, `(${limits.name}; re-measured once after a breach)`) : name;
-        check('budget', label, !failed.length, { failed, conditions,
+        check('budget', label, ok, { failed, conditions,
           // Keep both concise samples ahead of potentially large task lists.
           measurements: rows.map(r => ({ attempt: r.attempt, k: r.k, limitMs: r.limitMs, hostTooSlowToJudge: r.hostTooSlowToJudge, ratioReason: r.ratioReason,
             switchMs: r.switchWorst, taskMs: r.longTasks.length ? max(r.longTasks) : null,
             load1: r.machineLoad?.loadavg?.[0] ?? null, probeMs: r.probeMs,
             ...(r.quietWait ? { quietWait: { waitedSeconds: r.quietWait.waitedSeconds, quiet: r.quietWait.quiet,
-              threshold: r.quietWait.threshold, skipped: r.quietWait.skipped, skipReason: r.quietWait.skipReason } } : {}) })),
+              threshold: r.quietWait.threshold, endLoad1: r.quietWait.endLoad1, skipped: r.quietWait.skipped, skipReason: r.quietWait.skipReason } } : {}),
+            ...(r === rows.at(-1) ? judgment : {}) })),
           calibration: rows.at(-1).calibration,
           offendingTasks: rows.at(-1).longTasks.filter(ms => ms >= rows.at(-1).limitMs.taskMs),
-          ...rows.at(-1), ...(decision.remeasured ? { attemptRows: rows } : {}) });
+          ...rows.at(-1), ...(decision.remeasured ? { attemptRows: rows } : {}), ...judgment });
       }
     }
   } finally { await unserve(); }

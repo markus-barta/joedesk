@@ -1,6 +1,74 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { captureMachineLoad, machineLoadTable, waitForQuietHost, quietWaitCells, budgetAttemptLine } from '../scripts/browser/machine-load.mjs';
+import { captureMachineLoad, captureLoadOwners, assessBudgetCheck, machineLoadTable, waitForQuietHost, quietWaitCells, budgetAttemptLine } from '../scripts/browser/machine-load.mjs';
+import { TIMING_GUARDS } from '../scripts/browser/budget.mjs';
+import { reportCalibration, calibrationEvidence } from '../scripts/browser/ratio-guard.mjs';
+import { createGate } from '../scripts/browser/gate.mjs';
+
+test('JOED-197: load owners are the top five by CPU, with only executable names retained', () => {
+  const owners = captureLoadOwners({ platform: 'linux', ps: (command, args, options) => {
+    assert.equal(command, 'ps');
+    assert.deepEqual(args, ['-eo', 'comm=,pcpu=']);
+    assert.equal(options.timeout, 2000);
+    assert.equal(options.env.LC_ALL, 'C');
+    return { status: 0, stdout: [
+      'bash 1.0', '/usr/bin/node 35.0', 'chrome 99.9', 'rustc 90.0', 'nix 75.0',
+      'python3 42.0', 'ps 0.1', 'USER=private 100.0', 'node --secret private 110.0',
+      'malformed', 'bad NaN', ''].join('\n') };
+  } });
+  assert.deepEqual(owners, ['chrome', 'rustc', 'nix', 'python3', 'node']);
+  assert.doesNotMatch(owners.join(', '), /[/%=]|private|secret|usr|\d+\.\d+/);
+});
+
+test('JOED-197: load-owner collection is best effort and unavailable outside Linux', () => {
+  for (const result of [{ status: 1, stdout: 'node 90.0' }, { status: 0, error: new Error('timeout') },
+    { status: null }, { status: 0, stdout: '' }, { status: 0, stdout: 'bad Infinity' }]) {
+    assert.equal(captureLoadOwners({ platform: 'linux', ps: () => result }), 'unavailable');
+  }
+  assert.equal(captureLoadOwners({ platform: 'linux', ps: () => { throw new Error('unavailable'); } }), 'unavailable');
+  assert.equal(captureLoadOwners({ platform: 'darwin', ps: () => assert.fail('Linux only') }), 'unavailable');
+});
+
+test('JOED-197: inconclusive checks stay green in gate aggregation and each gets a summary line and JSON reason', () => {
+  const row = { viewport: '1024', phase: 'results', attempt: 2, attempts: 2, remeasured: true,
+    quietWait: { quiet: false, endLoad1: 51, threshold: 3 } };
+  const gate = createGate('/unused');
+  let samples = 0;
+  const assess = conditions => assessBudgetCheck('1024: timing', conditions, row, TIMING_GUARDS, {
+    sampleLoadOwners: () => { samples++; return ['chrome', 'node']; },
+  });
+  for (const conditions of [{ renderBudget: false }, { taskBudget: false }]) {
+    const verdict = assess(conditions);
+    gate.check('budget', verdict.name, verdict.ok, verdict);
+  }
+  assert.equal(gate.results.filter(r => !r.ok).length, 0, 'same aggregation used for the P3/P4 exit code');
+  assert.equal(samples, 1, 'one snapshot at the first inconclusive check, shared by that attempt');
+  assert.equal(row.inconclusiveChecks.length, 2);
+  const functional = assess({ worker: false, renderBudget: false });
+  assert.equal(functional.ok, false);
+  assert.equal(functional.inconclusive, false, 'a functional check does not inherit another check outcome');
+  const summaries = [];
+  reportCalibration({ status: 'uncalibrated', cap: 3 }, [row], text => summaries.push(text), { phase: 'P4' });
+  const lines = summaries[0].split('\n');
+  assert.equal(lines.filter(line => line.startsWith('**Inconclusive:** P4 1024: timing')).length, 2);
+  assert.deepEqual(lines.filter(line => line.startsWith('Top load owners')),
+    Array(2).fill('Top load owners by CPU (names only): chrome, node'));
+  assert.match(summaries[0], /expired at load1=51\.00, threshold 3/);
+  const json = JSON.parse(calibrationEvidence([row], { runId: '123' }).split('```json\n')[1].split('\n```')[0]);
+  assert.ok(json.traces[0].inconclusiveChecks.every(c => c.inconclusive === true && c.inconclusiveReason.includes('load1=51.00')));
+});
+
+test('JOED-197: owner collection errors cannot turn an inconclusive check into a failure', () => {
+  const row = { attempt: 2, attempts: 2, remeasured: true, quietWait: { quiet: false, skipped: true, threshold: 3 } };
+  const verdict = assessBudgetCheck('timing', { taskBudget: false }, row, TIMING_GUARDS, {
+    sampleLoadOwners: () => { throw new Error('ps unavailable'); },
+  });
+  assert.equal(verdict.ok, true);
+  assert.equal(verdict.loadOwners, 'unavailable');
+  const summaries = [];
+  reportCalibration({ status: 'uncalibrated', cap: 3 }, [row], text => summaries.push(text));
+  assert.match(summaries[0], /Top load owners by CPU \(names only\): unavailable/);
+});
 
 test('JOED-188: budget log distinguishes skipped waits, unknown allowances and failed refunds on one line', () => {
   for (const skipped of [true, false]) {

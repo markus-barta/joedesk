@@ -21,7 +21,7 @@ function host(samples, parallelism = () => 26) {
 test('JOED-180 (a): busy then quiet returns at the first quiet sample with waited seconds', async () => {
   const h = host([43, 18, 13, 2]);
   const result = await waitForQuietHost(h.options);
-  assert.deepEqual(result, { waitedSeconds: 10, quiet: true, threshold: 13, startLoad1: 43,
+  assert.deepEqual(result, { waitedSeconds: 10, quiet: true, threshold: 13, startLoad1: 43, endLoad1: 13,
     budgetBeforeSeconds: 300, budgetAfterSeconds: 290, skipped: false, skipReason: null, budgetState: 'per-process', refundBudgetState: 'per-process' });
   assert.deepEqual(h.sleeps, [5000, 5000]);
   assert.equal(h.reads, 3, 'the inclusive threshold ends polling immediately');
@@ -32,7 +32,7 @@ test('JOED-180 (a): busy then quiet returns at the first quiet sample with waite
 test('JOED-180 (b): never quiet returns at 300 seconds with quiet false', async () => {
   const h = host([43]);
   const result = await waitForQuietHost(h.options);
-  assert.deepEqual(result, { waitedSeconds: 300, quiet: false, threshold: 13, startLoad1: 43,
+  assert.deepEqual(result, { waitedSeconds: 300, quiet: false, threshold: 13, startLoad1: 43, endLoad1: 43,
     budgetBeforeSeconds: 300, budgetAfterSeconds: 0, skipped: false, skipReason: null, budgetState: 'per-process', refundBudgetState: 'per-process' });
   assert.equal(h.sleeps.length, 60);
   assert.ok(h.sleeps.every(ms => ms === 5000));
@@ -48,7 +48,7 @@ test('JOED-180 (e): threshold uses availableParallelism before the injectable CP
   const fallback = host([15]);
   fallback.options.parallelism = null;
   assert.deepEqual(await waitForQuietHost(fallback.options),
-    { waitedSeconds: 0, quiet: true, threshold: 16, startLoad1: 15,
+    { waitedSeconds: 0, quiet: true, threshold: 16, startLoad1: 15, endLoad1: 15,
       budgetBeforeSeconds: 300, budgetAfterSeconds: 300, skipped: false, skipReason: null, budgetState: 'per-process', refundBudgetState: 'per-process' });
 });
 

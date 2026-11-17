@@ -76,8 +76,17 @@ export function applyAttemptGuard(result, guard) {
 }
 export function guardCheck(name, conditions, row, timingKeys) {
   const failed = Object.keys(conditions).filter(key => !conditions[key]);
-  if (!row.hostTooSlowToJudge || !failed.length || !failed.every(key => timingKeys.includes(key))) return { name, conditions };
-  return { name: `${name}; k = ${row.k.toFixed(2)}× (cap ${row.cap}×); host too slow to judge (absolute guards applied)`, conditions };
+  const check = { name, conditions, failed, ok: !failed.length, inconclusive: false };
+  if (!failed.length || !failed.every(key => timingKeys.includes(key))) return check;
+  const wait = row.quietWait;
+  if (row.remeasured && row.attempt === row.attempts && wait?.quiet === false) {
+    const load1 = wait.endLoad1 ?? row.machineLoad?.loadavg?.[0] ?? wait.startLoad1;
+    const status = wait.skipped ? `skipped${wait.skipReason ? `: ${wait.skipReason}` : ''}` : 'expired';
+    const reason = `host too busy to judge (quiet wait ${status} at load1=${Number.isFinite(load1) ? load1.toFixed(2) : 'unavailable'}, threshold ${wait.threshold ?? 'unavailable'})`;
+    return { ...check, name: `${name}; ${reason}: inconclusive`, ok: true, inconclusive: true, inconclusiveReason: reason };
+  }
+  if (!row.hostTooSlowToJudge) return check;
+  return { ...check, name: `${name}; k = ${row.k.toFixed(2)}× (cap ${row.cap}×); host too slow to judge (absolute guards applied)` };
 }
 export function calibrationSummary(record = PROBE_CALIBRATION) {
   if (record.status === 'uncalibrated') return 'uncalibrated: absolute guards';
@@ -98,6 +107,11 @@ export function reportCalibration(record, traces = [], writeSummary = writeStepS
   }
   const context = [phase, zone].filter(Boolean).join(' ');
   const lines = [...slow.values()].map(row => `Host too slow to judge: ${context ? `${context} ` : ''}${row.viewport} ${row.kind}, k = ${row.k.toFixed(2)}× (cap ${row.cap}×); absolute guards applied`);
+  for (const row of traces) {
+    for (const check of row.inconclusiveChecks ?? []) {
+      lines.push(`**Inconclusive:** ${context ? `${context} ` : ''}${check.name}\n\nTop load owners by CPU (names only): ${Array.isArray(row.loadOwners) && row.loadOwners.length ? row.loadOwners.join(', ') : 'unavailable'}`);
+    }
+  }
   writeSummary(`Probe calibration: ${calibrationSummary(record)}\n\n${lines.length ? `${lines.join('\n\n')}\n\n` : ''}`);
 }
 export function ratioCells(row, limits) {
@@ -111,6 +125,7 @@ export function calibrationEvidence(traces, source) {
   if (!source) return '';
   const capturedAt = traces.map(r => r.probeCapturedAt).filter(Boolean).sort((a, b) => Date.parse(a) - Date.parse(b)).at(-1);
   const evidence = { source: { ...source, capturedAt }, traces: traces.map(r => ({ viewport: r.viewport, phase: r.phase, kind: r.kind,
-    attempt: r.attempt, load1: r.machineLoad?.loadavg?.[0] ?? null, probeCapturedAt: r.probeCapturedAt, probe: r.probe })) };
+    attempt: r.attempt, load1: r.machineLoad?.loadavg?.[0] ?? null, probeCapturedAt: r.probeCapturedAt, probe: r.probe,
+    ...(r.inconclusiveChecks?.length ? { inconclusiveChecks: r.inconclusiveChecks, loadOwners: r.loadOwners } : {}) })) };
   return `Quiet-probe candidate evidence (JOED-187):\n\n\`\`\`json\n${JSON.stringify(evidence, null, 2)}\n\`\`\`\n`;
 }
