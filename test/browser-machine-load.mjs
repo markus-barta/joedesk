@@ -29,8 +29,18 @@ test('JOED-197: load-owner collection is best effort and unavailable outside Lin
   assert.equal(captureLoadOwners({ platform: 'darwin', ps: () => assert.fail('Linux only') }), 'unavailable');
 });
 
+test('JOED-197: owners rank summed pcpu by command and preserve kernel-thread names', () => {
+  const owners = captureLoadOwners({ platform: 'linux', ps: () => ({ status: 0, stdout: [
+    'chrome 30.0', 'node 50.0', 'chrome 40.0', '/usr/bin/node 10.0',
+    'kworker/u64:2 65.0', '[kworker/1:2] 5.0', 'rustc 1.0',
+  ].join('\n') }) });
+  assert.deepEqual(owners, ['chrome', 'kworker/u64:2', 'node', '[kworker/1:2]', 'rustc']);
+  assert.equal(new Set(owners).size, owners.length);
+});
+
 test('JOED-197: inconclusive checks stay green in gate aggregation and each gets a summary line and JSON reason', () => {
-  const row = { viewport: '1024', phase: 'results', attempt: 2, attempts: 2, remeasured: true,
+  const row = { viewport: '1024', phase: 'results', kind: 'results', attempt: 2, attempts: 2, remeasured: true,
+    switchWorst: 48.2, longTasks: [125, 150], limitMs: { patchMs: 40, taskMs: 125 },
     quietWait: { quiet: false, endLoad1: 51, threshold: 3 } };
   const gate = createGate('/unused');
   let samples = 0;
@@ -52,10 +62,29 @@ test('JOED-197: inconclusive checks stay green in gate aggregation and each gets
   const lines = summaries[0].split('\n');
   assert.equal(lines.filter(line => line.startsWith('**Inconclusive:** P4 1024: timing')).length, 2);
   assert.deepEqual(lines.filter(line => line.startsWith('Top load owners')),
-    Array(2).fill('Top load owners by CPU (names only): chrome, node'));
+    ['Top load owners by summed pcpu (lifetime-average CPU, names only): chrome, node']);
+  assert.ok(lines.some(line => line.startsWith('**Inconclusive:**') && line.endsWith('render worst 48.2 ms (applied limit 40.0 ms)')));
+  assert.ok(lines.some(line => line.startsWith('**Inconclusive:**') && line.endsWith('task worst 150.0 ms (applied limit 125.0 ms)')));
   assert.match(summaries[0], /expired at load1=51\.00, threshold 3/);
   const json = JSON.parse(calibrationEvidence([row], { runId: '123' }).split('```json\n')[1].split('\n```')[0]);
   assert.ok(json.traces[0].inconclusiveChecks.every(c => c.inconclusive === true && c.inconclusiveReason.includes('load1=51.00')));
+  assert.deepEqual(json.traces[0].inconclusiveChecks.map(c => c.failed), [['renderBudget'], ['taskBudget']]);
+});
+
+test('JOED-197: Board inconclusive summaries pair each measured worst with its applied limit and owners once per attempt', () => {
+  const rows = [
+    { kind: 'board-live', renderWorst: 130, limitMs: { historyMs: 125 }, conditions: { renderBudget: false } },
+    { kind: 'board-live', deskWorst: 48.2, historyWorst: 140, limitMs: { patchMs: 40, historyMs: 125 }, conditions: { patchBudget: false, historyBudget: false } },
+  ];
+  for (const row of rows) {
+    Object.assign(row, { attempt: 2, attempts: 2, remeasured: true, quietWait: { quiet: false } });
+    assessBudgetCheck('Board timing', row.conditions, row, TIMING_GUARDS, { sampleLoadOwners: () => ['node'] });
+  }
+  const summaries = [];
+  reportCalibration({ status: 'uncalibrated', cap: 3 }, rows, text => summaries.push(text));
+  assert.match(summaries[0], /render worst 130\.0 ms \(applied limit 125\.0 ms\)/);
+  assert.match(summaries[0], /patch worst 48\.2 ms \(applied limit 40\.0 ms\); history worst 140\.0 ms \(applied limit 125\.0 ms\)/);
+  assert.equal(summaries[0].split('\n').filter(line => line.startsWith('Top load owners')).length, 2);
 });
 
 test('JOED-197: owner collection errors cannot turn an inconclusive check into a failure', () => {
@@ -67,7 +96,7 @@ test('JOED-197: owner collection errors cannot turn an inconclusive check into a
   assert.equal(verdict.loadOwners, 'unavailable');
   const summaries = [];
   reportCalibration({ status: 'uncalibrated', cap: 3 }, [row], text => summaries.push(text));
-  assert.match(summaries[0], /Top load owners by CPU \(names only\): unavailable/);
+  assert.match(summaries[0], /Top load owners by summed pcpu \(lifetime-average CPU, names only\): unavailable/);
 });
 
 test('JOED-188: budget log distinguishes skipped waits, unknown allowances and failed refunds on one line', () => {

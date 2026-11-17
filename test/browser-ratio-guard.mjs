@@ -48,6 +48,17 @@ test('JOED-197: functional failures remain hard failures after an unsatisfied qu
   }
 });
 
+test('JOED-197: over-cap inconclusive names retain the measured ratio and cap', () => {
+  for (const skipped of [false, true]) {
+    const row = { ...busyFinalAttempt(), hostTooSlowToJudge: true, k: 3.5, cap: 3 };
+    row.quietWait.skipped = skipped;
+    const verdict = guardCheck('render budget', { renderBudget: false }, row, TIMING_GUARDS);
+    assert.equal(verdict.ok, true);
+    assert.equal(verdict.inconclusive, true);
+    assert.match(verdict.name, /; k = 3\.50× \(cap 3×\); host too busy to judge.*: inconclusive$/);
+  }
+});
+
 test('JOED-197: quiet final waits, first attempts, absent waits and passing checks keep their outcomes', () => {
   for (const row of [
     { ...busyFinalAttempt(), quietWait: { quiet: true } },
@@ -88,7 +99,7 @@ test('JOED-197: the default summary writer appends visible inconclusive checks t
   const summary = readFileSync(path, 'utf8');
   assert.match(summary, /^Existing summary/);
   assert.match(summary, /\*\*Inconclusive:\*\* 1024: Results render budget; host too busy to judge/);
-  assert.match(summary, /Top load owners by CPU \(names only\): chrome, node/);
+  assert.match(summary, /Top load owners by summed pcpu \(lifetime-average CPU, names only\): chrome, node/);
 });
 
 test('JOED-187 (d/f): ratios floor at one and use only the same width and kind', () => {

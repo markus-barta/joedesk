@@ -117,7 +117,7 @@ export async function runBudget({ page, newBoard, check, limits, sampleLoad = ca
       { name: `${viewport.name}: the ${full.history.points.length}-point (8 MiB) history is read and validated in the worker and drawn`,
         conditions: { worker: trace.worker, historyRead: work.length >= 1, noMainThreadHistory: !row.mainThreadHistory, drawn: trace.lines >= 3 } },
       { name: `${viewport.name}: drawing the full 8 MiB history takes ${bound(timing.historyMs)} with no task on the page reaching ${displayMs(timing.taskMs)} ms (${limits.name})`,
-        conditions: { measured: renders.length > 0, renderBudget: within(row.renderWorst, timing.historyMs), taskBudget: !tooLong(row.longTasks, timing).length } },
+        conditions: { measured: renders.length > 0, finite: renders.every(Number.isFinite), renderBudget: within(row.renderWorst, timing.historyMs), taskBudget: !tooLong(row.longTasks, timing).length } },
     ] };
   };
   for (const viewport of VIEWPORTS) await runViewport(viewport, measureCold);

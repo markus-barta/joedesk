@@ -96,20 +96,24 @@ export function captureMachineLoad({ clock = () => new Date(), cpuList = os.cpus
       /^(?:chrome(?:[-_].*)?|chromium(?:[-_].*)?|headless_shell|Google Chrome(?: Helper.*)?|Chromium(?: Helper.*)?)$/i.test(basename(line.trim()))).length : null };
 }
 
-// CPU percentages are used only for ranking. Never request argv, users or env,
-// and keep only plain executable names in evidence and the step summary.
+// Sum lifetime-average pcpu by command name for ranking. Never request argv,
+// users or env, and keep only command names in evidence and the step summary.
 export function captureLoadOwners({ ps = spawnSync, platform = process.platform } = {}) {
   if (platform !== 'linux') return 'unavailable';
   try {
     const result = ps('ps', ['-eo', 'comm=,pcpu='], { encoding: 'utf8', timeout: 2000, maxBuffer: 4 * 1024 * 1024,
       env: { ...process.env, LC_ALL: 'C' } });
     if (result.error || result.status !== 0 || typeof result.stdout !== 'string') return 'unavailable';
-    const owners = result.stdout.split('\n').flatMap(line => {
+    const totals = new Map();
+    for (const line of result.stdout.split('\n')) {
       const match = line.match(/^\s*(\S+)\s+(\d+(?:\.\d+)?)\s*$/);
-      if (!match) return [];
-      const name = basename(match[1]), cpu = Number(match[2]);
-      return /^[A-Za-z0-9_.+():\[\]-]+$/.test(name) && Number.isFinite(cpu) ? [{ name, cpu }] : [];
-    }).sort((a, b) => b.cpu - a.cpu).slice(0, 5).map(owner => owner.name);
+      if (!match) continue;
+      // Absolute executable paths lose their directories; kernel-thread
+      // command names such as kworker/u64:2 keep their slash and suffix.
+      const name = match[1].startsWith('/') ? basename(match[1]) : match[1], cpu = Number(match[2]);
+      if (/^[A-Za-z0-9_.+():\[\]/-]+$/.test(name) && Number.isFinite(cpu)) totals.set(name, (totals.get(name) ?? 0) + cpu);
+    }
+    const owners = [...totals].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name]) => name);
     return owners.length ? owners : 'unavailable';
   } catch { return 'unavailable'; }
 }
@@ -123,7 +127,7 @@ export function assessBudgetCheck(name, conditions, row, timingKeys, { sampleLoa
       try { row.loadOwners = sampleLoadOwners(); }
       catch { row.loadOwners = 'unavailable'; }
     }
-    (row.inconclusiveChecks ??= []).push({ name: verdict.name, inconclusive: true, inconclusiveReason: verdict.inconclusiveReason });
+    (row.inconclusiveChecks ??= []).push({ name: verdict.name, failed: verdict.failed, inconclusive: true, inconclusiveReason: verdict.inconclusiveReason });
     verdict.loadOwners = row.loadOwners;
   }
   return verdict;

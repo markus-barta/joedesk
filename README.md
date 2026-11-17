@@ -591,11 +591,12 @@ An invalid calibration fails loudly at startup. Within the cap, timing limits
 scale with k. If `k > cap`, the measured ratio remains in the evidence and the
 attempt records `hostTooSlowToJudge: true`, but all timing limits revert to the
 absolute CI guard (`k = 1` for limits): a 35 ms patch passes and a 45 ms patch
-fails at k = 3.5, cap 3. This never judges an overloaded host more loosely or
-more strictly than today's absolute guard. The existing timing-only re-measure
-still uses its own probe and limits. This is not the rejected option
-“(4) inconclusive on overload”: every attempt is judged against timing limits,
-and overload alone grants neither a pass nor a failure.
+breaches the timing guard at k = 3.5, cap 3. The existing timing-only re-measure
+still uses its own probe and limits. JOED-197 adopts option “(4) inconclusive
+on overload” in narrowed form: only the final re-measure, after a quiet wait
+ended `quiet:false` (expired or skipped), is inconclusive when every failed
+condition in that check is a timing guard. Functional failures, including
+non-finite render timings, still fail and never trigger a re-measure.
 Budget and machine-load tables show k to two decimals and applied
 patch/history/task limits to 0.1 ms; check names round fractional limits to
 0.1 ms. JSON evidence keeps exact values. Failure-line `measurements` keep each
@@ -606,10 +607,15 @@ did not run write nothing. It includes calibration provenance plus one line
 per width/kind with any over-cap attempt, using its highest k, even if a
 re-measure passed:
 `Host too slow to judge: <phase> <zone> <width> <kind>, k = <k>× (cap <cap>×); absolute guards applied`.
-Over-cap timing-only failure labels end with
+Conclusive over-cap timing-only failure labels end with
 `host too slow to judge (absolute guards applied)`. Functional failures keep
-their normal labels, and passing check names stay stable; k stays in evidence.
-Uncalibrated and within-cap attempts add no such line. The runners never write
+their normal labels; checks meeting their conditions keep their names.
+Uncalibrated and within-cap attempts add no over-cap line. Each inconclusive
+check adds `**Inconclusive:** <phase> <zone> <check>; <guard> worst <measured> ms (applied limit <limit> ms)`.
+The check name includes the quiet-wait reason and retains k/cap when over-cap.
+One `Top load owners by summed pcpu (lifetime-average CPU, names only): <names or unavailable>`
+line follows per inconclusive attempt; CPU is summed by command, keeping
+kernel-thread names whole. The runners never write
 the summary file; their simulated tests inject a writer that captures the text.
 
 To prepare calibration, retain Board and Results evidence from 1–5 quiet CI
@@ -786,7 +792,7 @@ attempts skip waiting and measure immediately. Each second attempt records
 waited seconds, quiet yes/no, the threshold, starting load1, budget before/after,
 and whether waiting was skipped with reason “budget exhausted” or “an earlier
 wait never reached a quiet host”; a corrupt budget resets to 300 s and is recorded.
-The second measurement is final; a reproduced breach or
+The second measurement is final; a reproduced breach with `quiet:true` or
 any functional failure still fails. Both
 attempts appear in the trace, table and failure detail. Results keeps its
 40 ms base switch-render guard and rejects tasks reaching its 125 ms base

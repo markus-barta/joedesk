@@ -2500,7 +2500,7 @@ async function simulatedBudget({ cold = [{}], live = [{}], viewports = ['390'], 
     async evaluate(source) {
       if (source.includes('tasks: window.__budgetTasks.snapshot()')) {
         const task = { startTime: phase === 'cold' ? 210 : 150, duration: sample.taskMs ?? 60, attribution: [] };
-        return { timings: [...timings('history-worker', 3, 10), ...timings('history', 3, sample.historyMs ?? 10)],
+        return { timings: [...timings('history-worker', 3, 10), ...timings('history', 3, Object.hasOwn(sample, 'historyMs') ? sample.historyMs : 10)],
           tasks: { tasks: sample.taskMs === null ? [] : [task], frames: [], hasFrames: false }, worker: sample.worker ?? true, lines: 3, end: 400,
           accountWorker: sample.accountWorker ?? true };
       }
@@ -2882,7 +2882,7 @@ async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUA
     async evaluate(source) {
       if (source.includes('timings: window.__joedesk.timings.slice()')) {
         return { timings: [
-          ...Array.from({ length: sample.renders ?? 11 }, () => ({ reason: 'results-period', ms: sample.switchMs ?? 10 })),
+          ...Array.from({ length: sample.renders ?? 11 }, () => ({ reason: 'results-period', ms: Object.hasOwn(sample, 'switchMs') ? sample.switchMs : 10 })),
           ...Array.from({ length: sample.mainThreadResults ?? 0 }, () => ({ reason: 'results-accept', ms: 1 })),
         ], worker: sample.worker ?? true, long: sample.taskMs === undefined ? [] : [[110, sample.taskMs]] };
       }
@@ -3030,6 +3030,47 @@ test('Results budget: attempts are independent per viewport and both measurement
   }
 });
 
+test('JOED-197: non-finite Board and Results render timings fail without retrying, including on busy final rows', async () => {
+  for (const runner of ['Board', 'Results']) {
+    for (const ms of [undefined, NaN, Infinity, -Infinity]) {
+      for (const remeasured of [false, true]) {
+        const invalid = runner === 'Board' ? { historyMs: ms } : { switchMs: ms };
+        const samples = remeasured ? [{ historyMs: 130, switchMs: 48.2 }, invalid] : [invalid];
+        const options = { calibration: { status: 'uncalibrated', cap: 3 },
+          sampleLoad: () => ({ loadavg: [51] }),
+          waitForQuiet: async () => ({ quiet: false, skipped: true, skipReason: 'budget exhausted', endLoad1: 51, threshold: 3 }) };
+        const run = runner === 'Board'
+          ? await simulatedBudget({ ...options, cold: samples })
+          : await simulatedResultsBudget({ ...options, samples: { 1024: samples } });
+        const check = run.checks.find(c => c.name.includes(runner === 'Board' ? 'drawing the full' : 'period, desk, step and day'));
+        assert.equal(check.ok, false, `${runner}: ${ms}, remeasured=${remeasured}`);
+        assert.equal(check.detail.conditions.finite, false);
+        assert.ok(check.detail.failed.includes('finite'));
+        assert.equal(check.detail.inconclusive, false);
+        assert.equal(check.detail.attempts, remeasured ? 2 : 1);
+        assert.equal(run.loads[runner === 'Board' ? 'cold' : '1024'], remeasured ? 2 : 1);
+        assert.equal(run.events.filter(e => e === 'wait-start').length, remeasured ? 1 : 0);
+        if (remeasured) assert.equal(check.detail.quietWait.quiet, false);
+      }
+    }
+  }
+});
+
+test('JOED-197: Results gate, step summary and JSON evidence use the same re-measured check name', async () => {
+  const summaries = [];
+  const run = await simulatedResultsBudget({ samples: { 1024: [{ switchMs: 48.2 }, { switchMs: 48.2 }] },
+    calibration: { status: 'uncalibrated', cap: 3 },
+    waitForQuiet: async () => ({ waitedSeconds: 300, quiet: false, endLoad1: 51, threshold: 3 }),
+    summaryWriter: text => summaries.push(text) });
+  const check = run.checks.find(c => c.detail.inconclusive);
+  assert.ok(check);
+  assert.match(check.name, /; re-measured once after a breach\)/);
+  const json = JSON.parse(ratioGuard.calibrationEvidence(run.traces, { runId: '123' }).split('```json\n')[1].split('\n```')[0]);
+  assert.equal(json.traces.at(-1).inconclusiveChecks[0].name, check.name);
+  const line = summaries[0].split('\n').find(line => line.startsWith('**Inconclusive:**'));
+  assert.equal(line, `**Inconclusive:** P4 ${process.env.TZ ?? 'UTC'} ${check.name}; render worst 48.2 ms (applied limit 40.0 ms)`);
+});
+
 test('JOED-197: Board and Results final timing checks are inconclusive only after unsatisfied waits; functional failures still fail', async () => {
   for (const runner of ['Board', 'Results']) {
     for (const skipped of [false, true]) {
@@ -3069,7 +3110,7 @@ test('JOED-197: Board and Results final timing checks are inconclusive only afte
           assert.equal(final.quietWait.skipped, skipped);
         }
         if (quiet) assert.doesNotMatch(summaries[0], /Top load owners/);
-        else assert.match(summaries[0], /Top load owners by CPU \(names only\): chrome, node/);
+        else assert.match(summaries[0], /Top load owners by summed pcpu \(lifetime-average CPU, names only\): chrome, node/);
       }
     }
   }

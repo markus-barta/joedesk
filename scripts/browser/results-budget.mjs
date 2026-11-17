@@ -61,7 +61,7 @@ export async function runResultsBudget({ page, newBoard, check, limits, serve, s
       { name: `${viewport.name}: the ${record.trades.length}-trade record is read, validated and indexed in the worker, never on the page`,
         conditions: { worker: trace.worker, noMainThreadResults: !row.mainThreadResults } },
       { name: `${viewport.name}: each of ${clicks.length} period, desk, step and day changes renders Results in ${bound(timing.patchMs)} (${limits.name})`,
-        conditions: { switchRenders: renders.length >= clicks.length, renderBudget: within(row.switchWorst, timing.patchMs) } },
+        conditions: { switchRenders: renders.length >= clicks.length, finite: renders.every(Number.isFinite), renderBudget: within(row.switchWorst, timing.patchMs) } },
       { name: `${viewport.name}: no task on the page reaches ${displayMs(timing.taskMs)} ms once the record has arrived (${limits.name})`,
         conditions: { taskBudget: !row.longTasks.some(ms => ms >= timing.taskMs) } },
     ] };
@@ -95,10 +95,10 @@ export async function runResultsBudget({ page, newBoard, check, limits, serve, s
       for (const row of rows) Object.assign(row, { attempts: decision.attempts, remeasured: decision.remeasured });
       const result = decision.remeasured ? second : first;
       for (const original of result.checks) {
-        const { name, conditions, failed, ok, ...judgment } = assessBudgetCheck(original.name, original.conditions, rows.at(-1), TIMING_GUARDS);
-        const label = decision.remeasured && Object.keys(conditions).some(key => TIMING_GUARDS.includes(key))
-          ? name.replace(`(${limits.name})`, `(${limits.name}; re-measured once after a breach)`) : name;
-        check('budget', label, ok, { failed, conditions,
+        const label = decision.remeasured && Object.keys(original.conditions).some(key => TIMING_GUARDS.includes(key))
+          ? original.name.replace(`(${limits.name})`, `(${limits.name}; re-measured once after a breach)`) : original.name;
+        const { name, conditions, failed, ok, ...judgment } = assessBudgetCheck(label, original.conditions, rows.at(-1), TIMING_GUARDS);
+        check('budget', name, ok, { failed, conditions,
           // Keep both concise samples ahead of potentially large task lists.
           measurements: rows.map(r => ({ attempt: r.attempt, k: r.k, limitMs: r.limitMs, hostTooSlowToJudge: r.hostTooSlowToJudge, ratioReason: r.ratioReason,
             switchMs: r.switchWorst, taskMs: r.longTasks.length ? max(r.longTasks) : null,
