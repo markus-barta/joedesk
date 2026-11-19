@@ -1,0 +1,50 @@
+{
+  "schema": "joedesk.adoption.v1",
+  "version": "261111154448.0.0",
+  "version_scheme": "inspr-calver-3",
+  "release_channel": "stable",
+  "release_sequence": 46,
+  "source": {
+    "commit": "6d5d25708206abeb0e4cb1e9bade7c11ed6f51b7",
+    "tree": "5bbc00a017ac63595361793d2bf24c2a54c23eee"
+  },
+  "release_set_sha256": "4a5f8831206f67df76b46fea73c7b6526b21b1311fe6c06101c062602f757944",
+  "image_digest": "sha256:4b727ff803d9e3c68515c22afa96918ad7b62e9f7deebce0e78745af2b02dc62",
+  "contract_set_sha256": "c266b39e33e6e15be491263b0ca3575598dd264da3e1a9f6d5a147fc9f1bd49b",
+  "validation_run_id": "43171447809",
+  "decisions": [
+    "d460fa43-0d9d-4831-8897-9248321cf9a0",
+    "dcd81341-18c4-42d8-a543-b0d70ef6fa00",
+    "6b7ec808-4fca-4971-9fd1-d092aef8f582"
+  ],
+  "deployment": {
+    "deployed_at": "2026-11-12T10:28:41Z",
+    "operator_ticket": "JOED-193",
+    "rollback_reference": "JOED-193: revert the csb0 re-pin (nixcfg #1248, merge 5a07563d) and switch csb0 to the previous generation vi5prcq7…-csb0 with the retained sequence-45 image csb0-joe-board:source-6ba8051af1108cd35ee6fb6e3cd51a94474f6d24 (578b4628a606, pull_policy never); hsb0 untouched; backup board-pre-46-20261112T102745Z.tar"
+  },
+  "live_checks": {
+    "joed_live_check": {
+      "status": "pass",
+      "checked_at": "2026-11-12T10:30:08Z"
+    },
+    "ops_t76_live": {
+      "status": "pass",
+      "checked_at": "2026-11-12T10:29:46Z"
+    },
+    "smoke_release": {
+      "status": "pass",
+      "checked_at": "2026-11-12T10:30:12Z"
+    },
+    "spoof_check": {
+      "status": "pass",
+      "checked_at": "2026-11-12T10:30:08Z"
+    }
+  },
+  "markus_ui_look": {
+    "status": "delegated",
+    "checked_at": "2026-11-12T10:30:38Z",
+    "performed_by": "JOED",
+    "delegation": "JOED-42 comment 2026-10-20: Markus delegated the post-switch look to JOED; GET-only served look with the QA actor on loopback: release 46 (About 46 > 45, 62 version refs, none stale, JOED-185/173/175 still served); feeds fresh, gateway confirmed, data seq advanced (62649 -> 62711); J/Joe/Joel Today present, history and results shape unchanged; board unchanged (CI-only release); same-build CI run 43171447809"
+  },
+  "adopted_at": "2026-11-12T10:30:54Z"
+}

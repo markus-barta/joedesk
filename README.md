@@ -2,14 +2,17 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261111154448.0.0` (`inspr-calver-3`, stable sequence 46), reserved once at `2026-11-11T15:44:48Z` for faster signed-out CI checks and nightly Results coverage (JOED-190/192/191; release [JOED-193](https://aeon.barta.cm/p/JOED/JOED-193)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
+**Candidate version:** `261119221928.0.0` (`inspr-calver-3`, stable sequence 47), reserved once at `2026-11-19T22:19:28Z` for inconclusive CI timing breaches after an unsatisfied quiet wait (JOED-197; release [JOED-199](https://aeon.barta.cm/p/JOED/JOED-199)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
 
-**Last deployed release:** `inspr-calver-3` / `261109023132.0.0` / sequence 45,
-published on `main` at `6ba8051af1108cd35ee6fb6e3cd51a94474f6d24` under JOED-189,
-live on csb0 since `2026-11-09T08:53:35Z` and adopted at `2026-11-09T08:56:44Z`
-(`adoption/261109023132.0.0.json`). Both `previous_release` and
-`last_deployed_release` record sequence 45, with disposition `deployed` and
+**Last deployed release:** `inspr-calver-3` / `261111154448.0.0` / sequence 46,
+published on `main` at `6d5d25708206abeb0e4cb1e9bade7c11ed6f51b7` under JOED-193,
+live on csb0 since `2026-11-12T10:28:41Z` and adopted at `2026-11-12T10:30:54Z`
+(`adoption/261111154448.0.0.json`). Both `previous_release` and
+`last_deployed_release` record sequence 46, with disposition `deployed` and
 `deployed: true` on `previous_release`.
+Sequence 45 (`261109023132.0.0`, JOED-189) was previously live on csb0 since
+`2026-11-09T08:53:35Z` and adopted at `2026-11-09T08:56:44Z`
+(`adoption/261109023132.0.0.json`).
 Sequence 44 (`261104111323.0.0`, JOED-183) was previously live on csb0 since
 `2026-11-08T11:31:16Z` and adopted at `2026-11-08T12:25:23Z`
 (`adoption/261104111323.0.0.json`).
@@ -54,14 +57,14 @@ published on `main` at `dafe7909af04ba5ded3c4b55504ea10970e07e4d`; JOED-41
 records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
-`previous_release` from `last_deployed_release`. About lists the current build, deployed and adopted sequences 45, 44 and 43, superseded published sequence 42, deployed and adopted sequences 41, 40 and 39, published sequence 38,
+`previous_release` from `last_deployed_release`. About lists the current build, deployed and adopted sequences 46, 45, 44 and 43, superseded published sequence 42, deployed and adopted sequences 41, 40 and 39, published sequence 38,
 deployed sequences 37, 36, 35, 34, 33, 32, 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
 ## P6a release preparation (JOED-26)
 
 This branch carries paper-only preparation from `rebuild/v2`. It is **not ready for
-cutover**. The sequence-46 candidate has not been published. The candidate
+cutover**. The sequence-47 candidate has not been published. The candidate
 reservation and unchanged legacy anchor live in `release/preparation.json`;
 published artifacts, historical tags and legacy history are preserved. The old CalVer2 proposal JOED-13 is
 superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
@@ -111,7 +114,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261111154448.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261119221928.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -3299,6 +3302,35 @@ then legacy; all previous entries retain their original content. Earlier
 preparation sections record their reservation-time state.
 
 - Release 46 changes only CI checks: faster signed-out checks and Results coverage split into a nightly run; board behaviour is unchanged.
+
+Contract revision 11 remains accepted beside revision 10 under the same schema
+ID. The pusher switch (JOED-149) belongs to DEVOPS and is separate; this
+candidate makes no claim of dollar-desk exchange-rate proof. The contract set
+remains `c266b39e33e6e15be491263b0ca3575598dd264da3e1a9f6d5a147fc9f1bd49b`.
+Reseal the integrated runtime closure once; preserve historical artifacts and
+the legacy anchor.
+
+The approved presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`
+is retained; the complete offline bundle remains active in footer/About.
+This local candidate grants no publication or deployment approval. The
+coordinator owns the cross-family gate, publication and live verification.
+
+## Release 47 candidate (JOED-199)
+
+Reserve `261119221928.0.0` at `2026-11-19T22:19:28Z` as `inspr-calver-3`, stable sequence 47,
+for JOED-197: a render-budget timing breach measured after an unsatisfied
+quiet wait is inconclusive instead of a failure. Board behaviour is unchanged.
+
+Previous and last deployed release are sequence 46 (`261111154448.0.0`), main
+`6d5d25708206abeb0e4cb1e9bade7c11ed6f51b7` (JOED-193), live on csb0 since
+`2026-11-12T10:28:41Z`, adopted at `2026-11-12T10:30:54Z` as recorded in
+`adoption/261111154448.0.0.json`. The previous release has disposition
+`deployed` and `deployed: true`. The supplied adoption record is preserved
+byte for byte. About orders 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37 through 26,
+then legacy; all previous entries retain their original content. Earlier
+preparation sections record their reservation-time state.
+
+- Release 47 changes only a CI check: a speed check measured while the build machine is still overloaded is reported as inconclusive instead of failing; board behaviour is unchanged.
 
 Contract revision 11 remains accepted beside revision 10 under the same schema
 ID. The pusher switch (JOED-149) belongs to DEVOPS and is separate; this
