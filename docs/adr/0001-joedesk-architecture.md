@@ -1931,3 +1931,32 @@ The approved presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`
 is retained; the complete offline bundle remains active in footer/About.
 This local candidate grants no publication or deployment approval. The
 coordinator owns the cross-family gate, publication and live verification.
+
+## Release 47 candidate (JOED-199)
+
+Reserve `261119221928.0.0` at `2026-11-19T22:19:28Z` as `inspr-calver-3`, stable sequence 47,
+for JOED-197: a render-budget timing breach measured after an unsatisfied
+quiet wait is inconclusive instead of a failure. Board behaviour is unchanged.
+
+Previous and last deployed release are sequence 46 (`261111154448.0.0`), main
+`6d5d25708206abeb0e4cb1e9bade7c11ed6f51b7` (JOED-193), live on csb0 since
+`2026-11-12T10:28:41Z`, adopted at `2026-11-12T10:30:54Z` as recorded in
+`adoption/261111154448.0.0.json`. The previous release has disposition
+`deployed` and `deployed: true`. The supplied adoption record is preserved
+byte for byte. About orders 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37 through 26,
+then legacy; all previous entries retain their original content. Earlier
+preparation sections record their reservation-time state.
+
+- Release 47 changes only a CI check: a speed check measured while the build machine is still overloaded is reported as inconclusive instead of failing; board behaviour is unchanged.
+
+Contract revision 11 remains accepted beside revision 10 under the same schema
+ID. The pusher switch (JOED-149) belongs to DEVOPS and is separate; this
+candidate makes no claim of dollar-desk exchange-rate proof. The contract set
+remains `c266b39e33e6e15be491263b0ca3575598dd264da3e1a9f6d5a147fc9f1bd49b`.
+Reseal the integrated runtime closure once; preserve historical artifacts and
+the legacy anchor.
+
+The approved presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`
+is retained; the complete offline bundle remains active in footer/About.
+This local candidate grants no publication or deployment approval. The
+coordinator owns the cross-family gate, publication and live verification.

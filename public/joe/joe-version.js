@@ -2,10 +2,19 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "261111154448.0.0",
+    APP_VERSION: "261119221928.0.0",
     VERSION_SCHEME: "inspr-calver-3",
-    RELEASE_SEQUENCE: 46,
+    RELEASE_SEQUENCE: 47,
     VERSION_HISTORY: [
+      {
+        version: "261119221928.0.0",
+        versionScheme: "inspr-calver-3",
+        date: "2026-11-19",
+        title: "Inconclusive CI speed checks on an overloaded machine",
+        changes: [
+          "Release 47 changes only a CI check: a speed check measured while the build machine is still overloaded is reported as inconclusive instead of failing; board behaviour is unchanged.",
+        ],
+      },
       {
         version: "261111154448.0.0",
         versionScheme: "inspr-calver-3",
