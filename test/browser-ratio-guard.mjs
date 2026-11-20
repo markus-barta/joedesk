@@ -4,8 +4,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { CI_GUARD, REFERENCE_BUDGET } from '../scripts/browser/budget.mjs';
-import { validateCalibration, attemptGuard, calibrationSummary, calibrationEvidence, reportCalibration, ratioCells } from '../scripts/browser/ratio-guard.mjs';
+import { CI_GUARD, REFERENCE_BUDGET, TIMING_GUARDS } from '../scripts/browser/budget.mjs';
+import { validateCalibration, attemptGuard, guardCheck, calibrationSummary, calibrationEvidence, reportCalibration, ratioCells } from '../scripts/browser/ratio-guard.mjs';
 import { calibrateProbe, analyzeProbeCalibration, readProbeEvidence } from '../scripts/probe-calibrate.mjs';
 import { scratch, discard } from '../scripts/browser/scratch.mjs';
 
@@ -13,6 +13,94 @@ const fixtureURL = new URL('./fixtures/probe-quiet.json', import.meta.url);
 const evidence = () => JSON.parse(readFileSync(fixtureURL, 'utf8'));
 const calibrated = () => calibrateProbe([evidence()]);
 const captured = medianMs => ({ probe: { medianMs } });
+
+const busyFinalAttempt = () => ({ attempt: 2, attempts: 2, remeasured: true,
+  quietWait: { waitedSeconds: 300, quiet: false, skipped: false, startLoad1: 43, endLoad1: 51, threshold: 3 } });
+
+test('JOED-197: every timing-only failure after an unsatisfied final quiet wait is inconclusive and not failed', () => {
+  for (const skipped of [false, true]) {
+    for (let mask = 1; mask < 1 << TIMING_GUARDS.length; mask++) {
+      const conditions = Object.freeze({ worker: true,
+        ...Object.fromEntries(TIMING_GUARDS.map((key, i) => [key, !(mask & 1 << i)])) });
+      const row = busyFinalAttempt();
+      Object.assign(row.quietWait, { skipped, ...(skipped ? { skipReason: 'budget exhausted' } : {}) });
+      const before = JSON.stringify({ row, conditions });
+      const verdict = guardCheck('1024: render budget', conditions, row, TIMING_GUARDS);
+      assert.equal(verdict.ok, true);
+      assert.equal(verdict.inconclusive, true);
+      assert.ok(verdict.failed.length > 0 && verdict.failed.every(key => TIMING_GUARDS.includes(key)));
+      assert.ok(verdict.name.endsWith(`${verdict.inconclusiveReason}: inconclusive`));
+      assert.ok(verdict.inconclusiveReason.includes(`quiet wait ${skipped ? 'skipped: budget exhausted' : 'expired'} at load1=51.00, threshold 3`));
+      assert.equal(JSON.stringify({ row, conditions }), before);
+    }
+  }
+});
+
+test('JOED-197: functional failures remain hard failures after an unsatisfied quiet wait', () => {
+  for (const functional of ['worker', 'measured', 'switchRenders', 'finite', 'unknownBudget']) {
+    for (const timingOK of [false, true]) {
+      const conditions = { [functional]: false, renderBudget: timingOK };
+      const verdict = guardCheck('functional check', conditions, busyFinalAttempt(), TIMING_GUARDS);
+      assert.equal(verdict.ok, false);
+      assert.equal(verdict.inconclusive, false);
+      assert.equal(verdict.name, 'functional check');
+    }
+  }
+});
+
+test('JOED-197: over-cap inconclusive names retain the measured ratio and cap', () => {
+  for (const skipped of [false, true]) {
+    const row = { ...busyFinalAttempt(), hostTooSlowToJudge: true, k: 3.5, cap: 3 };
+    row.quietWait.skipped = skipped;
+    const verdict = guardCheck('render budget', { renderBudget: false }, row, TIMING_GUARDS);
+    assert.equal(verdict.ok, true);
+    assert.equal(verdict.inconclusive, true);
+    assert.match(verdict.name, /; k = 3\.50× \(cap 3×\); host too busy to judge.*: inconclusive$/);
+  }
+});
+
+test('JOED-197: quiet final waits, first attempts, absent waits and passing checks keep their outcomes', () => {
+  for (const row of [
+    { ...busyFinalAttempt(), quietWait: { quiet: true } },
+    { ...busyFinalAttempt(), quietWait: { quiet: true, skipped: true } },
+    { ...busyFinalAttempt(), quietWait: undefined },
+    { ...busyFinalAttempt(), attempt: 1 },
+    { ...busyFinalAttempt(), remeasured: false },
+  ]) {
+    const verdict = guardCheck('render budget', { renderBudget: false }, row, TIMING_GUARDS);
+    assert.equal(verdict.ok, false);
+    assert.equal(verdict.inconclusive, false);
+    assert.equal(verdict.name, 'render budget');
+  }
+  const passing = guardCheck('render budget', { renderBudget: true }, busyFinalAttempt(), TIMING_GUARDS);
+  assert.equal(passing.ok, true);
+  assert.equal(passing.inconclusive, false);
+  const overCap = guardCheck('render budget', { renderBudget: false }, {
+    ...busyFinalAttempt(), quietWait: { quiet: true }, hostTooSlowToJudge: true, k: 3.5, cap: 3,
+  }, TIMING_GUARDS);
+  assert.equal(overCap.ok, false);
+  assert.match(overCap.name, /host too slow to judge \(absolute guards applied\)$/);
+});
+
+test('JOED-197: the default summary writer appends visible inconclusive checks to GITHUB_STEP_SUMMARY', async t => {
+  const dir = scratch('joed-197-summary-');
+  t.after(() => discard(dir, 'JOED-197 step summary fixture'));
+  const path = join(dir, 'summary.md');
+  writeFileSync(path, 'Existing summary\n\n');
+  const verdict = guardCheck('1024: Results render budget', { renderBudget: false }, busyFinalAttempt(), TIMING_GUARDS);
+  const previous = process.env.GITHUB_STEP_SUMMARY;
+  try {
+    process.env.GITHUB_STEP_SUMMARY = path;
+    reportCalibration({ status: 'uncalibrated', cap: 3 }, [{ inconclusiveChecks: [verdict], loadOwners: ['chrome', 'node'] }]);
+  } finally {
+    if (previous === undefined) delete process.env.GITHUB_STEP_SUMMARY;
+    else process.env.GITHUB_STEP_SUMMARY = previous;
+  }
+  const summary = readFileSync(path, 'utf8');
+  assert.match(summary, /^Existing summary/);
+  assert.match(summary, /\*\*Inconclusive:\*\* 1024: Results render budget; host too busy to judge/);
+  assert.match(summary, /Top load owners by summed pcpu \(lifetime-average CPU, names only\): chrome, node/);
+});
 
 test('JOED-187 (d/f): ratios floor at one and use only the same width and kind', () => {
   const calibration = calibrated();

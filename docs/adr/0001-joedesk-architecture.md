@@ -493,7 +493,7 @@ as abandoned, recorded, and skipped without deleting it. Refunds record their
 own budget source; failures leave the remaining allowance marked unavailable
 while preserving the reservation's budget state. An abandoned refund lock is
 recorded as a refund reason, without marking the completed wait as skipped.
-The second measurement is final; a reproduced breach or
+The second measurement is final; a reproduced breach with `quiet:true` or
 any functional failure still fails. Both
 attempts appear in the trace, table and failure detail. Results keeps its
 40 ms base switch-render guard and rejects tasks reaching its 125 ms base
@@ -531,11 +531,12 @@ An invalid calibration fails loudly at startup. Within the cap, timing limits
 scale with k. If `k > cap`, the measured ratio remains in the evidence and the
 attempt records `hostTooSlowToJudge: true`, but all timing limits revert to the
 absolute CI guard (`k = 1` for limits): a 35 ms patch passes and a 45 ms patch
-fails at k = 3.5, cap 3. This never judges an overloaded host more loosely or
-more strictly than today's absolute guard. The existing timing-only re-measure
-still uses its own probe and limits. This is not the rejected option
-“(4) inconclusive on overload”: every attempt is judged against timing limits,
-and overload alone grants neither a pass nor a failure.
+breaches the timing guard at k = 3.5, cap 3. The existing timing-only re-measure
+still uses its own probe and limits. JOED-197 adopts option “(4) inconclusive
+on overload” in narrowed form: only the final re-measure, after a quiet wait
+ended `quiet:false` (expired or skipped), is inconclusive when every failed
+condition in that check is a timing guard. Functional failures, including
+non-finite render timings, still fail and never trigger a re-measure.
 Budget and machine-load tables show k to two decimals and applied
 patch/history/task limits to 0.1 ms; check names round fractional limits to
 0.1 ms. JSON evidence keeps exact values. Failure-line `measurements` keep each
@@ -546,10 +547,15 @@ did not run write nothing. It includes calibration provenance plus one line
 per width/kind with any over-cap attempt, using its highest k, even if a
 re-measure passed:
 `Host too slow to judge: <phase> <zone> <width> <kind>, k = <k>× (cap <cap>×); absolute guards applied`.
-Over-cap timing-only failure labels end with
+Conclusive over-cap timing-only failure labels end with
 `host too slow to judge (absolute guards applied)`. Functional failures keep
-their normal labels, and passing check names stay stable; k stays in evidence.
-Uncalibrated and within-cap attempts add no such line. The runners never write
+their normal labels; checks meeting their conditions keep their names.
+Uncalibrated and within-cap attempts add no over-cap line. Each inconclusive
+check adds `**Inconclusive:** <phase> <zone> <check>; <guard> worst <measured> ms (applied limit <limit> ms)`.
+The check name includes the quiet-wait reason and retains k/cap when over-cap.
+One `Top load owners by summed pcpu (lifetime-average CPU, names only): <names or unavailable>`
+line follows per inconclusive attempt; CPU is summed by command, keeping
+kernel-thread names whole. The runners never write
 the summary file; their simulated tests inject a writer that captures the text.
 
 To prepare calibration, retain Board and Results evidence from 1–5 quiet CI
@@ -1913,6 +1919,35 @@ then legacy; all previous entries retain their original content. Earlier
 preparation sections record their reservation-time state.
 
 - Release 46 changes only CI checks: faster signed-out checks and Results coverage split into a nightly run; board behaviour is unchanged.
+
+Contract revision 11 remains accepted beside revision 10 under the same schema
+ID. The pusher switch (JOED-149) belongs to DEVOPS and is separate; this
+candidate makes no claim of dollar-desk exchange-rate proof. The contract set
+remains `c266b39e33e6e15be491263b0ca3575598dd264da3e1a9f6d5a147fc9f1bd49b`.
+Reseal the integrated runtime closure once; preserve historical artifacts and
+the legacy anchor.
+
+The approved presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`
+is retained; the complete offline bundle remains active in footer/About.
+This local candidate grants no publication or deployment approval. The
+coordinator owns the cross-family gate, publication and live verification.
+
+## Release 47 candidate (JOED-199)
+
+Reserve `261119221928.0.0` at `2026-11-19T22:19:28Z` as `inspr-calver-3`, stable sequence 47,
+for JOED-197: a render-budget timing breach measured after an unsatisfied
+quiet wait is inconclusive instead of a failure. Board behaviour is unchanged.
+
+Previous and last deployed release are sequence 46 (`261111154448.0.0`), main
+`6d5d25708206abeb0e4cb1e9bade7c11ed6f51b7` (JOED-193), live on csb0 since
+`2026-11-12T10:28:41Z`, adopted at `2026-11-12T10:30:54Z` as recorded in
+`adoption/261111154448.0.0.json`. The previous release has disposition
+`deployed` and `deployed: true`. The supplied adoption record is preserved
+byte for byte. About orders 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37 through 26,
+then legacy; all previous entries retain their original content. Earlier
+preparation sections record their reservation-time state.
+
+- Release 47 changes only a CI check: a speed check measured while the build machine is still overloaded is reported as inconclusive instead of failing; board behaviour is unchanged.
 
 Contract revision 11 remains accepted beside revision 10 under the same schema
 ID. The pusher switch (JOED-149) belongs to DEVOPS and is separate; this

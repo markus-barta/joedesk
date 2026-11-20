@@ -9,9 +9,9 @@
 import { largeScenario, wideSnapshot, accountScenario, NOW, at, ACTOR } from './board.mjs';
 import { VIEWPORTS, configure, load, go, settle, waitFor } from './shots.mjs';
 import { observeBudgetTasks, attributeBudgetTasks } from './budget-tasks.mjs';
-import { captureMachineLoad, machineLoadTable, waitForQuietHost, quietWaitCells, budgetAttemptLine } from './machine-load.mjs';
+import { captureMachineLoad, machineLoadTable, waitForQuietHost, quietWaitCells, budgetAttemptLine, assessBudgetCheck } from './machine-load.mjs';
 import { runReferenceProbe, captureReferenceProbe, probeCell } from './reference-probe.mjs';
-import { PROBE_CALIBRATION, validateCalibration, attemptGuard, applyAttemptGuard, guardCheck, calibrationSummary, ratioCells, calibrationEvidence } from './ratio-guard.mjs';
+import { PROBE_CALIBRATION, validateCalibration, attemptGuard, applyAttemptGuard, calibrationSummary, ratioCells, calibrationEvidence } from './ratio-guard.mjs';
 
 export const REFERENCE_DEVICES = Object.freeze(['mbp2606', 'mbp2607']);
 export const REFERENCE_BUDGET = Object.freeze({ name: 'reference budget', patchMs: 16, historyMs: 50, taskMs: 50, atMost: false });
@@ -41,19 +41,22 @@ export async function runBudget({ page, newBoard, check, limits, sampleLoad = ca
   const bound = limit => `${limits.atMost ? 'at most' : 'under'} ${displayMs(limit)} ms`;
   const tooLong = (tasks, timing) => tasks.filter(ms => ms >= timing.taskMs);
   const observerSource = `(${observeBudgetTasks.toString()})()`;
-  const verify = (name, conditions, row) => {
-    ({ name, conditions } = guardCheck(name, conditions, row, TIMING_GUARDS));
-    const failed = Object.keys(conditions).filter(k => !conditions[k]);
-    check('budget', name, !failed.length, { failed, conditions,
+  const verify = (name, conditions, row, attemptRows) => {
+    const { name: label, conditions: checkedConditions, failed, ok, ...judgment } = assessBudgetCheck(name, conditions, row, TIMING_GUARDS);
+    // The gates aggregate !ok for their exit code; inconclusive timing counts
+    // as not failed while the breached conditions remain in the evidence.
+    check('budget', label, ok, { failed, conditions: checkedConditions,
       // Put both concise measurements before the potentially large task
       // attribution so the failure log's detail limit cannot hide either one.
-      measurements: (row.attemptRows ?? [row]).map(r => ({ attempt: r.attempt, k: r.k, limitMs: r.limitMs, hostTooSlowToJudge: r.hostTooSlowToJudge, ratioReason: r.ratioReason,
+      measurements: (attemptRows ?? [row]).map(r => ({ attempt: r.attempt, k: r.k, limitMs: r.limitMs, hostTooSlowToJudge: r.hostTooSlowToJudge, ratioReason: r.ratioReason,
         patchMs: r.deskWorst ?? null, historyMs: r.historyWorst ?? r.renderWorst,
         taskMs: r.longTasks.length ? max(r.longTasks) : null, load1: r.machineLoad?.loadavg?.[0] ?? null, probeMs: r.probeMs,
         ...(r.quietWait ? { quietWait: { waitedSeconds: r.quietWait.waitedSeconds, quiet: r.quietWait.quiet,
-          threshold: r.quietWait.threshold, skipped: r.quietWait.skipped, skipReason: r.quietWait.skipReason } } : {}) })),
+          threshold: r.quietWait.threshold, endLoad1: r.quietWait.endLoad1, skipped: r.quietWait.skipped, skipReason: r.quietWait.skipReason } } : {}),
+        ...(r === row ? judgment : {}) })),
       calibration: row.calibration,
-      offendingTasks: row.longTaskDetails?.filter(t => t.duration >= row.limitMs.taskMs), ...row });
+      offendingTasks: row.longTaskDetails?.filter(t => t.duration >= row.limitMs.taskMs), ...row,
+      ...(attemptRows ? { attemptRows } : {}), ...judgment });
   };
   const runViewport = async (viewport, measure) => {
     await configure(page, viewport, 'light');
@@ -87,7 +90,7 @@ export async function runBudget({ page, newBoard, check, limits, sampleLoad = ca
     for (const { name, conditions } of result.checks) {
       const label = decision.remeasured && Object.keys(conditions).some(key => TIMING_GUARDS.includes(key))
         ? name.replace(`(${limits.name})`, `(${limits.name}; re-measured once after a breach)`) : name;
-      verify(label, conditions, { ...rows.at(-1), ...(decision.remeasured ? { attemptRows: rows } : {}) });
+      verify(label, conditions, rows.at(-1), decision.remeasured ? rows : null);
     }
   };
   const full = largeScenario(NOW);
@@ -114,7 +117,7 @@ export async function runBudget({ page, newBoard, check, limits, sampleLoad = ca
       { name: `${viewport.name}: the ${full.history.points.length}-point (8 MiB) history is read and validated in the worker and drawn`,
         conditions: { worker: trace.worker, historyRead: work.length >= 1, noMainThreadHistory: !row.mainThreadHistory, drawn: trace.lines >= 3 } },
       { name: `${viewport.name}: drawing the full 8 MiB history takes ${bound(timing.historyMs)} with no task on the page reaching ${displayMs(timing.taskMs)} ms (${limits.name})`,
-        conditions: { measured: renders.length > 0, renderBudget: within(row.renderWorst, timing.historyMs), taskBudget: !tooLong(row.longTasks, timing).length } },
+        conditions: { measured: renders.length > 0, finite: renders.every(Number.isFinite), renderBudget: within(row.renderWorst, timing.historyMs), taskBudget: !tooLong(row.longTasks, timing).length } },
     ] };
   };
   for (const viewport of VIEWPORTS) await runViewport(viewport, measureCold);
